@@ -122,6 +122,7 @@ int main(int argc, char *argv[])
 
     report_write_ini(&table, &opts, opts.out_path);
     ui_render_summary(&table, &opts);
+    ui_render_consistency_alerts(&table);
 
     if (opts.do_upload) {
         upload_rc = upload_ini(opts.out_path);

@@ -12,4 +12,10 @@
  */
 void ui_render_summary(const result_table_t *t, const opts_t *o);
 
+/* Render consistency-flag alert boxes for every rule that failed or
+ * warned. The signature visual moment — "HARDWARE CLAIMS X, MEASURES Y"
+ * as a CP437 double-line-framed panel. Silent if every rule passed.
+ * Called from main() after ui_render_summary. */
+void ui_render_consistency_alerts(const result_table_t *t);
+
 #endif

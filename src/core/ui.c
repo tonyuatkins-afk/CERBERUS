@@ -107,6 +107,125 @@ void ui_render_summary(const result_table_t *t, const opts_t *o)
 
     if (sig_r && strcmp(
             sig_r->display ? sig_r->display : sig_r->v.s, "none") != 0) {
-        printf("Note: emulator detected — downstream confidence capped at MEDIUM.\n");
+        printf("Note: emulator detected - downstream confidence capped at MEDIUM.\n");
+    }
+}
+
+/* ----------------------------------------------------------------------- */
+/* Consistency-flag alert renderer                                          */
+/* ----------------------------------------------------------------------- */
+
+#define ALERT_INNER_WIDTH 62
+
+static void put_dbl_horiz_line(int width)
+{
+    int i;
+    for (i = 0; i < width; i++) putchar(0xCD);
+}
+
+static void print_padded_line(const char *s)
+{
+    int len = (int)strlen(s);
+    int i;
+    putchar(0xBA);
+    putchar(' ');
+    if (len > ALERT_INNER_WIDTH - 2) len = ALERT_INNER_WIDTH - 2;
+    for (i = 0; i < len; i++) putchar(s[i]);
+    for (; i < ALERT_INNER_WIDTH - 2; i++) putchar(' ');
+    putchar(' ');
+    putchar(0xBA);
+    putchar('\n');
+}
+
+static void render_alert_box(const char *rule_name, verdict_t v,
+                             const char *explanation)
+{
+    char buf[80];
+    const char *verdict_str =
+        (v == VERDICT_FAIL) ? "FAIL" :
+        (v == VERDICT_WARN) ? "WARN" : "?";
+    const char *rule_label = rule_name;
+    if (strncmp(rule_name, "consistency.", 12) == 0) {
+        rule_label = rule_name + 12;
+    }
+
+    /* Top border */
+    putchar('\n');
+    putchar(0xC9);
+    put_dbl_horiz_line(ALERT_INNER_WIDTH);
+    putchar(0xBB);
+    putchar('\n');
+
+    /* Title */
+    sprintf(buf, "*** CONSISTENCY FLAG - %s ***", verdict_str);
+    print_padded_line(buf);
+
+    /* Separator */
+    putchar(0xCC);
+    put_dbl_horiz_line(ALERT_INNER_WIDTH);
+    putchar(0xB9);
+    putchar('\n');
+
+    /* Rule name */
+    sprintf(buf, "Rule:   %s", rule_label);
+    print_padded_line(buf);
+
+    /* Explanation — may be longer than one line, break on word boundary */
+    {
+        const char *p = explanation ? explanation : "(no explanation)";
+        unsigned int max = ALERT_INNER_WIDTH - 10;  /* room for "Reason:  " */
+        int first = 1;
+        while (*p) {
+            unsigned int take = 0;
+            unsigned int last_space = 0;
+            unsigned int i;
+            /* Advance to find a break point */
+            while (take < max && p[take] != '\0') {
+                if (p[take] == ' ') last_space = take;
+                take++;
+            }
+            if (p[take] != '\0' && last_space > 0) take = last_space;
+            sprintf(buf, "%s", first ? "Reason: " : "        ");
+            for (i = 0; i < take; i++) {
+                buf[8 + i] = p[i];
+            }
+            buf[8 + take] = '\0';
+            print_padded_line(buf);
+            p += take;
+            while (*p == ' ') p++;
+            first = 0;
+        }
+    }
+
+    /* Footer hint */
+    print_padded_line("");
+    print_padded_line("See docs/consistency-rules.md for rule methodology.");
+
+    /* Bottom border */
+    putchar(0xC8);
+    put_dbl_horiz_line(ALERT_INNER_WIDTH);
+    putchar(0xBC);
+    putchar('\n');
+}
+
+void ui_render_consistency_alerts(const result_table_t *t)
+{
+    unsigned int i;
+    int flagged = 0;
+
+    for (i = 0; i < t->count; i++) {
+        const result_t *r = &t->results[i];
+        if (strncmp(r->key, "consistency.", 12) != 0) continue;
+        if (r->verdict != VERDICT_FAIL && r->verdict != VERDICT_WARN) continue;
+        render_alert_box(r->key, r->verdict,
+                         r->display ? r->display :
+                         (r->type == V_STR ? r->v.s : (const char *)0));
+        flagged++;
+    }
+
+    if (flagged == 0) {
+        /* Positive confirmation is just as informative as a flag — tell
+         * the user the cross-checks ran clean. */
+        printf("\nConsistency: all rules passed.\n");
     }
 }
