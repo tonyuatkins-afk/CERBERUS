@@ -59,11 +59,23 @@ static void test_elapsed_ticks(void)
     EXPECT_EQ_UL(timing_elapsed_ticks(0x1234, 0x1234), 0UL,      "start=stop (zero elapsed)");
 }
 
+static void test_bios_ticks_to_us(void)
+{
+    printf("timing_bios_ticks_to_us (54925 us/tick):\n");
+    EXPECT_EQ_UL(timing_bios_ticks_to_us(0UL),      0UL,        "0 bios ticks");
+    EXPECT_EQ_UL(timing_bios_ticks_to_us(1UL),      54925UL,    "1 bios tick");
+    EXPECT_EQ_UL(timing_bios_ticks_to_us(4UL),      219700UL,   "4 bios ticks (target interval)");
+    EXPECT_EQ_UL(timing_bios_ticks_to_us(18UL),     988650UL,   "18 bios ticks (~1 sec)");
+    /* Sanity — stay under the 32-bit overflow boundary. */
+    EXPECT_EQ_UL(timing_bios_ticks_to_us(1000UL),   54925000UL, "1000 bios ticks (~55 sec)");
+}
+
 int main(void)
 {
     printf("=== CERBERUS host unit test: timing ===\n");
     test_ticks_to_us();
     test_elapsed_ticks();
+    test_bios_ticks_to_us();
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }

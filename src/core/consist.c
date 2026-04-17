@@ -267,6 +267,60 @@ static void rule_8086_implies_isa8(result_table_t *t)
 }
 
 /* ----------------------------------------------------------------------- */
+/* Rule 4a: PIT Channel 2 (timing.c) vs Channel 0 (BIOS tick) agreement.
+ *
+ * Both PIT channels share the 1.193182 MHz crystal. timing_self_check
+ * measured the same real-time interval with both and wrote the two
+ * derived us totals as timing.cross_check.{pit_us,bios_us}. If they
+ * disagree by more than 15%, flag timing_inconsistency — something in
+ * timing.c's math (or the BIOS tick path) is biased.
+ *
+ * This rule is independent of every CPU/memory/bus detection result —
+ * it validates the measurement infrastructure itself, the one thing all
+ * other rules depend on.
+ *
+ * Detects: the 16-bit integer trap class in timing.c (ticks * 838
+ *          overflows without unsigned long), PIT C2 wrap counting bugs,
+ *          a BIOS tick that's been hooked by a TSR that drops ticks.
+ * Does NOT detect: faults that bias BOTH paths identically (e.g. a
+ *          crystal running off-spec — both channels report the same
+ *          wrong answer).
+ * Verdict: WARN, not FAIL. We can see the two paths disagree but can't
+ *          tell which is the biased one; downstream timing-dependent
+ *          measurements should be viewed skeptically, not discarded.  */
+/* ----------------------------------------------------------------------- */
+
+static void rule_timing_independence(result_table_t *t)
+{
+    const result_t *pit  = find_key(t, "timing.cross_check.pit_us");
+    const result_t *bios = find_key(t, "timing.cross_check.bios_us");
+    unsigned long pit_us, bios_us;
+    unsigned long delta, threshold;
+
+    if (!pit || !bios) return;  /* self-check didn't run / bailed */
+
+    pit_us  = pit->v.u;
+    bios_us = bios->v.u;
+    if (pit_us == 0 || bios_us == 0) return;
+
+    delta     = (pit_us > bios_us) ? (pit_us - bios_us) : (bios_us - pit_us);
+    threshold = bios_us * 15UL / 100UL;
+
+    if (delta <= threshold) {
+        report_add_str(t, "consistency.timing_independence",
+                       "pass (PIT C2 and BIOS tick agree within 15%)",
+                       CONF_HIGH, VERDICT_PASS);
+    } else {
+        char msg[120];
+        unsigned long pct = delta * 100UL / bios_us;
+        sprintf(msg, "WARN: PIT=%luus BIOS=%luus diverge %lu%% (timing.c suspect)",
+                pit_us, bios_us, pct);
+        report_add_str(t, "consistency.timing_independence", msg,
+                       CONF_HIGH, VERDICT_WARN);
+    }
+}
+
+/* ----------------------------------------------------------------------- */
 
 void consist_check(result_table_t *t)
 {
@@ -276,11 +330,10 @@ void consist_check(result_table_t *t)
     rule_fpu_diag_bench_agreement(t);
     rule_extmem_implies_286(t);
     rule_8086_implies_isa8(t);
+    rule_timing_independence(t);
     /*
      * Rules landing as downstream phases complete:
      *
-     *   rule_cpu_clock_independent_check  — needs BIOS-tick-based clock
-     *                                        measurement (Task 4.4)
      *   rule_mips_in_class_ipc_range      — needs class_ipc values in
      *                                        cpu_db, needs bench mode
      *   rule_cache_stride_vs_cpuid_leaf2  — needs cache bench (Task 3.3)

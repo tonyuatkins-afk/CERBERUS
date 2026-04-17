@@ -8,6 +8,7 @@
 #include "core/ui.h"
 #include "core/consist.h"
 #include "core/thermal.h"
+#include "core/timing.h"
 #include "detect/detect.h"
 #include "detect/unknown.h"
 #include "diag/diag.h"
@@ -116,6 +117,12 @@ int main(int argc, char *argv[])
     if (opts.do_detect)    detect_all(&table, &opts);
     if (opts.do_diagnose)  diag_all(&table, &opts);
     if (opts.do_benchmark) bench_all(&table, &opts);
+
+    /* Timing self-check runs once per invocation, independent of which
+     * heads ran. Writes the two cross-check values consist_check's rule
+     * 4a reads. Skipped if /SKIP:TIMING was passed (ship-hatch for
+     * buggy real-hardware scenarios). */
+    if (!crumb_skiplist_has("TIMING")) timing_self_check(&table);
 
     /* Consistency cross-check runs after all three heads so it sees
      * everything that got populated. Thermal follows, consuming the

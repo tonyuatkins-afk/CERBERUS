@@ -165,6 +165,69 @@ int main(void)
     CHECK(k(&t, "consistency.8086_bus") == NULL,
           "Scenario P: 486-class + pci → rule 9 no-op");
 
+    /* Scenario Q: self-check keys absent → rule 4a no-op (nothing to judge) */
+    memset(&t, 0, sizeof(t));
+    consist_check(&t);
+    CHECK(k(&t, "consistency.timing_independence") == NULL,
+          "Scenario Q: no self-check → rule 4a no-op");
+
+    /* Scenario R: PIT and BIOS agree within 15% → rule 4a PASS.
+     * Target was 4 BIOS ticks = 219700 us. A 486 with working timing.c
+     * would come back with pit_us ≈ 219700 +/- quantization noise
+     * (1 PIT wrap is 54925 us, so +/-1 wrap across 4 equals ±25%; in
+     * practice we'll observe far less because the wrap counter is
+     * exact — the noise is only in the sub-wrap residue). */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "timing.cross_check.pit_us",  220500UL, "220500", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "timing.cross_check.bios_us", 219700UL, "219700", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.timing_independence")) == VERDICT_PASS,
+          "Scenario R: PIT 220500us vs BIOS 219700us (0.4% diff) → rule 4a PASS");
+
+    /* Scenario S: PIT reads HALF of BIOS (classic 16-bit overflow
+     * fingerprint — ticks * 838 truncated at 65535 us every 78 ticks).
+     * 50% divergence is well above the 15% threshold → WARN. */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "timing.cross_check.pit_us",  110000UL, "110000", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "timing.cross_check.bios_us", 219700UL, "219700", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.timing_independence")) == VERDICT_WARN,
+          "Scenario S: PIT 110000us vs BIOS 219700us (50% diff) → rule 4a WARN");
+
+    /* Scenario T: exactly at the 15% boundary on the PASS side. bios=100000,
+     * delta allowed up to 15000 → pit=114999 should still PASS. */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "timing.cross_check.pit_us",  114999UL, "114999", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "timing.cross_check.bios_us", 100000UL, "100000", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.timing_independence")) == VERDICT_PASS,
+          "Scenario T: 15% boundary (14.999% diff) → rule 4a PASS");
+
+    /* Scenario U: just past the boundary → WARN. bios=100000, pit=115001. */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "timing.cross_check.pit_us",  115001UL, "115001", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "timing.cross_check.bios_us", 100000UL, "100000", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.timing_independence")) == VERDICT_WARN,
+          "Scenario U: 15.001% diff → rule 4a WARN");
+
+    /* Scenario V: PIT higher than BIOS by 20% (symmetric check — the
+     * rule must treat directionality the same way). */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "timing.cross_check.pit_us",  100000UL, "100000", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "timing.cross_check.bios_us", 125000UL, "125000", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.timing_independence")) == VERDICT_WARN,
+          "Scenario V: PIT < BIOS by 20% → rule 4a WARN (symmetric)");
+
+    /* Scenario W: pit_us=0 (self-check sentinel) → rule 4a no-op. */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "timing.cross_check.pit_us",  0UL, "0", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "timing.cross_check.bios_us", 219700UL, "219700", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.timing_independence") == NULL,
+          "Scenario W: pit_us=0 → rule 4a no-op (self-check bailed)");
+
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }

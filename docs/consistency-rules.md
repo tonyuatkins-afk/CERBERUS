@@ -101,6 +101,27 @@ Each rule below names the key it emits (`consistency.<name>`), the prerequisite 
 **What it does not catch:**
 - Wrong extended-memory values on a correctly-detected 286+ system. Size verification requires actual memory probing under diagnostic pattern testing, which is `diag_mem`'s domain.
 
+### Rule 4a — `consistency.timing_independence`
+
+**Claim:** Two timekeeping paths that share a crystal but use different PIT channels should agree on the duration of any given real-time interval.
+
+**Prerequisites:** `timing.cross_check.pit_us` and `timing.cross_check.bios_us` present. These are written by `timing_self_check()` during startup; it spans a fixed real-time interval (4 BIOS ticks ≈ 220 ms) and reports elapsed µs computed from PIT Channel 2 (what `timing.c` uses for every measurement) and from the BIOS system-tick counter at `0040:006Ch` (driven by PIT Channel 0). Both channels share the 1.193182 MHz crystal.
+
+**Verdicts:**
+- **PASS** — `|pit_us − bios_us| ≤ bios_us × 15 %`
+- **WARN** — divergence exceeds 15 %
+
+**What it catches:**
+- Bugs in `timing.c`'s math, including the 16-bit integer overflow trap that recurs whenever someone writes `ticks * 838` without `UL` promotion (see `feedback_dos_16bit_int.md`). PIT C2 then reads low while the BIOS-tick path stays honest, producing asymmetric disagreement.
+- PIT C2 wrap-counter miscounts (too few → PIT reads low; too many → PIT reads high).
+- A TSR that has hooked INT 8 and drops ticks without reissuing them — BIOS path then reads low.
+
+**What it does not catch:**
+- A crystal running off-spec. Both channels use the same oscillator, so both report the same wrong µs. This is a limitation inherent to the methodology; detecting off-spec crystals requires a truly independent reference (wall-clock sync, network NTP), which is out of scope for a DOS diagnostic.
+- Any failure that biases PIT C2 and BIOS-tick identically. By construction, this rule catches only *asymmetric* timing bugs.
+
+**Verdict is WARN not FAIL.** A disagreement says the two paths observed the same interval differently; it doesn't say which is the liar. Downstream timing-derived measurements should be viewed with added skepticism, but the run is not invalidated outright.
+
 ### Rule 9 — `consistency.8086_bus`
 
 **Claim:** An 8086-class CPU must be on an ISA-8 bus.
@@ -122,7 +143,6 @@ Each rule below names the key it emits (`consistency.<name>`), the prerequisite 
 
 These are noted in the plan and will land as their prerequisite phases complete. Each is correctly no-op today.
 
-- **Rule 4a — CPU clock vs independent time reference.** Cross-check `cpu.clock_mhz` (derived from PIT Channel 2) against a second clock derived from the BIOS tick counter (PIT Channel 0, independent of Channel 2). Disagreement > 15% flags `timing_inconsistency`. Blocked on adding the BIOS-tick-based clock measurement path.
 - **Rule 4b — MIPS within class_ipc range.** Compare `bench.cpu.iters_per_sec` against `cpu.clock_mhz × class_ipc_low..high` from `cpu_db`. Blocked on (a) `cpu_db` rows gaining `class_ipc_low_q16` and `class_ipc_high_q16` fields, and (b) Phase 3 calibrated-mode MIPS-equivalent reporting.
 - **Rule 7 — VGA adapter implies VGA benchmark modes available.** Blocked on `bench_video` landing.
 - **Rule 8 — Cache stride-knee locations match CPUID leaf 2 descriptors.** Blocked on (a) cache-bandwidth stride tests in `bench_cache`, and (b) CPUID leaf 2 descriptor decode on Pentium+.
