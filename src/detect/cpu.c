@@ -23,6 +23,7 @@
 #include <dos.h>
 #include <i86.h>
 #include "detect.h"
+#include "cpu.h"
 #include "env.h"
 #include "cpu_db.h"
 #include "../core/report.h"
@@ -55,14 +56,8 @@ extern void cpu_asm_cpuid(unsigned long leaf, cpuid_regs_t __far *out);
 
 /* --- Internal state ----------------------------------------------- */
 
-typedef enum {
-    CPU_CLASS_UNKNOWN = 0,
-    CPU_CLASS_8086,
-    CPU_CLASS_286,
-    CPU_CLASS_386,
-    CPU_CLASS_486_NOCPUID,
-    CPU_CLASS_CPUID
-} cpu_class_t;
+static cpu_class_t last_detected = CPU_CLASS_UNKNOWN;
+cpu_class_t cpu_get_class(void) { return last_detected; }
 
 static const char *legacy_token(cpu_class_t c)
 {
@@ -143,6 +138,8 @@ void detect_cpu(result_table_t *t, const opts_t *o)
     cpu_class_t class = probe_class();
     const cpu_db_entry_t *entry = (const cpu_db_entry_t *)0;
     (void)o;  /* /NOCYRIX gating lands with the DIR probe in a follow-up */
+
+    last_detected = class;  /* expose for downstream detect modules */
 
     if (class == CPU_CLASS_CPUID) {
         unsigned char family, model, stepping;

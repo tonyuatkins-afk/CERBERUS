@@ -34,7 +34,9 @@ OBJS = src\main.obj                                                  &
        src\detect\env.obj                                            &
        src\detect\cpu.obj     src\detect\cpu_a.obj                   &
        src\detect\cpu_db.obj                                         &
-       src\detect\fpu.obj     src\detect\mem.obj                     &
+       src\detect\fpu.obj     src\detect\fpu_a.obj                   &
+       src\detect\fpu_db.obj                                         &
+       src\detect\mem.obj                                            &
        src\detect\cache.obj   src\detect\bus.obj                     &
        src\detect\video.obj   src\detect\audio.obj                   &
        src\detect\bios.obj                                           &
@@ -90,8 +92,17 @@ src\detect\cpu_db.obj: src\detect\cpu_db.c src\detect\cpu_db.h
 regen-cpu-db: .SYMBOLIC
 	python hw_db\build_cpu_db.py
 
-src\detect\fpu.obj: src\detect\fpu.c src\detect\detect.h src\cerberus.h
+src\detect\fpu.obj: src\detect\fpu.c src\detect\detect.h src\detect\cpu.h src\detect\env.h src\detect\fpu_db.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\fpu.c
+
+src\detect\fpu_a.obj: src\detect\fpu_a.asm
+	$(ASM) $(ASFLAGS) -o src\detect\fpu_a.obj src\detect\fpu_a.asm
+
+src\detect\fpu_db.obj: src\detect\fpu_db.c src\detect\fpu_db.h
+	$(CC) $(CFLAGS) -fo=$^@ src\detect\fpu_db.c
+
+regen-fpu-db: .SYMBOLIC
+	python hw_db\build_fpu_db.py
 
 src\detect\mem.obj: src\detect\mem.c src\detect\detect.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\mem.c
