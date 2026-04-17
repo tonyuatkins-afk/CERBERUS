@@ -7,5 +7,6 @@ void bench_all(result_table_t *t, const opts_t *o)
     puts("[benchmark] running...");
     bench_cpu(t);
     bench_memory(t);
-    /* bench_fpu / bench_cache / bench_video land as Phase 3 continues. */
+    bench_fpu(t);
+    /* bench_cache / bench_video land as Phase 3 continues. */
 }

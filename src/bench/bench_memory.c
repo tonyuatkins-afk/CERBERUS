@@ -27,7 +27,11 @@
 #include "../core/timing.h"
 #include "../core/report.h"
 
-#define MEM_BUF_BYTES 16384
+#define MEM_BUF_BYTES 4096   /* Kept modest so DGROUP stays under 64KB in
+                              * medium model. Phase 3 Task 3.3 (cache
+                              * bandwidth) will use FAR buffers outside
+                              * DGROUP for the larger working-set
+                              * sweeps. */
 
 static unsigned char mem_src[MEM_BUF_BYTES];
 static unsigned char mem_dst[MEM_BUF_BYTES];
