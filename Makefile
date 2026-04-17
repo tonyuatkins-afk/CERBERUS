@@ -26,8 +26,9 @@ STACK   = 4096
 
 OBJS = src\main.obj                                                  &
        src\core\timing.obj    src\core\display.obj                   &
-       src\core\report.obj    src\core\consist.obj                   &
-       src\core\thermal.obj   src\core\crumb.obj                     &
+       src\core\report.obj    src\core\sha1.obj                      &
+       src\core\consist.obj   src\core\thermal.obj                   &
+       src\core\crumb.obj                                            &
        src\detect\detect_all.obj                                     &
        src\detect\env.obj     src\detect\cpu.obj                     &
        src\detect\fpu.obj     src\detect\mem.obj                     &
@@ -52,8 +53,11 @@ src\core\timing.obj: src\core\timing.c src\core\timing.h src\cerberus.h
 src\core\display.obj: src\core\display.c src\core\display.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\display.c
 
-src\core\report.obj: src\core\report.c src\core\report.h src\cerberus.h
+src\core\report.obj: src\core\report.c src\core\report.h src\core\sha1.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\report.c
+
+src\core\sha1.obj: src\core\sha1.c src\core\sha1.h
+	$(CC) $(CFLAGS) -fo=$^@ src\core\sha1.c
 
 src\core\consist.obj: src\core\consist.c src\core\consist.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\consist.c
