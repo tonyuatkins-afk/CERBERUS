@@ -127,8 +127,12 @@ Current spec has `/D` meaning "detection only" and `/B` meaning "skip diagnostic
 **Step 1: Create the directory skeleton**
 
 ```bash
-mkdir -p src/core src/detect src/diag src/bench src/upload docs
+mkdir -p src/core src/detect src/diag src/bench src/upload docs \
+         hw_db/submissions tests/host tests/target \
+         .github/ISSUE_TEMPLATE
 ```
+
+The `hw_db/` directory holds the human-editable CSV databases (CPU, FPU, video, audio, BIOS) that build scripts in Phase 1 regenerate into C source. `hw_db/submissions/` documents the community-contribution workflow. `.github/ISSUE_TEMPLATE/` holds the hardware-submission issue template added in Task 1.11.
 
 **Step 2: Write `src/cerberus.h`** — master types and constants
 
@@ -741,6 +745,81 @@ Which calls `report_add(t, "<subsys>.<key>", value, confidence, VERDICT_UNKNOWN)
 7. Test on real hardware — at minimum one 486 and one 386. Flag any real-hardware misclassification as a gate blocker.
 8. Commit
 
+### Task 1.1a — CPU identification database (detect/cpu_db.c)
+
+**Goal:** turn raw probe results (CPU class + vendor string + family/model/stepping) into a rich friendly name, marketing name, known errata list, and `class_ipc` range for Phase 4 rule 4b. This is the primary lever that makes CERBERUS identification "feature-rich" — the gap between "486DX-class" and "Intel i486DX2-66 SX807/SX808, sSpec SX807, B1 stepping, FDIV-bug-free, class_ipc 0.4-0.5 MIPS/MHz."
+
+**Files:** `src/detect/cpu_db.h`, `src/detect/cpu_db.c`, `hw_db/cpus.csv` (source of truth, human-editable)
+
+**Schema — each entry:**
+```c
+typedef struct {
+    /* CPUID-based match (all zero = pre-CPUID entry, match on legacy probe instead) */
+    const char    *vendor;        /* CPUID vendor string, e.g. "GenuineIntel", NULL for pre-CPUID */
+    unsigned char  family_min, family_max;
+    unsigned char  model_min,  model_max;
+    unsigned char  stepping_min, stepping_max;    /* 0xFF for "any" */
+
+    /* Legacy match (when CPUID unavailable) */
+    const char    *legacy_class;  /* "8086", "8088", "v20", "286", "386dx", "486dx-nocpuid", etc. */
+    const char    *legacy_vendor_probe;  /* e.g. "cyrix-dir0=30h" result string, NULL for any */
+
+    /* Output */
+    const char    *friendly;      /* "Intel i486DX2-66" */
+    const char    *marketing;     /* "IntelDX2 Processor 66 MHz" */
+    const char    *sspec;         /* "SX807/SX808" (NULL if not applicable) */
+    long           ipc_low_q16;   /* Q16.16 — min expected MIPS/MHz for class_ipc rule */
+    long           ipc_high_q16;  /* Q16.16 — max */
+    const char    *errata_flags;  /* comma-separated short codes: "fdiv,f00f,no-cmov" */
+    const char    *notes;         /* short free-form, one sentence */
+} cpu_db_entry_t;
+
+extern const cpu_db_entry_t cpu_db[];
+extern const unsigned int   cpu_db_count;
+
+/* Lookup: returns NULL if no match */
+const cpu_db_entry_t *cpu_db_lookup(
+    const char *cpuid_vendor,
+    unsigned char family, unsigned char model, unsigned char stepping,
+    const char *legacy_class);
+```
+
+**Source data — build from factual references (facts aren't copyrightable):**
+- Intel datasheets, sSpec databases (published at ark.intel.com and historical archives)
+- AMD CPU documentation
+- Cyrix device databooks (available via archive.org / bitsavers.org)
+- InstLatx64 (https://www.instlatx64.atw.hu/) for real-hardware CPUID dumps
+- sandpile.org for cross-referenced CPUID tables
+- Wikipedia List-of processor pages for missing entries (cite source in `hw_db/cpus.csv` header)
+- FreeBSD `sys/i386/i386/identcpu.c` — BSD-2-clause, can be adapted into MIT with attribution
+
+**Target coverage for v0.2:** 80–120 entries covering every pre-Pentium and early-Pentium CPU plus the major Cyrix/AMD/IBM/ULSI/TI/NexGen oddities. Explicit list in `hw_db/cpus.csv` header:
+- Intel: 8086, 8088, 80186, 80286 (all variants), 386SX/DX/CX/EX/CXSA, 486SX/DX/DX2/DX4, Pentium P5/P54C up through P55C
+- AMD: Am286, Am386SX/DX, Am486SX/DX/DX2/DX4, Am5x86, K5, K6 (brief)
+- Cyrix: Cx486SLC/DLC, Cx486S/DX/DX2, Cx5x86, 6x86 (M1), MediaGX, 6x86MX (M2)
+- IBM: 486SLC2, BL3 variants
+- NEC: V20, V30, V33, V53
+- ULSI: US486DX
+- TI: 486SXL, 486DLC
+- NexGen: Nx586, Nx686
+- RapidCAD: the 486-class-with-387-FPU pair
+- UMC: U5S, U5SD
+
+**Steps:**
+1. Create `hw_db/cpus.csv` with the schema above, header row comments explaining each column, and the first 30 entries (the canonical Intel lineup). This is human-editable — designed for community PRs.
+2. Write a small Python build script `hw_db/build_cpu_db.py` that reads the CSV, validates every row (valid Q16 ranges, no duplicate matches, referenced errata flags are in a known set), and emits `src/detect/cpu_db.c` as a static array.
+3. Add `hw_db/build_cpu_db.py` invocation to the Makefile as a prerequisite for `cpu_db.obj`:
+   ```
+   src/detect/cpu_db.c : hw_db/cpus.csv hw_db/build_cpu_db.py
+       python hw_db/build_cpu_db.py hw_db/cpus.csv src/detect/cpu_db.c
+   ```
+   This keeps the source of truth in a version-controllable CSV and regenerates C whenever it changes.
+4. Write `cpu_db_lookup()` — walks the array, returns first matching entry. O(n) is fine at n=120.
+5. Wire into Task 1.1's `detect_cpu()`: after class+CPUID probes populate family/model/stepping, call `cpu_db_lookup`. If found, populate `cpu.friendly`, `cpu.sspec`, `cpu.errata`, `cpu.ipc_expected_low`, `cpu.ipc_expected_high`. If NOT found, populate `cpu.friendly="<family/model/stepping — please submit via /UNKNOWN>"` at confidence MEDIUM and trigger the unknown-hardware path (Task 1.11).
+6. Host tests: verify `cpu_db_lookup` with 20 known CPUID signatures returns correct friendly names; verify unknown signatures return NULL; verify the legacy match path (no CPUID) resolves 8088/V20/386 correctly.
+7. Fill out `hw_db/cpus.csv` to the 80-entry target.
+8. Commit CSV + generated C + Python script.
+
 ### Task 1.2 — FPU detection (detect/fpu.c)
 
 **Methodology:** FNINIT, read control word via FNSTSW/FNSTCW, inspect bits.
@@ -754,6 +833,41 @@ Which calls `report_add(t, "<subsys>.<key>", value, confidence, VERDICT_UNKNOWN)
 2. Write 287/387 distinguishing probe (infinity handling)
 3. Wire CPU-integrated-FPU check from CPUID results (Task 1.1 output in table)
 4. Test on DOSBox-X presets with/without FPU emulation
+5. Commit
+
+### Task 1.2a — FPU identification database (detect/fpu_db.c)
+
+**Goal:** turn the raw FPU probe (present/absent + 287/387/integrated discriminator) into a named FPU with vendor, process node where known, and quirks.
+
+**Files:** `src/detect/fpu_db.h`, `src/detect/fpu_db.c`, `hw_db/fpus.csv`
+
+**Schema:**
+```c
+typedef struct {
+    const char *probe_result;   /* "none", "8087", "287", "387-affine", "387-projective",
+                                   "integrated-486dx", "integrated-pentium",
+                                   "rapidcad", "cyrix-fasmath", "iit-2c87", ... */
+    const char *friendly;       /* "Intel 80387DX (Affine Mode)" */
+    const char *vendor;         /* "Intel", "Cyrix", "IIT", "ULSI", "Weitek" */
+    const char *notes;           /* "transcendental bug fixed in stepping B2" */
+    unsigned char fpu_mhz_matches_cpu_mhz;  /* 1 if same clock as CPU, 0 if asynchronous */
+} fpu_db_entry_t;
+```
+
+**Target coverage for v0.2 (~20 entries):**
+- Intel 8087, 80287 (6MHz / 8MHz / 10MHz variants), 80287XL, 80387SX, 80387DX, 80487SX (the socketed 486SX coprocessor that disables the host CPU)
+- Integrated FPUs: 486DX/DX2/DX4, Pentium P5/P54C
+- Cyrix FasMath CX-83D87, EMC87
+- IIT 2C87, 3C87
+- ULSI 83S87, 83C87, 83C287
+- Weitek 1167, 3167, 4167 (non-x87 but listed for completeness since they exist on some 386 boards)
+- RapidCAD (reports as 486-CPU + 387-FPU but is a single pair)
+
+**Steps:**
+1. Create `hw_db/fpus.csv` with 20-entry initial table
+2. Build script `hw_db/build_fpu_db.py` — same pattern as CPU DB
+3. Wire into `detect_fpu()` — after the probe returns a `probe_result` string, look up in `fpu_db` and populate `fpu.friendly`, `fpu.vendor`, `fpu.notes`
+4. Host test: 5 synthetic probe results → correct friendly names
 5. Commit
 
 ### Task 1.3 — Memory detection (detect/mem.c)
@@ -805,19 +919,55 @@ Keep confidence LOW where inference is indirect. §4 design principle: report un
 4. Skip VLB deep-detection for v0.2 — stub with "possibly VLB" if 486 detected, cite confidence LOW
 5. Commit
 
-### Task 1.6 — Video detection (detect/video.c)
+### Task 1.6 — Video detection (detect/video.c + detect/video_db.c)
 
 **Methodology:**
 - INT 10h AH=1Ah (VGA detect, returns adapter type)
 - INT 10h AH=12h BL=10h (EGA info)
 - Segment probe: MDA at B000:0000h, CGA/EGA/VGA at B800:0000h
 - Hercules detection: CGA-like + distinct status register behavior on port 3BAh
+- **Chipset identification via signature-scan database** (Task 1.6a below)
 
 **Steps:**
 1. Write layered detect: try VGA (INT 10h AH=1A), fall back to EGA (INT 10h AH=12h), fall back to segment probe
 2. Hercules probe via status register timing
-3. Chipset signature: BIOS ROM string scan at C000h for known vendor strings (Trident, Cirrus Logic, S3, ATI, Paradise). Best-effort, confidence MEDIUM.
-4. Commit
+3. Call `video_db_identify_chipset()` — scans video BIOS segment (C000:0000h to C000:7FFFh, stepping by 16 bytes) for known strings from `video_db`. Populates `video.chipset`, `video.chipset_vendor`, `video.bios_version` where detected.
+4. Probe VESA BIOS Extensions: INT 10h AX=4F00h returns VBE info block. Extract: VBE version, OEM string, total video memory, and the supported-modes list. This gives rich identification on ~95% of post-1992 cards.
+5. For Trident-specific, ATI-specific, and S3-specific deep-identification, run the vendor-specific register probes (e.g., S3 "unlock" sequence at 3D4h/3D5h indices 38h/39h reveals chip revision).
+6. Commit
+
+### Task 1.6a — Video chipset database (detect/video_db.c)
+
+**Goal:** named identification for VGA/SVGA chipsets. "Generic VGA" becomes "Tseng Labs ET4000/W32i, 1MB, VGA BIOS 8.00N."
+
+**Files:** `src/detect/video_db.h`, `src/detect/video_db.c`, `hw_db/video.csv`
+
+**Schema:**
+```c
+typedef struct {
+    const char *bios_signature;   /* substring to scan for in C000:xxxx */
+    const char *vendor;            /* "Trident", "Cirrus Logic", "S3", "ATI", "Tseng", ... */
+    const char *chipset;           /* "ET4000/W32i", "CL-GD5446", "Trio64V+", "Mach64 VT" */
+    const char *family;            /* "svga", "vga", "ega-super", "mda" */
+    unsigned int  min_vram_kb;     /* typical minimum VRAM */
+    const char *notes;             /* "Tseng-specific register probe available at 3CEh/3CFh" */
+} video_db_entry_t;
+```
+
+**Target coverage (~60 entries):**
+- Pre-VGA: IBM MDA/CGA/EGA/PGC, Hercules HGC/InColor, AT&T DEB
+- Early VGA: IBM VGA, Paradise PVGA1, Video7 V7VGA, Chips & Tech F82C441/452, Oak OTI-037/067/077/087
+- Late VGA/SVGA: Trident 8800/8900/9000/9400/TGUI9440, Tseng ET3000/ET4000/ET4000-W32/ET6000, Cirrus Logic CL-GD5402..5480, S3 86C911/924/928/80x/Trio/Virge, ATI Mach8/Mach32/Mach64/Rage, Matrox MGA, Number Nine
+- Plus VESA-reported chipset strings for the long tail
+
+**Steps:**
+1. `hw_db/video.csv` seeded with BIOS signature strings from published chipset references + InstLatx64 / VOGONS contributions
+2. Build script → `src/detect/video_db.c`
+3. `video_db_identify_chipset()` walks video BIOS segment once, matches first hit
+4. Host test: 10 synthetic BIOS-signature dumps → correct chipset identification
+5. Commit
+
+### Task 1.7 — Audio detection (detect/audio.c)
 
 ### Task 1.7 — Audio detection (detect/audio.c)
 
@@ -849,9 +999,35 @@ Sound Blaster detection uses the `BLASTER` env var. **Actual format is space-sep
 2. OPL2 probe — follow the 13-step sequence above exactly. Use `timing_wait_us(100)` from the timing module for the delay. If first status read (step 5) returns 11b already, OPL hardware is in unknown state — repeat the sequence once; if still 11b, flag AdLib probe as confidence LOW and proceed.
 3. OPL3 distinguishing probe: after OPL2 confirmed, write to extended register bank (`OUT 38Ah, 05h` / `OUT 38Bh, 01h`) to enable OPL3 mode, re-read status — OPL3 has extra status bits set. If not OPL3, the writes are no-ops on OPL2.
 4. BLASTER env parse (via `getenv("BLASTER")`). If set, DSP reset + version query. If BLASTER unset but AdLib detected, note "SB probe skipped (no BLASTER env)" — do NOT guess port 220h.
-5. Update `docs/methodology.md` with the exact probe sequences and their sources.
-6. Test on DOSBox-X with Sound Blaster disabled, SB1, SB Pro, SB16 configurations.
-7. Commit
+5. Call `audio_db_identify()` with the collected probe results (OPL type, SB DSP version, MPU-401 response) — populates `audio.friendly`, `audio.model` from the DB.
+6. Update `docs/methodology.md` with the exact probe sequences and their sources.
+7. Test on DOSBox-X with Sound Blaster disabled, SB1, SB Pro, SB16 configurations.
+8. Commit
+
+### Task 1.7a — Audio chipset database (detect/audio_db.c)
+
+**Goal:** turn "SB Pro, OPL3" into "Sound Blaster Pro 2.0 (CT1600), OPL3 (YMF262)."
+
+**Files:** `src/detect/audio_db.h`, `src/detect/audio_db.c`, `hw_db/audio.csv`
+
+**Match keys:** DSP version (major.minor), OPL type (OPL2/OPL3/OPL4), presence of mixer (CT1345/CT1745), MPU-401 UART mode response, Gravis UltraSound detection (INT 11h equipment + GUS-specific port probe), Roland MT-32/SC-55 via MPU-401 system-exclusive probe.
+
+**Target coverage (~30 entries):**
+- Creative: SB 1.0 (CT1320), SB 1.5 (CT1320B), SB 2.0 (CT1350), SB Pro (CT1330), SB Pro 2.0 (CT1600), SB16 (CT1740/CT2230/CT2290/CT2940), SB16 ASP (CT1750), SB AWE32 (CT2760/CT3900), SB AWE64 (CT4500)
+- AdLib: original AdLib (OPL2), AdLib Gold (OPL3 + YMZ263)
+- Gravis: UltraSound Classic (GF1), UltraSound MAX, UltraSound ACE, UltraSound PnP
+- MediaVision: Pro AudioSpectrum 8/16/Plus
+- ESS: ES688, ES1688, ES1868, ES1869
+- OPTi: 82C929, 82C930, 82C931
+- Aztech: Sound Galaxy family
+- Roland: MT-32 / LAPC-I / CM-32L / SC-55 (via MPU-401 SysEx)
+
+**Steps:**
+1. `hw_db/audio.csv` seeded from Creative's CT-number database (publicly documented), VOGONS hardware database (factual), Ralf Brown's Interrupt List
+2. Build script → `src/detect/audio_db.c`
+3. `audio_db_identify()` matches on composite key (OPL+DSP+mixer)
+4. Host test: 8 synthetic probe signatures → correct model identification
+5. Commit
 
 ### Task 1.8 — BIOS info (detect/bios.c)
 
@@ -868,7 +1044,25 @@ Already ostensibly implemented in v0.1 per §3 — but the repo has no code. Imp
 2. Scan for vendor string
 3. Probe INT 15h extensions and record which are present
 4. PnP header scan
-5. Commit
+5. Call `bios_db_identify()` — matches vendor string against `hw_db/bios.csv`. Populates `bios.vendor`, `bios.flavor` (Award/AMI/Phoenix/IBM/MR BIOS/Quadtel/Microid Research/...), known-version-era, and flags if the BIOS is from a motherboard family with documented quirks.
+6. Motherboard OEM string: scan F000:E000h–F000:FFF0h for OEM-specific strings (Asus ID strings, Abit, Intel motherboard IDs). Best-effort, confidence MEDIUM.
+7. Commit
+
+### Task 1.8a — BIOS and motherboard database (detect/bios_db.c)
+
+**Goal:** "Award BIOS 4.51PG" becomes "Award Modular BIOS v4.51PG (1995 era, typical on Socket 5/7 boards, known-good memory detection above 64MB)."
+
+**Files:** `src/detect/bios_db.h`, `src/detect/bios_db.c`, `hw_db/bios.csv`, `hw_db/motherboards.csv`
+
+**Schema:** match substrings in the BIOS vendor string against a database of known BIOS families with era, capability flags (E801h support, PnP, shadow RAM regions), and known-quirk notes.
+
+**Target coverage:** Award, AMI, Phoenix, IBM, MR BIOS, Quadtel, Microid Research, DTK, Mylex, Compaq, Dell, HP Vectra, Zenith, Tandy, Olivetti — ~40 BIOS family entries, plus a separate `motherboards.csv` with ~100 common board OEM strings (Asus P55T2P4, Abit IT5H, Intel Advanced/EV, etc.)
+
+**Steps:**
+1. Seed `bios.csv` from published BIOS reference lists and motherboards.csv from the VOGONS hardware database
+2. Build script
+3. Host test
+4. Commit
 
 ### Task 1.9 — UI: three-pane layout + confidence meter
 
@@ -895,6 +1089,41 @@ Already ostensibly implemented in v0.1 per §3 — but the repo has no code. Imp
 5. Test rendering on DOSBox-X MDA, CGA, EGA, VGA presets
 6. Commit
 
+### Task 1.11 — Unknown-hardware submission path (detect/unknown.c)
+
+**Goal:** every time CERBERUS encounters a CPU, FPU, video, audio, or BIOS signature not in the database, it captures the raw probe results to a dedicated submission file and prompts the user to contribute back. This is what turns CERBERUS from a closed identification tool into a **community-grown database** — exactly the §13 Barely Booting content angle ("the DOS scene contributes a weird Cyrix the tool didn't know about → next release recognizes it").
+
+**Files:** `src/detect/unknown.c`, `hw_db/submissions/README.md`
+
+**Behavior:**
+1. When any `*_db_lookup()` returns NULL for a well-formed probe result, the caller calls `unknown_record(subsystem, raw_probe_data)`.
+2. `unknown_record` appends a structured entry to `CERBERUS.UNK` in the same location as the crash breadcrumb (CWD → %TEMP% → disabled) with:
+   - Subsystem (cpu/fpu/video/audio/bios)
+   - Raw probe result (CPUID dump as hex, EFLAGS probe outcomes, vendor-string scan hits, VBE info block, DSP version, BIOS vendor string bytes)
+   - Tool version, date, emulator id, hardware signature
+3. At end-of-run, if `CERBERUS.UNK` has any entries, the end-of-run summary card shows:
+   ```
+   ┌─ UNKNOWN HARDWARE CAPTURED ────────────────────────────────────┐
+   │ 1 CPU, 1 video chipset not in the CERBERUS database.            │
+   │                                                                 │
+   │ Help the database grow — submit CERBERUS.UNK as a GitHub issue: │
+   │ https://github.com/tonyuatkins-afk/CERBERUS/issues/new          │
+   │ (use the "hardware submission" template)                        │
+   └─────────────────────────────────────────────────────────────────┘
+   ```
+4. `hw_db/submissions/README.md` documents the submission workflow, the CSV schema, and how to add a new entry via PR with one-line `git add hw_db/cpus.csv` + regenerated C.
+5. GitHub issue template at `.github/ISSUE_TEMPLATE/hardware-submission.md` asks for: CERBERUS.UNK contents, machine description (make/model/year), any human-known identification the user has.
+
+**Why this is load-bearing for the "feature-rich" goal:** the DB is always the long tail — no single author can cover every Cyrix rebadge, every Taiwan OEM VGA card, every late-90s SB clone. A 120-entry seed DB + a 10-minute submission workflow becomes a 500-entry DB by v1.0.
+
+**Steps:**
+1. Implement `unknown_record()` writing append-only to `CERBERUS.UNK`
+2. Implement end-of-run summary card rendering for unknowns
+3. Create `.github/ISSUE_TEMPLATE/hardware-submission.md`
+4. Write `hw_db/submissions/README.md`
+5. Host test: call unknown_record with synthetic data, verify file contents match schema
+6. Commit
+
 ### Task 1.10 — Phase 1 quality gate (5-round adversarial, per TAKEOVER pattern)
 
 User's established pattern from `feedback_quality_gate_patterns.md` and `project_takeover.md`: 5 rounds, target ~12 bugs across rounds.
@@ -912,6 +1141,13 @@ User's established pattern from `feedback_quality_gate_patterns.md` and `project
 - [ ] Run on ≥1 real 8088/V20/V30-class machine
 - [ ] Attach each resulting INI file to the GitHub v0.2 release
 - [ ] Any discrepancy between DOSBox-X output and real-hardware output where both claim HIGH confidence is a gate failure — either fix detection or downgrade confidence
+
+**Hardware database validation:**
+- [ ] CPU DB has ≥80 entries; FPU DB ≥20; video DB ≥60; audio DB ≥30; BIOS DB ≥40; motherboard DB ≥50
+- [ ] Every real-hardware test machine gets a friendly-named identification (not "unknown")
+- [ ] If any real-hardware machine produces an unknown identification, either add the entry to the CSV (with source-of-data citation in the commit message) or document why it must remain unknown
+- [ ] `CERBERUS.UNK` submission file generated correctly on a synthetic unknown-CPU test
+- [ ] End-of-run "unknown hardware captured" summary renders correctly when unknowns are present
 
 Same real-hardware requirement applies to every subsequent phase gate (2, 3, 4). Reason: Phase 4's consistency engine will be calibrated against whatever data Phase 1/2/3 produce; if those phases only saw emulator data, the rule thresholds will be tuned to emulation artifacts and will false-positive on real hardware in v0.5. DOSBox-X cache/timing is explicitly synthetic (see Task 1.4 step 5).
 
