@@ -1,0 +1,54 @@
+# CERBERUS CPU identification database
+#
+# Source of truth — hw_db/build_cpu_db.py regenerates src/detect/cpu_db.c.
+# Contributors: add rows, re-run the generator, commit both files.
+#
+# Columns:
+#   match_kind    "cpuid" or "legacy"
+#   vendor        CPUID vendor string (cpuid match only; empty for legacy)
+#   family        CPU family (cpuid match only; decimal)
+#   model         CPU model (cpuid match only; decimal)
+#   stepping_min  min stepping, inclusive (cpuid match only; decimal)
+#   stepping_max  max stepping, inclusive (cpuid match only; decimal)
+#   legacy_class  class token (legacy match only; empty for cpuid)
+#   friendly      Human-readable name — what gets shown to the user
+#   notes         Brief caveat, quirk, or source citation
+#
+# Lookup order: top-to-bottom, first match wins. Put more-specific rows
+# (narrow stepping ranges, specific models) before catch-alls.
+#
+match_kind,vendor,family,model,stepping_min,stepping_max,legacy_class,friendly,notes
+cpuid,GenuineIntel,4,0,0,15,,Intel i486DX (A-step),early i486DX with FDIV-like microcode quirks
+cpuid,GenuineIntel,4,1,0,15,,Intel i486DX (B/C-step),mainstream i486DX-25/33/50
+cpuid,GenuineIntel,4,2,0,15,,Intel i486SX,no integrated FPU
+cpuid,GenuineIntel,4,3,0,15,,Intel i486DX2,clock-doubled i486DX
+cpuid,GenuineIntel,4,4,0,15,,Intel i486SL,SL-enhanced mobile variant
+cpuid,GenuineIntel,4,5,0,15,,Intel i486SX2,clock-doubled i486SX (rare)
+cpuid,GenuineIntel,4,7,0,15,,Intel i486DX2 Write-Back Enhanced,
+cpuid,GenuineIntel,4,8,0,15,,Intel i486DX4,clock-tripled i486DX
+cpuid,GenuineIntel,4,9,0,15,,Intel i486DX4 Write-Back Enhanced,
+cpuid,GenuineIntel,5,1,0,15,,Intel Pentium 60/66,FDIV bug on stepping 0-3
+cpuid,GenuineIntel,5,2,0,15,,Intel Pentium P54C,
+cpuid,GenuineIntel,5,4,0,15,,Intel Pentium MMX,
+cpuid,GenuineIntel,6,1,0,15,,Intel Pentium Pro,
+cpuid,GenuineIntel,6,3,0,15,,Intel Pentium II,
+cpuid,AuthenticAMD,4,3,0,15,,AMD Am486DX2,
+cpuid,AuthenticAMD,4,7,0,15,,AMD Am486DX2 Write-Back,
+cpuid,AuthenticAMD,4,8,0,15,,AMD Am486DX4,
+cpuid,AuthenticAMD,4,9,0,15,,AMD Am486DX4 Write-Back,
+cpuid,AuthenticAMD,4,14,0,15,,AMD Am5x86-P75,486 platform 133MHz
+cpuid,AuthenticAMD,4,15,0,15,,AMD Am5x86 Write-Back,
+cpuid,AuthenticAMD,5,0,0,15,,AMD K5 SSA/5,
+cpuid,AuthenticAMD,5,1,0,15,,AMD K5 PR90/100/120/133,
+cpuid,AuthenticAMD,5,6,0,15,,AMD K6,
+cpuid,CyrixInstead,4,4,0,15,,Cyrix MediaGX,
+cpuid,CyrixInstead,5,2,0,15,,Cyrix 6x86 (M1),
+cpuid,CyrixInstead,5,4,0,15,,Cyrix GXm,
+cpuid,CyrixInstead,6,0,0,15,,Cyrix 6x86MX (M2),
+legacy,,,,,,8086,Intel 8086 or compatible,
+legacy,,,,,,8088,IBM PC-class 8088 or compatible,
+legacy,,,,,,v20,NEC V20 (8088-compatible with 80186 superset),
+legacy,,,,,,v30,NEC V30 (8086-compatible with 80186 superset),
+legacy,,,,,,286,Intel or AMD 80286,
+legacy,,,,,,386,Intel/AMD/Cyrix 80386 class (CPUID absent),
+legacy,,,,,,486-no-cpuid,Early i486DX without CPUID support (SX327/SX328),

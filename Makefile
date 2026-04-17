@@ -33,6 +33,7 @@ OBJS = src\main.obj                                                  &
        src\detect\detect_all.obj                                     &
        src\detect\env.obj                                            &
        src\detect\cpu.obj     src\detect\cpu_a.obj                   &
+       src\detect\cpu_db.obj                                         &
        src\detect\fpu.obj     src\detect\mem.obj                     &
        src\detect\cache.obj   src\detect\bus.obj                     &
        src\detect\video.obj   src\detect\audio.obj                   &
@@ -81,6 +82,13 @@ src\detect\cpu.obj: src\detect\cpu.c src\detect\detect.h src\detect\env.h src\co
 
 src\detect\cpu_a.obj: src\detect\cpu_a.asm
 	$(ASM) $(ASFLAGS) -o src\detect\cpu_a.obj src\detect\cpu_a.asm
+
+src\detect\cpu_db.obj: src\detect\cpu_db.c src\detect\cpu_db.h
+	$(CC) $(CFLAGS) -fo=$^@ src\detect\cpu_db.c
+
+# Regenerate the C source from the CSV. Run manually when cpus.csv changes.
+regen-cpu-db: .SYMBOLIC
+	python hw_db\build_cpu_db.py
 
 src\detect\fpu.obj: src\detect\fpu.c src\detect\detect.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\fpu.c

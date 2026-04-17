@@ -30,6 +30,7 @@ global  cpu_asm_id_test_
 global  cpu_asm_int6_handler_
 global  cpu_asm_int6_fired_
 global  cpu_asm_int6_clear_
+global  cpu_asm_cpuid_
 
 ; --- CS-local storage (keeps INT 6 handler independent of DS) ---
 fault_flag:       dw 0
@@ -191,4 +192,47 @@ cpu_asm_id_test_:
     retf
 .no_id:
     xor ax, ax
+    retf
+
+; ---------------------------------------------------------------------
+; void cpu_asm_cpuid(unsigned long leaf, cpuid_regs_t __far *out)
+;   Execute CPUID with EAX=leaf, write EAX/EBX/ECX/EDX into *out.
+;   REQUIRES: caller already verified CPUID availability via cpu_asm_id_test.
+;
+;   Watcom cdecl via #pragma aux on the C side. Medium-model far call.
+;   Arg layout on stack:
+;       [bp+0]  saved bp
+;       [bp+2]  return IP
+;       [bp+4]  return CS
+;       [bp+6]  leaf low  16 bits
+;       [bp+8]  leaf high 16 bits
+;       [bp+10] out pointer offset (16-bit)
+;       [bp+12] out pointer segment (16-bit) — far pointer
+; ---------------------------------------------------------------------
+cpu_asm_cpuid_:
+    push bp
+    mov bp, sp
+    push ebx
+    push ecx
+    push edx
+    push edi
+    push es
+
+    mov eax, [bp+6]          ; 32-bit leaf (NASM emits 66 prefix)
+    cpuid
+
+    ; Store via far pointer ES:DI (caller passed far ptr via cdecl)
+    mov di, [bp+10]          ; offset
+    mov es, [bp+12]          ; segment
+    mov [es:di+0],  eax
+    mov [es:di+4],  ebx
+    mov [es:di+8],  ecx
+    mov [es:di+12], edx
+
+    pop es
+    pop edi
+    pop edx
+    pop ecx
+    pop ebx
+    pop bp
     retf
