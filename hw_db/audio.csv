@@ -1,0 +1,37 @@
+# CERBERUS audio identification database
+#
+# Matched by composite key: OPL type + SB DSP version + mixer type.
+# Lookup signature: "<opl>:<dsp_hex>" where <opl> is "opl2"/"opl3"/"none"
+# and <dsp_hex> is the DSP version byte as two hex chars, or "none".
+#
+# Columns:
+#   match_key       Composite signature for matching (see above)
+#   friendly        Human-readable name
+#   vendor          Manufacturer
+#   notes           Brief note on era, CT-number, or quirks
+#
+match_key,friendly,vendor,notes
+pc-speaker-only,PC Speaker only,IBM-compatible,Always present on IBM PC-class hardware
+opl2:none,AdLib (OPL2),AdLib,Original 1987 card — Yamaha YM3812
+opl2:0100,Sound Blaster 1.0 (CT1320),Creative Technology,DSP v1.x — 8-bit mono 22kHz max
+opl2:0200,Sound Blaster 1.5 (CT1320B),Creative Technology,DSP v2.x — High-speed DMA
+opl2:0201,Sound Blaster 2.0 (CT1350),Creative Technology,DSP v2.01 — Auto-init DMA
+opl3:0300,Sound Blaster Pro (CT1330),Creative Technology,DSP v3.xx — Stereo 8-bit + OPL2x2
+opl3:0302,Sound Blaster Pro 2 (CT1600),Creative Technology,DSP v3.02 — Single OPL3
+opl3:0400,Sound Blaster 16 (CT1740),Creative Technology,DSP v4.xx — 16-bit stereo
+opl3:0404,Sound Blaster 16 (CT2230),Creative Technology,DSP v4.04
+opl3:0405,Sound Blaster 16 (CT2290),Creative Technology,DSP v4.05 — Value edition
+opl3:040C,Sound Blaster AWE32 (CT2760),Creative Technology,DSP v4.0C — EMU8000 wavetable
+opl3:040D,Sound Blaster AWE64 (CT4500),Creative Technology,DSP v4.0D
+opl3:none,OPL3-based card (unknown),various,OPL3 detected without recognizable DSP
+opl2:none-adlib,AdLib Gold,AdLib,1992 OPL3 + YMZ263 codec (later product)
+gus-classic,Gravis UltraSound (Classic),Advanced Gravis,GF1 synth — not OPL-based
+gus-max,Gravis UltraSound MAX,Advanced Gravis,GF1 + CS4231 codec
+gus-ace,Gravis UltraSound ACE,Advanced Gravis,Audio Compression Engine
+ess-688,ESS AudioDrive ES688,ESS Technology,SB Pro compatible
+ess-1688,ESS AudioDrive ES1688,ESS Technology,SB Pro + OPL3
+ess-1868,ESS AudioDrive ES1868,ESS Technology,Plug and Play
+mpas-16,Pro AudioSpectrum 16,MediaVision,SB-compatible mode + native
+mpu401-mt32,Roland MT-32,Roland,MPU-401 synth — general MIDI on intelligent mode
+mpu401-sc55,Roland SC-55 Sound Canvas,Roland,General MIDI reference
+mpu401-unknown,MPU-401 compatible MIDI device,various,Responds to MPU-401 UART

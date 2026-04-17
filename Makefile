@@ -39,7 +39,7 @@ OBJS = src\main.obj                                                  &
        src\detect\mem.obj                                            &
        src\detect\cache.obj   src\detect\bus.obj                     &
        src\detect\video.obj   src\detect\video_db.obj                &
-       src\detect\audio.obj                                          &
+       src\detect\audio.obj   src\detect\audio_db.obj                &
        src\detect\bios.obj                                           &
        src\diag\diag_all.obj  src\bench\bench_all.obj                &
        src\upload\upload.obj
@@ -123,8 +123,14 @@ src\detect\video_db.obj: src\detect\video_db.c src\detect\video_db.h
 regen-video-db: .SYMBOLIC
 	python hw_db\build_video_db.py
 
-src\detect\audio.obj: src\detect\audio.c src\detect\detect.h src\cerberus.h
+src\detect\audio.obj: src\detect\audio.c src\detect\detect.h src\detect\env.h src\detect\audio_db.h src\core\timing.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\audio.c
+
+src\detect\audio_db.obj: src\detect\audio_db.c src\detect\audio_db.h
+	$(CC) $(CFLAGS) -fo=$^@ src\detect\audio_db.c
+
+regen-audio-db: .SYMBOLIC
+	python hw_db\build_audio_db.py
 
 src\detect\bios.obj: src\detect\bios.c src\detect\detect.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\bios.c
