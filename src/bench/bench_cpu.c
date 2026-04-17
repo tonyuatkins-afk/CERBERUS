@@ -30,7 +30,18 @@
 #define BENCH_ITERS   100000L
 #define MAX_PASSES    16      /* hard cap on calibrated runs */
 
-static us_t pass_results[MAX_PASSES];
+static us_t         pass_results[MAX_PASSES];
+/* Key + display-value buffers per pass. report_add_* stores the
+ * pointer we hand it (no copy), so these need to outlive the call —
+ * stack-local sprintf targets would dangle. Static-duration arrays
+ * are the simplest lifetime guarantee. */
+static char pass_keys[MAX_PASSES][40];
+static char pass_vals[MAX_PASSES][24];
+static char summary_val_min[24];
+static char summary_val_max[24];
+static char summary_val_med[24];
+static char summary_val_range[16];
+static char summary_val_ips[24];
 
 static unsigned long run_int_loop(unsigned long iters)
 {
@@ -106,16 +117,14 @@ static void emit_calibrated(result_table_t *t, int runs)
     us_t median, lo, hi;
     unsigned long range_pct_x10;
     int i;
-    char buf[32];
-    char key[40];
 
-    /* Emit per-pass values first — this is what Phase 4 thermal
-     * walks for monotonic drift detection. */
+    /* Per-pass values — key + value both into static arrays so the
+     * pointers the result table stores remain valid for INI write. */
     for (i = 0; i < runs; i++) {
-        sprintf(key, "bench.cpu.int_pass_%d_us", i);
-        sprintf(buf, "%lu", (unsigned long)pass_results[i]);
-        report_add_u32(t, key, (unsigned long)pass_results[i], buf,
-                       CONF_HIGH, VERDICT_UNKNOWN);
+        sprintf(pass_keys[i], "bench.cpu.int_pass_%d_us", i);
+        sprintf(pass_vals[i], "%lu", (unsigned long)pass_results[i]);
+        report_add_u32(t, pass_keys[i], (unsigned long)pass_results[i],
+                       pass_vals[i], CONF_HIGH, VERDICT_UNKNOWN);
         sorted[i] = pass_results[i];
     }
 
@@ -124,38 +133,32 @@ static void emit_calibrated(result_table_t *t, int runs)
     hi     = sorted[runs - 1];
     median = sorted[runs / 2];
 
-    sprintf(buf, "%lu", (unsigned long)lo);
-    report_add_u32(t, "bench.cpu.int_min_us", (unsigned long)lo, buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
-    sprintf(buf, "%lu", (unsigned long)hi);
-    report_add_u32(t, "bench.cpu.int_max_us", (unsigned long)hi, buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
-    sprintf(buf, "%lu", (unsigned long)median);
-    report_add_u32(t, "bench.cpu.int_median_us", (unsigned long)median, buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    sprintf(summary_val_min, "%lu", (unsigned long)lo);
+    report_add_u32(t, "bench.cpu.int_min_us", (unsigned long)lo,
+                   summary_val_min, CONF_HIGH, VERDICT_UNKNOWN);
+    sprintf(summary_val_max, "%lu", (unsigned long)hi);
+    report_add_u32(t, "bench.cpu.int_max_us", (unsigned long)hi,
+                   summary_val_max, CONF_HIGH, VERDICT_UNKNOWN);
+    sprintf(summary_val_med, "%lu", (unsigned long)median);
+    report_add_u32(t, "bench.cpu.int_median_us", (unsigned long)median,
+                   summary_val_med, CONF_HIGH, VERDICT_UNKNOWN);
 
-    /* range_pct_x10 = (hi - lo) * 1000 / median — gives one decimal place
-     * of percent range with no floating point. Cheap substitute for CoV
-     * until Phase 4's Mann-Kendall needs real stats. */
     if (median > 0) {
         range_pct_x10 = ((unsigned long)(hi - lo) * 1000UL) / (unsigned long)median;
-        sprintf(buf, "%lu.%lu",
+        sprintf(summary_val_range, "%lu.%lu",
                 range_pct_x10 / 10UL, range_pct_x10 % 10UL);
-        report_add_str(t, "bench.cpu.int_range_pct", buf,
+        report_add_str(t, "bench.cpu.int_range_pct", summary_val_range,
                        CONF_HIGH, VERDICT_UNKNOWN);
     }
 
-    /* Summary iters_per_sec derived from median for the canonical-
-     * signature compatibility with quick mode. */
     {
         unsigned long us_x1000_per_iter =
             ((unsigned long)median * 1000UL) / BENCH_ITERS;
         if (us_x1000_per_iter > 0) {
             unsigned long iters_per_sec = 1000000000UL / us_x1000_per_iter;
-            sprintf(buf, "%lu", iters_per_sec);
-            report_add_u32(t, "bench.cpu.int_iters_per_sec",
-                           iters_per_sec, buf,
-                           CONF_HIGH, VERDICT_UNKNOWN);
+            sprintf(summary_val_ips, "%lu", iters_per_sec);
+            report_add_u32(t, "bench.cpu.int_iters_per_sec", iters_per_sec,
+                           summary_val_ips, CONF_HIGH, VERDICT_UNKNOWN);
         }
     }
 }
