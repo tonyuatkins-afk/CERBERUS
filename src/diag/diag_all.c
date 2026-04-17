@@ -9,6 +9,21 @@ void diag_all(result_table_t *t, const opts_t *o)
     diag_mem(t);
     diag_fpu(t);
     diag_video(t);
-    /* Further subsystems (cache coherence, DMA) land as Phase 2
-     * continues; each adds a diag_<subsys>() call here. */
+    /*
+     * Deferred from Phase 2 — needs real-hardware iteration:
+     *
+     *   Cache coherence  Requires 486+ INVD/WBINVD or explicit cache
+     *                    line flush to get meaningful results. Blind
+     *                    implementation risks false positives from
+     *                    emulator cache synthesis. Re-evaluate once
+     *                    Task 1.10 real-hardware gate surfaces actual
+     *                    failure modes.
+     *
+     *   DMA liveness     The plan is explicit: "diagnostics MUST NOT
+     *                    damage hardware. No DMA that overwrites DOS
+     *                    kernel memory." A safe harness needs careful
+     *                    address-space negotiation via INT 21h — scope
+     *                    grows fast. Deferred until benchmark module
+     *                    establishes DMA handling in Phase 3.
+     */
 }
