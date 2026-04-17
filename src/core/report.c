@@ -69,6 +69,18 @@ void report_add_q16(result_table_t *t, const char *key, long fixed,
     if (r) r->v.fixed = fixed;
 }
 
+int report_set_verdict(result_table_t *t, const char *key, verdict_t v)
+{
+    unsigned int i;
+    for (i = 0; i < t->count; i++) {
+        if (strcmp(t->results[i].key, key) == 0) {
+            t->results[i].verdict = v;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* ----------------------------------------------------------------------- */
 /* Hardware-identity signature (frozen canonical subset)                    */
 /* ----------------------------------------------------------------------- */

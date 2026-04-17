@@ -20,4 +20,9 @@ int  report_write_ini(const result_table_t *t, const opts_t *o, const char *path
  * Writes a 9-byte hex string (8 chars + NUL) into out_hex. */
 void report_hardware_signature(const result_table_t *t, char out_hex[9]);
 
+/* Set the verdict on an existing result-table entry by key. Returns 1 on
+ * success, 0 if the key wasn't found. Used by diagnose modules to attach
+ * pass/warn/fail verdicts to detect entries without adding new rows. */
+int report_set_verdict(result_table_t *t, const char *key, verdict_t v);
+
 #endif

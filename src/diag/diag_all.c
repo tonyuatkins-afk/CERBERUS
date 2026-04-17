@@ -3,6 +3,10 @@
 
 void diag_all(result_table_t *t, const opts_t *o)
 {
-    (void)t; (void)o;
-    puts("[diagnose] stub - lands in v0.3");
+    (void)o;
+    puts("[diagnose] running...");
+    diag_cpu(t);
+    diag_mem(t);
+    /* Further subsystems (FPU, video RAM, cache coherence, DMA) land as
+     * Phase 2 continues; each adds a diag_<subsys>() call here. */
 }
