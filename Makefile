@@ -29,7 +29,7 @@ OBJS = src\main.obj                                                  &
        src\core\timing.obj    src\core\display.obj                   &
        src\core\report.obj    src\core\sha1.obj                      &
        src\core\consist.obj   src\core\thermal.obj                   &
-       src\core\crumb.obj                                            &
+       src\core\crumb.obj     src\core\ui.obj                        &
        src\detect\detect_all.obj                                     &
        src\detect\env.obj     src\detect\unknown.obj                 &
        src\detect\cpu.obj     src\detect\cpu_a.obj                   &
@@ -50,7 +50,7 @@ $(TARGET): $(OBJS)
 	$(LD) system dos name $(TARGET) option map=$(MAPFILE) option stack=$(STACK) file { $(OBJS) }
 
 # Explicit per-file rules (wmake inference rules across subdirs are fragile)
-src\main.obj: src\main.c src\cerberus.h src\detect\unknown.h
+src\main.obj: src\main.c src\cerberus.h src\detect\unknown.h src\core\ui.h
 	$(CC) $(CFLAGS) -fo=$^@ src\main.c
 
 src\core\timing.obj: src\core\timing.c src\core\timing.h src\cerberus.h
@@ -73,6 +73,9 @@ src\core\thermal.obj: src\core\thermal.c src\core\thermal.h src\cerberus.h
 
 src\core\crumb.obj: src\core\crumb.c src\core\crumb.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\crumb.c
+
+src\core\ui.obj: src\core\ui.c src\core\ui.h src\core\display.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\core\ui.c
 
 src\detect\detect_all.obj: src\detect\detect_all.c src\detect\detect.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\detect_all.c

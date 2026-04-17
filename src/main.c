@@ -5,6 +5,7 @@
 #include "core/display.h"
 #include "core/report.h"
 #include "core/crumb.h"
+#include "core/ui.h"
 #include "detect/detect.h"
 #include "detect/unknown.h"
 #include "diag/diag.h"
@@ -115,6 +116,7 @@ int main(int argc, char *argv[])
     if (opts.do_benchmark) bench_all(&table, &opts);
 
     report_write_ini(&table, &opts, opts.out_path);
+    ui_render_summary(&table, &opts);
 
     if (opts.do_upload) {
         upload_rc = upload_ini(opts.out_path);
