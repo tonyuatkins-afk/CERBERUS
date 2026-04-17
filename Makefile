@@ -54,7 +54,7 @@ $(TARGET): $(OBJS)
 	$(LD) system dos name $(TARGET) option map=$(MAPFILE) option stack=$(STACK) file { $(OBJS) }
 
 # Explicit per-file rules (wmake inference rules across subdirs are fragile)
-src\main.obj: src\main.c src\cerberus.h src\detect\unknown.h src\core\ui.h
+src\main.obj: src\main.c src\cerberus.h src\detect\unknown.h src\core\ui.h src\core\consist.h
 	$(CC) $(CFLAGS) -fo=$^@ src\main.c
 
 src\core\timing.obj: src\core\timing.c src\core\timing.h src\cerberus.h
@@ -69,7 +69,7 @@ src\core\report.obj: src\core\report.c src\core\report.h src\core\sha1.h src\cer
 src\core\sha1.obj: src\core\sha1.c src\core\sha1.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\sha1.c
 
-src\core\consist.obj: src\core\consist.c src\core\consist.h src\cerberus.h
+src\core\consist.obj: src\core\consist.c src\core\consist.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\consist.c
 
 src\core\thermal.obj: src\core\thermal.c src\core\thermal.h src\cerberus.h
