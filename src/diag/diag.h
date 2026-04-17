@@ -12,5 +12,6 @@ void diag_all(result_table_t *t, const opts_t *o);
 void diag_cpu(result_table_t *t);
 void diag_mem(result_table_t *t);
 void diag_fpu(result_table_t *t);
+void diag_video(result_table_t *t);
 
 #endif

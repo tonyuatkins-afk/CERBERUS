@@ -8,6 +8,7 @@ void diag_all(result_table_t *t, const opts_t *o)
     diag_cpu(t);
     diag_mem(t);
     diag_fpu(t);
-    /* Further subsystems (video RAM, cache coherence, DMA) land as
-     * Phase 2 continues; each adds a diag_<subsys>() call here. */
+    diag_video(t);
+    /* Further subsystems (cache coherence, DMA) land as Phase 2
+     * continues; each adds a diag_<subsys>() call here. */
 }
