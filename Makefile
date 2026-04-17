@@ -42,7 +42,7 @@ OBJS = src\main.obj                                                  &
        src\detect\audio.obj   src\detect\audio_db.obj                &
        src\detect\bios.obj    src\detect\bios_db.obj                 &
        src\diag\diag_all.obj  src\diag\diag_cpu.obj                  &
-       src\diag\diag_mem.obj                                         &
+       src\diag\diag_mem.obj  src\diag\diag_fpu.obj                  &
        src\bench\bench_all.obj                                       &
        src\upload\upload.obj
 
@@ -157,6 +157,9 @@ src\diag\diag_cpu.obj: src\diag\diag_cpu.c src\diag\diag.h src\core\report.h src
 
 src\diag\diag_mem.obj: src\diag\diag_mem.c src\diag\diag.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_mem.c
+
+src\diag\diag_fpu.obj: src\diag\diag_fpu.c src\diag\diag.h src\core\report.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_fpu.c
 
 src\bench\bench_all.obj: src\bench\bench_all.c src\bench\bench.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_all.c

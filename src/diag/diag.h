@@ -11,5 +11,6 @@ void diag_all(result_table_t *t, const opts_t *o);
  * rows for fine-grained pass/fail reporting. */
 void diag_cpu(result_table_t *t);
 void diag_mem(result_table_t *t);
+void diag_fpu(result_table_t *t);
 
 #endif

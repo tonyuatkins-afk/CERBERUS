@@ -7,6 +7,7 @@ void diag_all(result_table_t *t, const opts_t *o)
     puts("[diagnose] running...");
     diag_cpu(t);
     diag_mem(t);
-    /* Further subsystems (FPU, video RAM, cache coherence, DMA) land as
+    diag_fpu(t);
+    /* Further subsystems (video RAM, cache coherence, DMA) land as
      * Phase 2 continues; each adds a diag_<subsys>() call here. */
 }
