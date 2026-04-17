@@ -38,7 +38,8 @@ OBJS = src\main.obj                                                  &
        src\detect\fpu_db.obj                                         &
        src\detect\mem.obj                                            &
        src\detect\cache.obj   src\detect\bus.obj                     &
-       src\detect\video.obj   src\detect\audio.obj                   &
+       src\detect\video.obj   src\detect\video_db.obj                &
+       src\detect\audio.obj                                          &
        src\detect\bios.obj                                           &
        src\diag\diag_all.obj  src\bench\bench_all.obj                &
        src\upload\upload.obj
@@ -113,8 +114,14 @@ src\detect\cache.obj: src\detect\cache.c src\detect\detect.h src\detect\cpu.h sr
 src\detect\bus.obj: src\detect\bus.c src\detect\detect.h src\detect\cpu.h src\detect\env.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\bus.c
 
-src\detect\video.obj: src\detect\video.c src\detect\detect.h src\cerberus.h
+src\detect\video.obj: src\detect\video.c src\detect\detect.h src\detect\env.h src\detect\video_db.h src\core\display.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\video.c
+
+src\detect\video_db.obj: src\detect\video_db.c src\detect\video_db.h
+	$(CC) $(CFLAGS) -fo=$^@ src\detect\video_db.c
+
+regen-video-db: .SYMBOLIC
+	python hw_db\build_video_db.py
 
 src\detect\audio.obj: src\detect\audio.c src\detect\detect.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\audio.c
