@@ -26,6 +26,7 @@
 #include "cpu.h"
 #include "env.h"
 #include "cpu_db.h"
+#include "unknown.h"
 #include "../core/report.h"
 
 /* --- NASM probes -------------------------------------------------- */
@@ -193,11 +194,26 @@ void detect_cpu(result_table_t *t, const opts_t *o)
                            env_clamp(CONF_MEDIUM), VERDICT_UNKNOWN);
         }
     } else {
+        static char unk_detail[80];
         report_add_str(t, "cpu.detected",
                        class == CPU_CLASS_CPUID ? vendor_string : "unknown",
                        env_clamp(CONF_MEDIUM), VERDICT_UNKNOWN);
-        /* Unknown hardware — Task 1.11 submission path gets wired when it
-         * lands. For now just emit a MEDIUM-confidence placeholder. */
+        if (class == CPU_CLASS_CPUID) {
+            sprintf(unk_detail, "vendor=%s fms=%u.%u.%u features_edx=%08lx",
+                    vendor_string,
+                    (unsigned)((leaf1_regs.eax >> 8) & 0x0F),
+                    (unsigned)((leaf1_regs.eax >> 4) & 0x0F),
+                    (unsigned)(leaf1_regs.eax & 0x0F),
+                    leaf1_regs.edx);
+            unknown_record("cpu",
+                           "CPUID-capable CPU not in DB — please submit",
+                           unk_detail);
+        } else if (class != CPU_CLASS_UNKNOWN) {
+            sprintf(unk_detail, "legacy_class=%s", legacy_token(class));
+            unknown_record("cpu",
+                           "Legacy CPU class lookup missed",
+                           unk_detail);
+        }
     }
 
     {

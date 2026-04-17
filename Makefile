@@ -31,7 +31,7 @@ OBJS = src\main.obj                                                  &
        src\core\consist.obj   src\core\thermal.obj                   &
        src\core\crumb.obj                                            &
        src\detect\detect_all.obj                                     &
-       src\detect\env.obj                                            &
+       src\detect\env.obj     src\detect\unknown.obj                 &
        src\detect\cpu.obj     src\detect\cpu_a.obj                   &
        src\detect\cpu_db.obj                                         &
        src\detect\fpu.obj     src\detect\fpu_a.obj                   &
@@ -50,7 +50,7 @@ $(TARGET): $(OBJS)
 	$(LD) system dos name $(TARGET) option map=$(MAPFILE) option stack=$(STACK) file { $(OBJS) }
 
 # Explicit per-file rules (wmake inference rules across subdirs are fragile)
-src\main.obj: src\main.c src\cerberus.h
+src\main.obj: src\main.c src\cerberus.h src\detect\unknown.h
 	$(CC) $(CFLAGS) -fo=$^@ src\main.c
 
 src\core\timing.obj: src\core\timing.c src\core\timing.h src\cerberus.h
@@ -80,7 +80,10 @@ src\detect\detect_all.obj: src\detect\detect_all.c src\detect\detect.h src\cerbe
 src\detect\env.obj: src\detect\env.c src\detect\env.h src\detect\detect.h src\core\timing.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\env.c
 
-src\detect\cpu.obj: src\detect\cpu.c src\detect\detect.h src\detect\env.h src\core\report.h src\cerberus.h
+src\detect\unknown.obj: src\detect\unknown.c src\detect\unknown.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\detect\unknown.c
+
+src\detect\cpu.obj: src\detect\cpu.c src\detect\detect.h src\detect\cpu.h src\detect\env.h src\detect\unknown.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\cpu.c
 
 src\detect\cpu_a.obj: src\detect\cpu_a.asm

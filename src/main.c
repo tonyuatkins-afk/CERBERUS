@@ -6,6 +6,7 @@
 #include "core/report.h"
 #include "core/crumb.h"
 #include "detect/detect.h"
+#include "detect/unknown.h"
 #include "diag/diag.h"
 #include "bench/bench.h"
 #include "upload/upload.h"
@@ -104,6 +105,7 @@ int main(int argc, char *argv[])
     if (parse_rc == -1) return EXIT_USAGE;
 
     crumb_init();
+    unknown_init();
     display_init();
     crumb_check_previous();
     display_banner();
@@ -119,6 +121,7 @@ int main(int argc, char *argv[])
         if (upload_rc != UPLOAD_OK) exit_code = EXIT_UPLOAD_FAIL;
     }
 
+    unknown_finalize();
     display_shutdown();
     return exit_code;
 }
