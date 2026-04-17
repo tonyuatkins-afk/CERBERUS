@@ -1,29 +1,217 @@
+/*
+ * CERBERUS display abstraction
+ *
+ * Text-mode detection and primitives covering MDA, CGA, Hercules, EGA, and
+ * VGA. Detection is layered from newest to oldest:
+ *
+ *   1. INT 10h AH=1Ah — VGA/MCGA self-report (returns AL=1Ah on success)
+ *   2. INT 10h AH=12h BL=10h — EGA info (BL changes if EGA+)
+ *   3. BDA equipment flag at 0040:0010h bits 4-5 — CGA/MDA fallback
+ *   4. 3BAh status-register toggle — Hercules distinguished from MDA
+ *
+ * Output uses BIOS INT 10h AH=0Eh (teletype) for the portable path. Direct
+ * VRAM fast paths are deferred to the UI work in Task 1.9 when they become
+ * load-bearing for redraw latency.
+ */
+
 #include <stdio.h>
+#include <conio.h>
+#include <dos.h>
+#include <i86.h>
 #include "display.h"
 #include "../cerberus.h"
 
-static adapter_t current_adapter = ADAPTER_UNKNOWN;
+static adapter_t     current_adapter = ADAPTER_UNKNOWN;
+static unsigned char current_attr    = ATTR_NORMAL;
 
-void display_init(void)
+/* ----------------------------------------------------------------------- */
+/* Adapter detection                                                        */
+/* ----------------------------------------------------------------------- */
+
+static int probe_vga(adapter_t *out)
 {
-    /* Phase 0 stub — full adapter detection in Task 0.3 */
-    current_adapter = ADAPTER_UNKNOWN;
+    union REGS r;
+    r.h.ah = 0x1A;
+    r.h.al = 0x00;
+    r.x.bx = 0;
+    int86(0x10, &r, &r);
+    if (r.h.al != 0x1A) return 0;
+    /* BL: 01=MDA, 02=CGA, 04=EGA color, 05=EGA mono,
+     *     07=VGA mono, 08=VGA color, 0A=MCGA color, 0B=MCGA mono, 0C=MCGA color */
+    switch (r.h.bl) {
+        case 0x07: *out = ADAPTER_VGA_MONO;  return 1;
+        case 0x08: *out = ADAPTER_VGA_COLOR; return 1;
+        case 0x0A:
+        case 0x0C: *out = ADAPTER_MCGA;      return 1;
+        default:
+            /* AH=1A succeeded but BL is an older class — treat as VGA color */
+            *out = ADAPTER_VGA_COLOR;
+            return 1;
+    }
 }
 
-void display_shutdown(void)
+static int probe_ega(adapter_t *out)
 {
+    union REGS r;
+    r.h.ah = 0x12;
+    r.h.bl = 0x10;  /* get EGA info */
+    r.h.bh = 0xFF;  /* sentinel */
+    r.h.cl = 0xFF;
+    int86(0x10, &r, &r);
+    if (r.h.bl == 0x10) return 0;  /* BL unchanged => not EGA */
+    /* BH: 00 = color (5150/5153), 01 = mono (5151) */
+    *out = (r.h.bh == 0x01) ? ADAPTER_EGA_MONO : ADAPTER_EGA_COLOR;
+    return 1;
 }
 
-void display_banner(void)
+static int probe_hercules(void)
 {
-    puts("CERBERUS " CERBERUS_VERSION " - Retro PC System Intelligence");
-    puts("(c) 2026 Tony Atkins / Barely Booting - MIT License");
-    puts("");
+    /* MDA/HGC status register at 3BAh:
+     *   bit 7 = vertical sync (HGC only — MDA holds this fixed)
+     * Poll for transitions. If bit 7 ever toggles, it's HGC.
+     */
+    unsigned int  i;
+    unsigned char first = (unsigned char)(inp(0x3BA) & 0x80);
+    for (i = 0; i < 32000U; i++) {
+        if ((unsigned char)(inp(0x3BA) & 0x80) != first) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
-adapter_t display_adapter(void)
+static adapter_t probe_bda_cga_mda(void)
 {
-    return current_adapter;
+    /* BDA 0040:0010h equipment flag, bits 5:4:
+     *   00 = EGA/VGA (shouldn't reach here — caught above)
+     *   01 = 40x25 CGA
+     *   10 = 80x25 CGA
+     *   11 = 80x25 MDA
+     */
+    unsigned char __far *bda_equipment = (unsigned char __far *)MK_FP(0x0040, 0x0010);
+    unsigned char eq = *bda_equipment;
+    unsigned char mode_bits = (unsigned char)((eq >> 4) & 0x03);
+    switch (mode_bits) {
+        case 0x01:
+        case 0x02:
+            return ADAPTER_CGA;
+        case 0x03:
+            return probe_hercules() ? ADAPTER_HERCULES : ADAPTER_MDA;
+        default:
+            return ADAPTER_UNKNOWN;
+    }
+}
+
+static adapter_t detect_adapter(void)
+{
+    adapter_t a;
+    if (probe_vga(&a)) return a;
+    if (probe_ega(&a)) return a;
+    return probe_bda_cga_mda();
+}
+
+/* ----------------------------------------------------------------------- */
+/* Primitives                                                               */
+/* ----------------------------------------------------------------------- */
+
+void display_putc(char c)
+{
+    union REGS r;
+    r.h.ah = 0x0E;
+    r.h.al = (unsigned char)c;
+    r.h.bh = 0;              /* page 0 */
+    r.h.bl = current_attr;   /* foreground in graphics modes; ignored in text */
+    int86(0x10, &r, &r);
+}
+
+void display_puts(const char *s)
+{
+    while (*s) display_putc(*s++);
+}
+
+void display_goto(int row, int col)
+{
+    union REGS r;
+    r.h.ah = 0x02;
+    r.h.bh = 0;
+    r.h.dh = (unsigned char)row;
+    r.h.dl = (unsigned char)col;
+    int86(0x10, &r, &r);
+}
+
+void display_set_attr(unsigned char attr)
+{
+    current_attr = attr;
+}
+
+void display_wait_retrace(void)
+{
+    /* Only meaningful on CGA — MDA/EGA/VGA already synchronize via BIOS.
+     * On CGA, poll port 3DAh bit 0: 1 = in retrace, 0 = display active. */
+    if (current_adapter != ADAPTER_CGA) return;
+    /* Wait for any in-progress retrace to finish, then wait for next one */
+    while (inp(0x3DA) & 0x01) { /* in retrace */ }
+    while (!(inp(0x3DA) & 0x01)) { /* display active */ }
+}
+
+/* ----------------------------------------------------------------------- */
+/* Box drawing                                                              */
+/* ----------------------------------------------------------------------- */
+
+static void box_impl(int row, int col, int w, int h,
+                     unsigned char hc, unsigned char vc,
+                     unsigned char tl, unsigned char tr,
+                     unsigned char bl, unsigned char br)
+{
+    int i;
+    if (w < 2 || h < 2) return;
+    display_goto(row, col);
+    display_putc((char)tl);
+    for (i = 0; i < w - 2; i++) display_putc((char)hc);
+    display_putc((char)tr);
+    for (i = 1; i < h - 1; i++) {
+        display_goto(row + i, col);
+        display_putc((char)vc);
+        display_goto(row + i, col + w - 1);
+        display_putc((char)vc);
+    }
+    display_goto(row + h - 1, col);
+    display_putc((char)bl);
+    for (i = 0; i < w - 2; i++) display_putc((char)hc);
+    display_putc((char)br);
+}
+
+void display_box(int row, int col, int w, int h)
+{
+    box_impl(row, col, w, h,
+             CP437_HORIZ, CP437_VERT,
+             CP437_TL, CP437_TR, CP437_BL, CP437_BR);
+}
+
+void display_box_double(int row, int col, int w, int h)
+{
+    box_impl(row, col, w, h,
+             CP437_DBL_HORIZ, CP437_DBL_VERT,
+             CP437_DBL_TL, CP437_DBL_TR, CP437_DBL_BL, CP437_DBL_BR);
+}
+
+/* ----------------------------------------------------------------------- */
+/* Lifecycle + banner                                                       */
+/* ----------------------------------------------------------------------- */
+
+const char *display_adapter_name(adapter_t a)
+{
+    switch (a) {
+        case ADAPTER_MDA:       return "MDA";
+        case ADAPTER_CGA:       return "CGA";
+        case ADAPTER_HERCULES:  return "Hercules";
+        case ADAPTER_EGA_MONO:  return "EGA (mono)";
+        case ADAPTER_EGA_COLOR: return "EGA";
+        case ADAPTER_VGA_MONO:  return "VGA (mono)";
+        case ADAPTER_VGA_COLOR: return "VGA";
+        case ADAPTER_MCGA:      return "MCGA";
+        default:                return "unknown";
+    }
 }
 
 int display_has_color(void)
@@ -37,4 +225,31 @@ int display_has_color(void)
         default:
             return 0;
     }
+}
+
+adapter_t display_adapter(void)
+{
+    return current_adapter;
+}
+
+void display_init(void)
+{
+    current_adapter = detect_adapter();
+    current_attr = ATTR_NORMAL;
+}
+
+void display_shutdown(void)
+{
+    /* Reset attribute so we don't leave the terminal colored after exit */
+    current_attr = ATTR_NORMAL;
+}
+
+void display_banner(void)
+{
+    printf("CERBERUS %s - Retro PC System Intelligence\n", CERBERUS_VERSION);
+    printf("(c) 2026 Tony Atkins / Barely Booting - MIT License\n");
+    printf("Display: %s%s\n",
+           display_adapter_name(current_adapter),
+           display_has_color() ? " (color)" : " (mono)");
+    printf("\n");
 }
