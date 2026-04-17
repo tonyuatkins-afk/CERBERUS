@@ -120,8 +120,12 @@ static void bench_read(result_table_t *t)
                    CONF_HIGH, VERDICT_UNKNOWN);
 }
 
-void bench_memory(result_table_t *t)
+void bench_memory(result_table_t *t, const opts_t *o)
 {
+    /* Calibrated mode for memory bench lands as a follow-up — pattern
+     * is the same as bench_cpu's N-pass loop with per-metric median
+     * computation. Quick mode is used regardless of opts.mode for now. */
+    (void)o;
     bench_write(t);
     bench_copy(t);
     bench_read(t);

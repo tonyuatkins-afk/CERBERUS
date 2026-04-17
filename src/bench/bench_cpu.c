@@ -1,25 +1,24 @@
 /*
- * CPU integer benchmark — Phase 3 Task 3.1.
+ * CPU integer benchmark — Phase 3 Task 3.1 + 3.5.
  *
- * Quick-mode Dhrystone-adjacent integer-op mix. Not claiming Dhrystone
- * equivalence — that would require matching the canonical instruction
- * mix which is reverse-engineered folklore. Instead we pick a
- * deterministic mix, time it with PIT Channel 2, and report the
- * iteration rate honestly as what-CERBERUS-measured, not "MIPS."
+ * Quick mode (opts.mode == MODE_QUICK): run the inner loop once, emit
+ * iters_per_sec + us_per_iter.
  *
- * Per-iteration instruction mix:
- *   ADD, SUB, AND, OR, XOR, compare + conditional increment
+ * Calibrated mode (opts.mode == MODE_CALIBRATED, runs up to MAX_PASSES):
+ * run the inner loop N times, capture each pass's elapsed_us into a
+ * static array, emit per-pass values plus min/max/median/range. This
+ * per-pass series is what Phase 4's thermal stability module consumes.
  *
- * The `volatile` qualifiers on the working variables force Watcom to
- * keep each operation in the emitted code path — otherwise the
- * optimizer would hoist the entire loop body to a constant at
- * compile time, defeating the measurement.
+ * Not claiming Dhrystone equivalence — the canonical instruction mix is
+ * reverse-engineered folklore. We report what CERBERUS measured
+ * honestly; the Phase 4 consistency engine will compare against
+ * cpu_db's class_ipc ranges when those land.
  *
- * Iteration count auto-scales in calibrated mode but quick mode uses
- * a fixed 100K. On an 8088 at 4.77 MHz that's ~3 seconds (slow but
- * acceptable feedback); on a 486DX-33 it's ~15 ms; on a Pentium ~3 ms.
- * The 3 ms lower bound gives at least 3500 PIT ticks of resolution
- * (1.19 MHz * 3 ms = 3576 ticks) — plenty of precision.
+ * Per-iteration instruction mix (6 observable ops):
+ *   ADD with variable b, SUB with loop index, AND, OR, XOR, CMP + conditional INC.
+ * The `volatile` qualifiers force Watcom to emit each operation
+ * individually rather than hoisting the loop body to a compile-time
+ * constant.
  */
 
 #include <stdio.h>
@@ -28,11 +27,13 @@
 #include "../core/timing.h"
 #include "../core/report.h"
 
-#define BENCH_ITERS 100000L
+#define BENCH_ITERS   100000L
+#define MAX_PASSES    16      /* hard cap on calibrated runs */
+
+static us_t pass_results[MAX_PASSES];
 
 static unsigned long run_int_loop(unsigned long iters)
 {
-    /* volatile keeps the optimizer from constant-folding the loop */
     volatile unsigned int a = 0x1234;
     volatile unsigned int b = 0x5678;
     volatile unsigned int c;
@@ -40,35 +41,38 @@ static unsigned long run_int_loop(unsigned long iters)
     unsigned long i;
 
     for (i = 0; i < iters; i++) {
-        c = (unsigned int)(a + b);           /* ADD */
-        c = (unsigned int)(c - (unsigned int)i); /* SUB with loop var */
-        c = c & 0xFEDC;                      /* AND */
-        c = c | 0x0123;                      /* OR */
-        c = c ^ 0xA5A5;                      /* XOR */
-        if (c == 0) hits++;                  /* CMP + conditional INC */
+        c = (unsigned int)(a + b);
+        c = (unsigned int)(c - (unsigned int)i);
+        c = c & 0xFEDC;
+        c = c | 0x0123;
+        c = c ^ 0xA5A5;
+        if (c == 0) hits++;
     }
-    return hits;  /* returned so the compiler can't dead-code */
+    return hits;
 }
 
-void bench_cpu(result_table_t *t)
+/* Insertion sort on a small array of us_t. N up to MAX_PASSES = 16,
+ * so O(n²) is fine. */
+static void sort_us(us_t *arr, int n)
 {
-    us_t elapsed;
-    unsigned long iters_per_sec = 0;
-    unsigned long us_x1000_per_iter;
-    char buf[32];
-
-    timing_start();
-    (void)run_int_loop(BENCH_ITERS);
-    elapsed = timing_stop();
-
-    if (elapsed == 0) {
-        /* Pathological — measurement came back at zero. Report without
-         * a rate so the consistency engine can flag it. */
-        report_add_str(t, "bench.cpu.int_ops",
-                       "inconclusive (elapsed=0)",
-                       CONF_LOW, VERDICT_WARN);
-        return;
+    int i, j;
+    us_t tmp;
+    for (i = 1; i < n; i++) {
+        tmp = arr[i];
+        j = i - 1;
+        while (j >= 0 && arr[j] > tmp) {
+            arr[j + 1] = arr[j];
+            j--;
+        }
+        arr[j + 1] = tmp;
     }
+}
+
+static void emit_single_pass(result_table_t *t, us_t elapsed)
+{
+    unsigned long us_x1000_per_iter;
+    unsigned long iters_per_sec;
+    char buf[32];
 
     sprintf(buf, "%lu", (unsigned long)elapsed);
     report_add_u32(t, "bench.cpu.int_elapsed_us",
@@ -80,13 +84,6 @@ void bench_cpu(result_table_t *t)
                    BENCH_ITERS, buf,
                    CONF_HIGH, VERDICT_UNKNOWN);
 
-    /* iters_per_sec math designed to not overflow 32-bit unsigned long:
-     *   elapsed is microseconds (up to ~4e9 = 71 minutes max).
-     *   iters * 1000 fits in 32-bit for iters up to 4.29M.
-     *   (iters * 1000) / (elapsed_us / 1000) = iters * 10^6 / elapsed
-     *
-     * Guard against elapsed < 1000 (sub-millisecond) by computing
-     * us-per-iter-x1000 and deriving rate from that. */
     us_x1000_per_iter = ((unsigned long)elapsed * 1000UL) / BENCH_ITERS;
     if (us_x1000_per_iter > 0) {
         iters_per_sec = 1000000000UL / us_x1000_per_iter;
@@ -96,10 +93,107 @@ void bench_cpu(result_table_t *t)
                        CONF_HIGH, VERDICT_UNKNOWN);
     }
 
-    /* Per-iteration time, three decimals */
     sprintf(buf, "%lu.%03lu",
             us_x1000_per_iter / 1000UL,
             us_x1000_per_iter % 1000UL);
     report_add_str(t, "bench.cpu.int_us_per_iter", buf,
                    CONF_HIGH, VERDICT_UNKNOWN);
+}
+
+static void emit_calibrated(result_table_t *t, int runs)
+{
+    us_t sorted[MAX_PASSES];
+    us_t median, lo, hi;
+    unsigned long range_pct_x10;
+    int i;
+    char buf[32];
+    char key[40];
+
+    /* Emit per-pass values first — this is what Phase 4 thermal
+     * walks for monotonic drift detection. */
+    for (i = 0; i < runs; i++) {
+        sprintf(key, "bench.cpu.int_pass_%d_us", i);
+        sprintf(buf, "%lu", (unsigned long)pass_results[i]);
+        report_add_u32(t, key, (unsigned long)pass_results[i], buf,
+                       CONF_HIGH, VERDICT_UNKNOWN);
+        sorted[i] = pass_results[i];
+    }
+
+    sort_us(sorted, runs);
+    lo     = sorted[0];
+    hi     = sorted[runs - 1];
+    median = sorted[runs / 2];
+
+    sprintf(buf, "%lu", (unsigned long)lo);
+    report_add_u32(t, "bench.cpu.int_min_us", (unsigned long)lo, buf,
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    sprintf(buf, "%lu", (unsigned long)hi);
+    report_add_u32(t, "bench.cpu.int_max_us", (unsigned long)hi, buf,
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    sprintf(buf, "%lu", (unsigned long)median);
+    report_add_u32(t, "bench.cpu.int_median_us", (unsigned long)median, buf,
+                   CONF_HIGH, VERDICT_UNKNOWN);
+
+    /* range_pct_x10 = (hi - lo) * 1000 / median — gives one decimal place
+     * of percent range with no floating point. Cheap substitute for CoV
+     * until Phase 4's Mann-Kendall needs real stats. */
+    if (median > 0) {
+        range_pct_x10 = ((unsigned long)(hi - lo) * 1000UL) / (unsigned long)median;
+        sprintf(buf, "%lu.%lu",
+                range_pct_x10 / 10UL, range_pct_x10 % 10UL);
+        report_add_str(t, "bench.cpu.int_range_pct", buf,
+                       CONF_HIGH, VERDICT_UNKNOWN);
+    }
+
+    /* Summary iters_per_sec derived from median for the canonical-
+     * signature compatibility with quick mode. */
+    {
+        unsigned long us_x1000_per_iter =
+            ((unsigned long)median * 1000UL) / BENCH_ITERS;
+        if (us_x1000_per_iter > 0) {
+            unsigned long iters_per_sec = 1000000000UL / us_x1000_per_iter;
+            sprintf(buf, "%lu", iters_per_sec);
+            report_add_u32(t, "bench.cpu.int_iters_per_sec",
+                           iters_per_sec, buf,
+                           CONF_HIGH, VERDICT_UNKNOWN);
+        }
+    }
+}
+
+void bench_cpu(result_table_t *t, const opts_t *o)
+{
+    int runs;
+    int i;
+
+    /* Always run at least one pass */
+    if (o->mode == MODE_CALIBRATED && o->runs > 1) {
+        runs = (int)o->runs;
+        if (runs > MAX_PASSES) runs = MAX_PASSES;
+    } else {
+        runs = 1;
+    }
+
+    for (i = 0; i < runs; i++) {
+        timing_start();
+        (void)run_int_loop(BENCH_ITERS);
+        pass_results[i] = timing_stop();
+
+        if (pass_results[i] == 0) {
+            /* One inconclusive pass in calibrated mode — note it, keep
+             * going. A single-pass quick run that comes back zero is
+             * harder to call; degrade to warn. */
+            if (runs == 1) {
+                report_add_str(t, "bench.cpu.int_ops",
+                               "inconclusive (elapsed=0)",
+                               CONF_LOW, VERDICT_WARN);
+                return;
+            }
+        }
+    }
+
+    if (runs == 1) {
+        emit_single_pass(t, pass_results[0]);
+    } else {
+        emit_calibrated(t, runs);
+    }
 }

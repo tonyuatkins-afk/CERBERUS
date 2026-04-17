@@ -5,11 +5,13 @@
 
 void bench_all(result_table_t *t, const opts_t *o);
 
-/* Per-subsystem benchmark entry points. Each times a fixed workload
- * via the timing module and reports iters/sec + us/iter into the
- * [bench.<subsys>] INI section. */
-void bench_cpu(result_table_t *t);
-void bench_memory(result_table_t *t);
-void bench_fpu(result_table_t *t);
+/* Per-subsystem benchmark entry points. Each reads opts->mode to
+ * decide between quick (one pass) and calibrated (opts->runs passes,
+ * with per-pass values + min/max/median emitted for Phase 4 thermal
+ * tracking to consume). Results go into the [bench.<subsys>] INI
+ * section. */
+void bench_cpu(result_table_t *t, const opts_t *o);
+void bench_memory(result_table_t *t, const opts_t *o);
+void bench_fpu(result_table_t *t, const opts_t *o);
 
 #endif

@@ -51,8 +51,10 @@ static double run_fpu_loop(unsigned long iters)
     return acc;
 }
 
-void bench_fpu(result_table_t *t)
+void bench_fpu(result_table_t *t, const opts_t *o)
 {
+    /* Calibrated FPU bench lands as follow-up — pattern is shared with
+     * bench_cpu's N-pass loop. */
     const result_t *fpu_entry;
     const char *fpu_val;
     us_t elapsed;
@@ -61,6 +63,7 @@ void bench_fpu(result_table_t *t)
     unsigned long us_x1000_per_op;
     char buf[32];
 
+    (void)o;
     fpu_entry = find_key(t, "fpu.detected");
     if (!fpu_entry) return;
     fpu_val = fpu_entry->display ? fpu_entry->display :
