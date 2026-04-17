@@ -53,3 +53,31 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Watcom toolchain
+*.err
+*.lst
+*.sym
+*.mbr
+*.lnk
+*.tgt
+*.wpj
+*.wpk
+
+# DOSBox-X / emulator artifacts
+dosbox*.conf
+*.img
+capture/
+
+# Windows dev host
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# CERBERUS runtime output (commit samples under samples/ instead)
+CERBERUS.INI
