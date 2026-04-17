@@ -8,7 +8,7 @@
 
 CC  = wcc
 LD  = wlink
-ASM = nasm
+ASM = "C:\Program Files\NASM\nasm.exe"
 
 # OpenWatcom flags:
 #   -0          8088/8086 instructions only (maximum compatibility)
@@ -18,7 +18,8 @@ ASM = nasm
 #   -w3         warning level 3 (bump to -wx after code is known clean)
 #   -zq         quiet
 #   -bt=dos     target DOS
-CFLAGS = -0 -fpi -mm -ox -w3 -zq -bt=dos -i=src
+CFLAGS  = -0 -fpi -mm -ox -w3 -zq -bt=dos -i=src
+ASFLAGS = -f obj
 
 TARGET  = CERBERUS.EXE
 MAPFILE = cerberus.map
@@ -30,7 +31,8 @@ OBJS = src\main.obj                                                  &
        src\core\consist.obj   src\core\thermal.obj                   &
        src\core\crumb.obj                                            &
        src\detect\detect_all.obj                                     &
-       src\detect\env.obj     src\detect\cpu.obj                     &
+       src\detect\env.obj                                            &
+       src\detect\cpu.obj     src\detect\cpu_a.obj                   &
        src\detect\fpu.obj     src\detect\mem.obj                     &
        src\detect\cache.obj   src\detect\bus.obj                     &
        src\detect\video.obj   src\detect\audio.obj                   &
@@ -74,8 +76,11 @@ src\detect\detect_all.obj: src\detect\detect_all.c src\detect\detect.h src\cerbe
 src\detect\env.obj: src\detect\env.c src\detect\env.h src\detect\detect.h src\core\timing.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\env.c
 
-src\detect\cpu.obj: src\detect\cpu.c src\detect\detect.h src\cerberus.h
+src\detect\cpu.obj: src\detect\cpu.c src\detect\detect.h src\detect\env.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\cpu.c
+
+src\detect\cpu_a.obj: src\detect\cpu_a.asm
+	$(ASM) $(ASFLAGS) -o src\detect\cpu_a.obj src\detect\cpu_a.asm
 
 src\detect\fpu.obj: src\detect\fpu.c src\detect\detect.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\fpu.c
