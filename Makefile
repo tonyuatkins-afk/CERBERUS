@@ -110,7 +110,7 @@ src\detect\mem.obj: src\detect\mem.c src\detect\detect.h src\detect\cpu.h src\de
 src\detect\cache.obj: src\detect\cache.c src\detect\detect.h src\detect\cpu.h src\detect\env.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\cache.c
 
-src\detect\bus.obj: src\detect\bus.c src\detect\detect.h src\cerberus.h
+src\detect\bus.obj: src\detect\bus.c src\detect\detect.h src\detect\cpu.h src\detect\env.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\bus.c
 
 src\detect\video.obj: src\detect\video.c src\detect\detect.h src\cerberus.h
