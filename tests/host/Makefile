@@ -1,0 +1,24 @@
+# Host-side unit tests — runs on Windows dev box (Watcom-built Win32 console).
+# Compiles portable CERBERUS modules with -DCERBERUS_HOST_TEST so the
+# hardware-specific code is excluded, then exercises the pure-math paths.
+#
+# Prerequisites: OpenWatcom installed, WATCOM env set, binnt on PATH.
+# Invoke via wmake (NOT gmake). The repo Makefile has a `test` target
+# that delegates here.
+
+CC       = wcl386
+CFLAGS   = -zq -bt=nt -w3 -DCERBERUS_HOST_TEST -I..\..\src
+
+TESTS = test_timing.exe
+
+all: $(TESTS) .SYMBOLIC
+
+test_timing.exe: test_timing.c ..\..\src\core\timing.c ..\..\src\core\timing.h
+	$(CC) $(CFLAGS) -fe=$@ test_timing.c
+
+run: $(TESTS) .SYMBOLIC
+	@test_timing.exe
+
+clean: .SYMBOLIC
+	-del *.exe
+	-del *.obj
