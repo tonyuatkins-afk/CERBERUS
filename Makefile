@@ -104,7 +104,7 @@ src\detect\fpu_db.obj: src\detect\fpu_db.c src\detect\fpu_db.h
 regen-fpu-db: .SYMBOLIC
 	python hw_db\build_fpu_db.py
 
-src\detect\mem.obj: src\detect\mem.c src\detect\detect.h src\cerberus.h
+src\detect\mem.obj: src\detect\mem.c src\detect\detect.h src\detect\cpu.h src\detect\env.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\mem.c
 
 src\detect\cache.obj: src\detect\cache.c src\detect\detect.h src\cerberus.h
