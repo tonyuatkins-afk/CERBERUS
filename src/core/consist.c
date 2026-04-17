@@ -186,19 +186,101 @@ static void rule_extmem_implies_286(result_table_t *t)
 }
 
 /* ----------------------------------------------------------------------- */
+/* Rule 3: cpu.detected contains "386SX" → bus.class must not be "isa8".
+ *
+ * 386SX has a 16-bit external data bus despite being a 32-bit CPU
+ * internally. Every system shipped with a 386SX used ISA 16-bit or
+ * better; a 386SX on an ISA-8 (XT-class) bus is electrically
+ * impossible.
+ *
+ * Detects: detection disagreement where the bus probe misclassified
+ *          a 386SX system as XT-class ISA-8.
+ * Does NOT detect: any 386SX variant (SL/CX/EX) specifics — the
+ *          current cpu_db lacks per-variant SX/DX entries on the
+ *          legacy CPUID-absent path. This rule activates only when
+ *          the DB gains "386SX" friendly names, which is a follow-up.
+ *          Until then it is correctly no-op.                             */
+/* ----------------------------------------------------------------------- */
+
+static void rule_386sx_implies_isa16(result_table_t *t)
+{
+    const result_t *cpu = find_key(t, "cpu.detected");
+    const result_t *bus = find_key(t, "bus.class");
+    const char *cv = key_value(cpu);
+    const char *bv = key_value(bus);
+
+    if (!cv || !bv) return;
+    if (strstr(cv, "386SX") == (char *)0) return;  /* dormant today */
+
+    if (strcmp(bv, "isa8") == 0) {
+        report_add_str(t, "consistency.386sx_bus",
+                       "FAIL: 386SX CPU reported but bus is ISA-8 (impossible)",
+                       CONF_HIGH, VERDICT_FAIL);
+    } else {
+        report_add_str(t, "consistency.386sx_bus",
+                       "pass (386SX bus is ISA-16 or better)",
+                       CONF_HIGH, VERDICT_PASS);
+    }
+}
+
+/* ----------------------------------------------------------------------- */
+/* Rule 9: 8086-class CPU must be on an ISA-8 bus.
+ *
+ * 8086/8088/V20/V30 systems all shipped with ISA 8-bit. A VLB or PCI
+ * bus on an 8086-class machine is physically impossible. Catches
+ * detection bugs where a misidentified chipset's probe confuses bus
+ * detection for floor-target machines.
+ *
+ * Fires today on current detect output — cpu_db legacy tokens
+ * "8086/8088/v20/v30" are populated whenever the EFLAGS probe
+ * determines the CPU is pre-286.                                          */
+/* ----------------------------------------------------------------------- */
+
+static void rule_8086_implies_isa8(result_table_t *t)
+{
+    const result_t *cls = find_key(t, "cpu.class");
+    const result_t *bus = find_key(t, "bus.class");
+    const char *cv = key_value(cls);
+    const char *bv = key_value(bus);
+
+    if (!cv || !bv) return;
+    if (!(strcmp(cv, "8086") == 0 || strcmp(cv, "8088") == 0 ||
+          strcmp(cv, "v20")  == 0 || strcmp(cv, "v30")  == 0)) return;
+
+    if (strcmp(bv, "isa8") == 0) {
+        report_add_str(t, "consistency.8086_bus",
+                       "pass (8086-class CPU with ISA-8 bus, as expected)",
+                       CONF_HIGH, VERDICT_PASS);
+    } else if (strcmp(bv, "unknown") == 0) {
+        /* Unknown bus on an 8086-class CPU is suspicious but not
+         * definitely wrong — might just be a probe miss. WARN, not
+         * FAIL. */
+        report_add_str(t, "consistency.8086_bus",
+                       "WARN: 8086-class CPU but bus class unknown",
+                       CONF_HIGH, VERDICT_WARN);
+    } else {
+        char msg[96];
+        sprintf(msg, "FAIL: 8086-class CPU (%s) cannot be on a %s bus", cv, bv);
+        report_add_str(t, "consistency.8086_bus", msg,
+                       CONF_HIGH, VERDICT_FAIL);
+    }
+}
+
+/* ----------------------------------------------------------------------- */
 
 void consist_check(result_table_t *t)
 {
     rule_486dx_implies_integrated_fpu(t);
     rule_486sx_no_integrated_fpu(t);
+    rule_386sx_implies_isa16(t);
     rule_fpu_diag_bench_agreement(t);
     rule_extmem_implies_286(t);
+    rule_8086_implies_isa8(t);
     /*
      * Rules landing as downstream phases complete:
      *
-     *   rule_386sx_bus_width              — needs bus.width in cpu_db
      *   rule_cpu_clock_independent_check  — needs BIOS-tick-based clock
-     *                                        measurement (Task 4.2)
+     *                                        measurement (Task 4.4)
      *   rule_mips_in_class_ipc_range      — needs class_ipc values in
      *                                        cpu_db, needs bench mode
      *   rule_cache_stride_vs_cpuid_leaf2  — needs cache bench (Task 3.3)

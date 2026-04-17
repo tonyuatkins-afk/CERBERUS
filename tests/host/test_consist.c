@@ -109,6 +109,62 @@ int main(void)
     CHECK(v_of(k(&t, "consistency.fpu_diag_bench")) == VERDICT_WARN,
           "Scenario I: diag pass but bench=0 → rule 5 WARN");
 
+    /* Scenario J: 386SX on ISA-8 → rule 3 FAIL */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.detected", "Intel i386SX-16", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bus.class",    "isa8",            CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.386sx_bus")) == VERDICT_FAIL,
+          "Scenario J: 386SX + isa8 → rule 3 FAIL");
+
+    /* Scenario K: 386SX on ISA-16 → rule 3 PASS */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.detected", "Intel i386SX", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bus.class",    "isa16",        CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.386sx_bus")) == VERDICT_PASS,
+          "Scenario K: 386SX + isa16 → rule 3 PASS");
+
+    /* Scenario L: 386DX on ISA-8 → rule 3 not applicable (no 386SX match) */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.detected", "Intel i386DX", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bus.class",    "isa8",        CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.386sx_bus") == NULL,
+          "Scenario L: 386DX + isa8 → rule 3 no-op");
+
+    /* Scenario M: 8088 on ISA-8 → rule 9 PASS */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class",  "8088", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bus.class",  "isa8", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.8086_bus")) == VERDICT_PASS,
+          "Scenario M: 8088 + isa8 → rule 9 PASS");
+
+    /* Scenario N: 8086 on PCI (impossible!) → rule 9 FAIL */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class",  "8086", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bus.class",  "pci",  CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.8086_bus")) == VERDICT_FAIL,
+          "Scenario N: 8086 + pci → rule 9 FAIL");
+
+    /* Scenario O: V20 on unknown bus → rule 9 WARN (softer) */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class",  "v20",     CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bus.class",  "unknown", CONF_LOW,  VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.8086_bus")) == VERDICT_WARN,
+          "Scenario O: V20 + unknown bus → rule 9 WARN");
+
+    /* Scenario P: 486DX on PCI → rule 9 not applicable (CPU class !=8086) */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class",  "GenuineIntel", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bus.class",  "pci",          CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.8086_bus") == NULL,
+          "Scenario P: 486-class + pci → rule 9 no-op");
+
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }
