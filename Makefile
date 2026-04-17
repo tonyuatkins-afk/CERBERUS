@@ -107,7 +107,7 @@ regen-fpu-db: .SYMBOLIC
 src\detect\mem.obj: src\detect\mem.c src\detect\detect.h src\detect\cpu.h src\detect\env.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\mem.c
 
-src\detect\cache.obj: src\detect\cache.c src\detect\detect.h src\cerberus.h
+src\detect\cache.obj: src\detect\cache.c src\detect\detect.h src\detect\cpu.h src\detect\env.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\cache.c
 
 src\detect\bus.obj: src\detect\bus.c src\detect\detect.h src\cerberus.h
