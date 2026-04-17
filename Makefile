@@ -71,7 +71,7 @@ src\core\crumb.obj: src\core\crumb.c src\core\crumb.h
 src\detect\detect_all.obj: src\detect\detect_all.c src\detect\detect.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\detect_all.c
 
-src\detect\env.obj: src\detect\env.c src\detect\detect.h src\cerberus.h
+src\detect\env.obj: src\detect\env.c src\detect\env.h src\detect\detect.h src\core\timing.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\env.c
 
 src\detect\cpu.obj: src\detect\cpu.c src\detect\detect.h src\cerberus.h
