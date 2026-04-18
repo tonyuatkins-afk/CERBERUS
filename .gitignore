@@ -86,3 +86,9 @@ CERBERUS.INI
 # Source of truth is the top-level build + tests/target/. Rebuild by
 # running `wmake` and `cp CERBERUS.EXE dist/`.
 dist/
+
+# DOSBox-X smoke-test runtime artifacts (dev/ convention).
+# The smoketest.conf IS tracked; its outputs are not.
+devenv/SMOKE.INI
+devenv/SMOKE.LOG
+devenv/SMOKE.RC
