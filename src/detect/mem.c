@@ -163,12 +163,18 @@ static int probe_ems(unsigned long *out_total_pages, unsigned long *out_free_pag
      * signature is the DOS-documented way to detect a real driver. */
     if (!ems_driver_present()) return 0;
 
+    /* Sub-probe crumbs: each crumb_enter OVERWRITES the file (O_TRUNC)
+     * with the more-specific name. We deliberately do NOT call
+     * crumb_exit between sub-probes — that would delete the file and
+     * leave a diagnostic gap if a hang occurred in C code between
+     * INT calls. The outer WRAP_DETECT("mem", ...) in detect_all.c
+     * owns the paired exit that cleans up when detect_mem returns. */
+
     /* INT 2Fh AX=5300h — EMM host probe */
     crumb_enter("detect.mem.ems.host");
     r.x.ax = 0x5300;
     r.x.bx = 0;
     int86(0x2F, &r, &r);
-    crumb_exit();
     /* BX returns handle 0000h on OK; AH=80h on no EMS. The response is
      * somewhat driver-dependent; most emulators implement this. */
 
@@ -176,14 +182,12 @@ static int probe_ems(unsigned long *out_total_pages, unsigned long *out_free_pag
     crumb_enter("detect.mem.ems.status");
     r.h.ah = 0x40;
     int86(0x67, &r, &r);
-    crumb_exit();
     if (r.h.ah != 0x00) return 0;
 
     /* INT 67h AH=42h — get page counts: BX=free, DX=total */
     crumb_enter("detect.mem.ems.pages");
     r.h.ah = 0x42;
     int86(0x67, &r, &r);
-    crumb_exit();
     if (r.h.ah != 0x00) return 0;
     *out_total_pages = (unsigned long)r.x.dx;
     *out_free_pages  = (unsigned long)r.x.bx;
@@ -212,10 +216,16 @@ void detect_mem(result_table_t *t)
      * narrows to the specific INT call rather than the whole function.
      * Task 1.10 validation on the 486DX2-66 bench box hung inside
      * detect.mem and the coarse "detect.mem" crumb left us guessing
-     * which INT was the culprit. Sub-crumbs remove that ambiguity. */
+     * which INT was the culprit. Sub-crumbs remove that ambiguity.
+     *
+     * We deliberately do NOT call crumb_exit between sub-probes —
+     * that would erase the file and leave a diagnostic gap if a hang
+     * occurred in C code between the INT calls. crumb_enter uses
+     * O_TRUNC so each call just overwrites with the more-specific
+     * name. The outer WRAP_DETECT("mem", ...) in detect_all owns the
+     * paired exit that cleans up when detect_mem returns. */
     crumb_enter("detect.mem.int12");
     conv_kb = probe_conventional_kb();
-    crumb_exit();
     sprintf(mem_conv_val, "%u", conv_kb);
     report_add_u32(t, "memory.conventional_kb", (unsigned long)conv_kb,
                    mem_conv_val, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
@@ -225,7 +235,6 @@ void detect_mem(result_table_t *t)
     if (cls >= CPU_CLASS_286) {
         crumb_enter("detect.mem.ah88");
         ext_kb = probe_ah88_kb();
-        crumb_exit();
     }
 
     /* E801h is safe to attempt on 386+ — it's the Phoenix/Compaq
@@ -234,7 +243,6 @@ void detect_mem(result_table_t *t)
     if (cls >= CPU_CLASS_386) {
         crumb_enter("detect.mem.e801");
         have_e801 = probe_e801_kb(&e801_kb);
-        crumb_exit();
     }
 
     {
@@ -263,7 +271,6 @@ void detect_mem(result_table_t *t)
     /* XMS and EMS work on any CPU — gate only by BIOS response */
     crumb_enter("detect.mem.xms");
     have_xms = probe_xms(&xms_ver);
-    crumb_exit();
     report_add_str(t, "memory.xms_present", have_xms ? "yes" : "no",
                    env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
 

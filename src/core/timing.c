@@ -507,8 +507,15 @@ int timing_dual_measure(unsigned int target_bios_ticks,
                     }
                     c2_now = c2_verify;
                 } else {
-                    /* Verify inconsistent — phantom. */
-                    c2_now = c2_verify;
+                    /* Verify inconsistent (c2_verify > c2_now is physically
+                     * impossible — the counter cannot increase between reads
+                     * unless it reloaded, but we're inside the apparent-wrap
+                     * branch which already treats c2_now as post-reload).
+                     * Both reads are suspect; adopting c2_verify as the new
+                     * reference would plant a biased-high baseline that
+                     * masks the next real wrap. Reject entirely and keep
+                     * the last known-good sample. */
+                    c2_now = c2_prev;
                 }
             } else {
                 /* Mid-range jump — physically impossible. Phantom.
