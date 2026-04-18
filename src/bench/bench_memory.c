@@ -36,18 +36,13 @@
 static unsigned char mem_src[MEM_BUF_BYTES];
 static unsigned char mem_dst[MEM_BUF_BYTES];
 
-/* Display buffers per emitted key. report_add_u32 stores the display
- * pointer verbatim (report.c:61), so a stack-local buf reused across
- * both sprintfs in each bench function would leave the first key
- * (write_kbps / copy_kbps / read_kbps) pointing at whatever the second
- * sprintf wrote — silent corruption in INI + UI. Six metrics, six
- * dedicated statics — one per (operation, metric) pair. */
-static char bench_mem_write_kbps_val[24];
-static char bench_mem_write_us_val[24];
-static char bench_mem_copy_kbps_val[24];
-static char bench_mem_copy_us_val[24];
-static char bench_mem_read_kbps_val[24];
-static char bench_mem_read_us_val[24];
+/* All six emits are V_U32 — pass NULL as display and let
+ * format_result_value format from r->v.u using "%lu". Identical output,
+ * no static buffers to misallocate, no sprintf to fail. The same
+ * approach in bench_fpu.c fixed a real-iron corruption (garbage bytes
+ * in fpu.total_ops) that the R6 sweep missed — generalizing it here
+ * closes the same bug class for bench_memory's copy_kbps (observed
+ * garbage on the 486DX2-66 bench box). */
 
 /* Compute KB/s given bytes-moved and elapsed microseconds.
  * bytes_per_us * 1e6 / 1024 = bytes_per_us * 976.5625
@@ -73,12 +68,10 @@ static void bench_write(result_table_t *t)
     elapsed = timing_stop();
 
     rate = kb_per_sec((unsigned long)MEM_BUF_BYTES, elapsed);
-    sprintf(bench_mem_write_kbps_val, "%lu", rate);
-    report_add_u32(t, "bench.memory.write_kbps", rate, bench_mem_write_kbps_val,
+    report_add_u32(t, "bench.memory.write_kbps", rate, (const char *)0,
                    CONF_HIGH, VERDICT_UNKNOWN);
-    sprintf(bench_mem_write_us_val, "%lu", (unsigned long)elapsed);
     report_add_u32(t, "bench.memory.write_us", (unsigned long)elapsed,
-                   bench_mem_write_us_val, CONF_HIGH, VERDICT_UNKNOWN);
+                   (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
 }
 
 static void bench_copy(result_table_t *t)
@@ -95,12 +88,10 @@ static void bench_copy(result_table_t *t)
     elapsed = timing_stop();
 
     rate = kb_per_sec((unsigned long)MEM_BUF_BYTES, elapsed);
-    sprintf(bench_mem_copy_kbps_val, "%lu", rate);
-    report_add_u32(t, "bench.memory.copy_kbps", rate, bench_mem_copy_kbps_val,
+    report_add_u32(t, "bench.memory.copy_kbps", rate, (const char *)0,
                    CONF_HIGH, VERDICT_UNKNOWN);
-    sprintf(bench_mem_copy_us_val, "%lu", (unsigned long)elapsed);
     report_add_u32(t, "bench.memory.copy_us", (unsigned long)elapsed,
-                   bench_mem_copy_us_val, CONF_HIGH, VERDICT_UNKNOWN);
+                   (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
 }
 
 static void bench_read(result_table_t *t)
@@ -122,12 +113,10 @@ static void bench_read(result_table_t *t)
     elapsed = timing_stop();
 
     rate = kb_per_sec((unsigned long)MEM_BUF_BYTES, elapsed);
-    sprintf(bench_mem_read_kbps_val, "%lu", rate);
-    report_add_u32(t, "bench.memory.read_kbps", rate, bench_mem_read_kbps_val,
+    report_add_u32(t, "bench.memory.read_kbps", rate, (const char *)0,
                    CONF_HIGH, VERDICT_UNKNOWN);
-    sprintf(bench_mem_read_us_val, "%lu", (unsigned long)elapsed);
     report_add_u32(t, "bench.memory.read_us", (unsigned long)elapsed,
-                   bench_mem_read_us_val, CONF_HIGH, VERDICT_UNKNOWN);
+                   (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
 }
 
 void bench_memory(result_table_t *t, const opts_t *o)

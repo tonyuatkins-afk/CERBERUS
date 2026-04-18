@@ -467,38 +467,54 @@ int timing_dual_measure(unsigned int target_bios_ticks,
      * GREATER than the previous, the counter reloaded (passed zero).
      *
      * Phantom-wrap defense: some chipsets (observed on the 486DX2-66
-     * bench box's integrated 8254) have non-atomic latch implementations
-     * where sporadic misreads return composite LSB/MSB from different
-     * time points, producing spurious c2_now > c2_prev observations. A
-     * genuine wrap continues to count DOWN from the reloaded 0xFFFF, so
-     * a follow-up read must be <= c2_now. If the follow-up is higher,
-     * the first read was garbage; discard it without incrementing the
-     * wrap counter. This catches the ~50% over-count symptom reported
-     * by rule 4a on Task 1.10 real-hardware validation.
+     * bench box's integrated 8254) produce composite LSB/MSB misreads
+     * that are BIASED toward consistent mid-range high values — a
+     * simple "verify re-read is <= first read" passes through them
+     * because the verify sees the same biased value.
+     *
+     * Stronger defense: require the physical SHAPE of a real wrap.
+     * A genuine wrap only happens as the counter crosses zero, so
+     * c2_prev must have been near zero (below 0x4000) AND c2_now must
+     * be near the reload value (above 0xC000). Any mid-range "wrap"
+     * (e.g. c2_prev=0x7000, c2_now=0x8500) is physically impossible —
+     * the counter does not leap upward mid-range. We add a verify
+     * re-read as belt-and-suspenders for chipsets whose misreads ARE
+     * random, not biased.
+     *
+     * Tuning: 0x4000 / 0xC000 gives a 16,384-tick (~14 ms) band on
+     * each end of the counter range where a wrap crossing is
+     * plausible. Any poll loop iterating faster than 14 ms between
+     * consecutive reads (every CERBERUS-target CPU qualifies) can't
+     * miss a real wrap. Slower poll loops can miss it — and the
+     * sanity check in timing_compute_dual catches gross undercount.
      *
      * Limitation: if a wrap occurs between two consecutive samples
      * (requires an interrupt handler running >55ms, implausible on
      * clean DOS but possible on a pathological TSR stack), the wrap
-     * is silently lost. The sanity-check bail-out in timing_compute_dual
-     * catches gross undercount. */
+     * is silently lost. */
     while (1) {
         c2_now = pit_read_c2();
         if (c2_now > c2_prev) {
-            /* Verify before accepting the wrap. */
-            c2_verify = pit_read_c2();
-            if (c2_verify <= c2_now) {
-                /* Genuine wrap — counter reloaded to 0xFFFF and kept
-                 * counting down. c2_verify is our new valid reading. */
-                c2_wraps++;
-                if (c2_wraps > 8UL) {
-                    c2_gate_off();
-                    return 1;
+            /* Apparent wrap — range-check the shape first. */
+            if (c2_prev < 0x4000U && c2_now > 0xC000U) {
+                /* Plausible wrap — belt-and-suspenders verify. */
+                c2_verify = pit_read_c2();
+                if (c2_verify <= c2_now) {
+                    c2_wraps++;
+                    if (c2_wraps > 8UL) {
+                        c2_gate_off();
+                        return 1;
+                    }
+                    c2_now = c2_verify;
+                } else {
+                    /* Verify inconsistent — phantom. */
+                    c2_now = c2_verify;
                 }
-                c2_now = c2_verify;
             } else {
-                /* Phantom: first read was latch-race garbage. Trust
-                 * the verify read instead; don't count a wrap. */
-                c2_now = c2_verify;
+                /* Mid-range jump — physically impossible. Phantom.
+                 * Keep c2_prev as-is so next iteration compares
+                 * against the last good sample. */
+                c2_now = c2_prev;
             }
         }
         c2_prev = c2_now;
