@@ -1,14 +1,23 @@
 #include <stdio.h>
 #include "diag.h"
+#include "../core/crumb.h"
+
+#define WRAP_DIAG(name, call) do {                                      \
+    if (!crumb_skiplist_has("diag." name)) {                            \
+        crumb_enter("diag." name);                                      \
+        call;                                                            \
+        crumb_exit();                                                   \
+    }                                                                    \
+} while (0)
 
 void diag_all(result_table_t *t, const opts_t *o)
 {
     (void)o;
     puts("[diagnose] running...");
-    diag_cpu(t);
-    diag_mem(t);
-    diag_fpu(t);
-    diag_video(t);
+    WRAP_DIAG("cpu",   diag_cpu(t));
+    WRAP_DIAG("mem",   diag_mem(t));
+    WRAP_DIAG("fpu",   diag_fpu(t));
+    WRAP_DIAG("video", diag_video(t));
     /*
      * Deferred from Phase 2 — needs real-hardware iteration:
      *

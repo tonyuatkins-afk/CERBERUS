@@ -81,7 +81,7 @@ src\core\crumb.obj: src\core\crumb.c src\core\crumb.h
 src\core\ui.obj: src\core\ui.c src\core\ui.h src\core\display.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\ui.c
 
-src\detect\detect_all.obj: src\detect\detect_all.c src\detect\detect.h src\cerberus.h
+src\detect\detect_all.obj: src\detect\detect_all.c src\detect\detect.h src\core\crumb.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\detect_all.c
 
 src\detect\env.obj: src\detect\env.c src\detect\env.h src\detect\detect.h src\core\timing.h src\core\report.h src\cerberus.h
@@ -151,7 +151,7 @@ src\detect\bios_db.obj: src\detect\bios_db.c src\detect\bios_db.h
 regen-bios-db: .SYMBOLIC
 	python hw_db\build_bios_db.py
 
-src\diag\diag_all.obj: src\diag\diag_all.c src\diag\diag.h src\cerberus.h
+src\diag\diag_all.obj: src\diag\diag_all.c src\diag\diag.h src\core\crumb.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_all.c
 
 src\diag\diag_cpu.obj: src\diag\diag_cpu.c src\diag\diag.h src\core\report.h src\cerberus.h
@@ -166,7 +166,7 @@ src\diag\diag_fpu.obj: src\diag\diag_fpu.c src\diag\diag.h src\core\report.h src
 src\diag\diag_video.obj: src\diag\diag_video.c src\diag\diag.h src\core\display.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_video.c
 
-src\bench\bench_all.obj: src\bench\bench_all.c src\bench\bench.h src\cerberus.h
+src\bench\bench_all.obj: src\bench\bench_all.c src\bench\bench.h src\core\crumb.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_all.c
 
 src\bench\bench_cpu.obj: src\bench\bench_cpu.c src\bench\bench.h src\core\timing.h src\core\report.h src\cerberus.h

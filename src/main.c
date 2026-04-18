@@ -115,6 +115,12 @@ int main(int argc, char *argv[])
     crumb_check_previous();
     display_banner();
 
+    /* PIT Channel 2 sanity probe — flags the emulator-or-broken hint
+     * that detect_env consumes as its fallback when signature scans
+     * return ambiguous. Quick (<1ms) + safe to call before anything
+     * else that touches C2. */
+    timing_init();
+
     if (opts.do_detect)    detect_all(&table, &opts);
     if (opts.do_diagnose)  diag_all(&table, &opts);
     if (opts.do_benchmark) bench_all(&table, &opts);

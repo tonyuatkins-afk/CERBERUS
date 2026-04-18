@@ -59,6 +59,7 @@ void diag_fpu(result_table_t *t)
     const char *fpu_val;
     double a, b, result, expected;
     long round_trip;
+    int any_failed = 0;
 
     /* Skip if no FPU */
     if (!fpu_entry) return;
@@ -70,13 +71,23 @@ void diag_fpu(result_table_t *t)
         return;
     }
 
+    /* All five tests below set `any_failed` rather than early-returning.
+     * Rule 5 in the consistency engine reads `diagnose.fpu.compound`
+     * as its aggregated FPU-ran-correctly signal, so the compound row
+     * MUST be emitted on every run that reaches this point — including
+     * when an earlier test failed. Early-returning before the compound
+     * emit made rule 5 no-op on precisely the machines it was designed
+     * to catch (failing FPU detected by diag but still exercised by
+     * bench_fpu producing a nonzero ops_per_sec number). */
+
     /* Test 1: addition */
     a = 1.0; b = 2.0; result = a + b; expected = 3.0;
     if (!double_bits_equal(result, expected)) {
         report_add_str(t, "diagnose.fpu.add", "1.0+2.0 failed",
                        CONF_HIGH, VERDICT_FAIL);
-        report_set_verdict(t, "fpu.detected", VERDICT_FAIL);
-        return;
+        any_failed = 1;
+    } else {
+        report_add_str(t, "diagnose.fpu.add", "pass", CONF_HIGH, VERDICT_PASS);
     }
 
     /* Test 2: subtraction */
@@ -84,8 +95,9 @@ void diag_fpu(result_table_t *t)
     if (!double_bits_equal(result, expected)) {
         report_add_str(t, "diagnose.fpu.sub", "5.0-2.0 failed",
                        CONF_HIGH, VERDICT_FAIL);
-        report_set_verdict(t, "fpu.detected", VERDICT_FAIL);
-        return;
+        any_failed = 1;
+    } else {
+        report_add_str(t, "diagnose.fpu.sub", "pass", CONF_HIGH, VERDICT_PASS);
     }
 
     /* Test 3: multiplication */
@@ -93,8 +105,9 @@ void diag_fpu(result_table_t *t)
     if (!double_bits_equal(result, expected)) {
         report_add_str(t, "diagnose.fpu.mul", "4.0*2.5 failed",
                        CONF_HIGH, VERDICT_FAIL);
-        report_set_verdict(t, "fpu.detected", VERDICT_FAIL);
-        return;
+        any_failed = 1;
+    } else {
+        report_add_str(t, "diagnose.fpu.mul", "pass", CONF_HIGH, VERDICT_PASS);
     }
 
     /* Test 4: division */
@@ -102,8 +115,9 @@ void diag_fpu(result_table_t *t)
     if (!double_bits_equal(result, expected)) {
         report_add_str(t, "diagnose.fpu.div", "10.0/2.0 failed",
                        CONF_HIGH, VERDICT_FAIL);
-        report_set_verdict(t, "fpu.detected", VERDICT_FAIL);
-        return;
+        any_failed = 1;
+    } else {
+        report_add_str(t, "diagnose.fpu.div", "pass", CONF_HIGH, VERDICT_PASS);
     }
 
     (void)round_trip;  /* long-to-double round-trip test removed — pulled
@@ -119,15 +133,19 @@ void diag_fpu(result_table_t *t)
     if (!double_bits_equal(result, expected)) {
         report_add_str(t, "diagnose.fpu.compound", "compound expr failed",
                        CONF_HIGH, VERDICT_FAIL);
-        report_set_verdict(t, "fpu.detected", VERDICT_FAIL);
-        return;
+        any_failed = 1;
+    } else if (any_failed) {
+        /* Aggregated signal: earlier test(s) failed, compound emits
+         * FAIL so rule 5 / downstream readers see a single source of
+         * truth for "did the FPU diagnostic pass as a whole." */
+        report_add_str(t, "diagnose.fpu.compound",
+                       "earlier bit-exact check failed",
+                       CONF_HIGH, VERDICT_FAIL);
+    } else {
+        report_add_str(t, "diagnose.fpu.compound", "pass",
+                       CONF_HIGH, VERDICT_PASS);
     }
 
-    /* All pass */
-    report_add_str(t, "diagnose.fpu.add",       "pass", CONF_HIGH, VERDICT_PASS);
-    report_add_str(t, "diagnose.fpu.sub",       "pass", CONF_HIGH, VERDICT_PASS);
-    report_add_str(t, "diagnose.fpu.mul",       "pass", CONF_HIGH, VERDICT_PASS);
-    report_add_str(t, "diagnose.fpu.div",       "pass", CONF_HIGH, VERDICT_PASS);
-    report_add_str(t, "diagnose.fpu.compound",  "pass", CONF_HIGH, VERDICT_PASS);
-    report_set_verdict(t, "fpu.detected", VERDICT_PASS);
+    report_set_verdict(t, "fpu.detected",
+                       any_failed ? VERDICT_FAIL : VERDICT_PASS);
 }
