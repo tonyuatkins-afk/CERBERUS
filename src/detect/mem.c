@@ -30,6 +30,7 @@
 #include "cpu.h"
 #include "env.h"
 #include "../core/report.h"
+#include "../core/crumb.h"
 
 /* Value-display buffers per emitted key. report_add_u32 stores the
  * `display` pointer verbatim (see report.c:61 and the lifetime note in
@@ -115,25 +116,74 @@ static int probe_xms(unsigned int *out_version_bcd)
     return 1;
 }
 
+/* Validate that INT 67h points at a real EMS driver before calling it.
+ * DOS convention (LIM EMS 3.2+): a genuine EMS driver installs a device-
+ * driver header at the INT 67h vector target; offset 10 contains the
+ * literal string "EMMXXXX0" (the driver's device name). If the vector
+ * points at a random uninitialized memory region — the failure mode
+ * observed on the 486DX2-66 test bed whose DOS 6.22 has no EMS driver
+ * loaded — calling INT 67h executes garbage bytes and hangs the
+ * machine. Returns 1 if the EMMXXXX0 signature is present, 0 otherwise.
+ *
+ * Reference: LIM EMS 4.0 spec, section 3.1 "Device driver header". */
+static int ems_driver_present(void)
+{
+    unsigned long vec;
+    unsigned int  seg, off;
+    const char __far *sig;
+    static const char expected[] = "EMMXXXX0";
+    int i;
+
+    _disable();
+    vec = (unsigned long)_dos_getvect(0x67);
+    _enable();
+    seg = (unsigned int)(vec >> 16);
+    off = (unsigned int)(vec & 0xFFFFU);
+
+    /* Null / obviously-uninitialized vectors — bail. */
+    if (seg == 0 && off == 0) return 0;
+    if (seg == 0xFFFF) return 0;
+
+    /* Device driver header's device-name field lives at offset 10
+     * from the vector target, 8 bytes long. */
+    sig = (const char __far *)MK_FP(seg, off + 10);
+    for (i = 0; i < 8; i++) {
+        if (sig[i] != expected[i]) return 0;
+    }
+    return 1;
+}
+
 static int probe_ems(unsigned long *out_total_pages, unsigned long *out_free_pages)
 {
     union REGS r;
 
+    /* Hard gate: if no EMS driver is loaded (the common case on
+     * DOS 6.22 with HIMEM only, no EMM386), INT 67h may point at
+     * uninitialized memory and calling it will hang. The EMMXXXX0
+     * signature is the DOS-documented way to detect a real driver. */
+    if (!ems_driver_present()) return 0;
+
     /* INT 2Fh AX=5300h — EMM host probe */
+    crumb_enter("detect.mem.ems.host");
     r.x.ax = 0x5300;
     r.x.bx = 0;
     int86(0x2F, &r, &r);
+    crumb_exit();
     /* BX returns handle 0000h on OK; AH=80h on no EMS. The response is
      * somewhat driver-dependent; most emulators implement this. */
 
     /* INT 67h AH=40h — get EMM status */
+    crumb_enter("detect.mem.ems.status");
     r.h.ah = 0x40;
     int86(0x67, &r, &r);
+    crumb_exit();
     if (r.h.ah != 0x00) return 0;
 
     /* INT 67h AH=42h — get page counts: BX=free, DX=total */
+    crumb_enter("detect.mem.ems.pages");
     r.h.ah = 0x42;
     int86(0x67, &r, &r);
+    crumb_exit();
     if (r.h.ah != 0x00) return 0;
     *out_total_pages = (unsigned long)r.x.dx;
     *out_free_pages  = (unsigned long)r.x.bx;
@@ -158,7 +208,14 @@ void detect_mem(result_table_t *t)
     unsigned long ems_free_pages  = 0;
     int           have_ems        = 0;
 
+    /* Sub-probe crumbs: each BIOS INT gets its own crumb so a hang
+     * narrows to the specific INT call rather than the whole function.
+     * Task 1.10 validation on the 486DX2-66 bench box hung inside
+     * detect.mem and the coarse "detect.mem" crumb left us guessing
+     * which INT was the culprit. Sub-crumbs remove that ambiguity. */
+    crumb_enter("detect.mem.int12");
     conv_kb = probe_conventional_kb();
+    crumb_exit();
     sprintf(mem_conv_val, "%u", conv_kb);
     report_add_u32(t, "memory.conventional_kb", (unsigned long)conv_kb,
                    mem_conv_val, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
@@ -166,14 +223,18 @@ void detect_mem(result_table_t *t)
     /* AH=88h is safe on 286+ (requires protected mode services the 8086
      * can't support). Gate accordingly. */
     if (cls >= CPU_CLASS_286) {
+        crumb_enter("detect.mem.ah88");
         ext_kb = probe_ah88_kb();
+        crumb_exit();
     }
 
     /* E801h is safe to attempt on 386+ — it's the Phoenix/Compaq
      * extension. Many late-486 and most Pentium BIOSes implement it;
      * not hardcoding which, just trying and honoring CF. */
     if (cls >= CPU_CLASS_386) {
+        crumb_enter("detect.mem.e801");
         have_e801 = probe_e801_kb(&e801_kb);
+        crumb_exit();
     }
 
     {
@@ -200,10 +261,17 @@ void detect_mem(result_table_t *t)
     }
 
     /* XMS and EMS work on any CPU — gate only by BIOS response */
+    crumb_enter("detect.mem.xms");
     have_xms = probe_xms(&xms_ver);
+    crumb_exit();
     report_add_str(t, "memory.xms_present", have_xms ? "yes" : "no",
                    env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
 
+    /* EMS: probe_ems internally crumbs each INT sub-call. It also
+     * gates the INT 67h calls behind a driver-signature check, so a
+     * system with no EMS driver loaded (DOS 6.22 + HIMEM only) doesn't
+     * execute whatever bytes happen to live at the uninitialized
+     * INT 67h vector. */
     have_ems = probe_ems(&ems_total_pages, &ems_free_pages);
     report_add_str(t, "memory.ems_present", have_ems ? "yes" : "no",
                    env_clamp(CONF_HIGH), VERDICT_UNKNOWN);

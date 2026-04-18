@@ -22,15 +22,11 @@
 #include "../core/timing.h"
 #include "../core/report.h"
 
-/* Display buffers per emitted key. report_add_* stores the display
- * pointer verbatim (report.c:55,61), so a stack-local buf reused
- * across four sprintfs would leave the first three keys pointing at
- * whatever the fourth sprintf wrote — silent corruption in both the
- * INI writer and the UI renderer. Each key gets its own dedicated
- * file-scope static below. */
-static char bench_fpu_elapsed_us_val[24];
-static char bench_fpu_total_ops_val[24];
-static char bench_fpu_ops_per_sec_val[24];
+/* V_U32 emits pass NULL as display and let format_result_value format
+ * from r->v.u directly — identical output ("%lu") and eliminates a
+ * class of sprintf/static-buffer lifetime bugs. The V_STR emit
+ * (us_per_op below) still needs its own static because report's V_STR
+ * path stores the string pointer and has no fallback. */
 static char bench_fpu_us_per_op_val[32];
 
 #define FPU_ITERS 10000L
@@ -98,18 +94,15 @@ void bench_fpu(result_table_t *t, const opts_t *o)
     total_ops = FPU_ITERS * 4UL;
     us_x1000_per_op = ((unsigned long)elapsed * 1000UL) / total_ops;
 
-    sprintf(bench_fpu_elapsed_us_val, "%lu", (unsigned long)elapsed);
     report_add_u32(t, "bench.fpu.elapsed_us", (unsigned long)elapsed,
-                   bench_fpu_elapsed_us_val, CONF_HIGH, VERDICT_UNKNOWN);
-    sprintf(bench_fpu_total_ops_val, "%lu", total_ops);
+                   (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
     report_add_u32(t, "bench.fpu.total_ops", total_ops,
-                   bench_fpu_total_ops_val, CONF_HIGH, VERDICT_UNKNOWN);
+                   (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
 
     if (us_x1000_per_op > 0) {
         ops_per_sec = 1000000000UL / us_x1000_per_op;
-        sprintf(bench_fpu_ops_per_sec_val, "%lu", ops_per_sec);
         report_add_u32(t, "bench.fpu.ops_per_sec", ops_per_sec,
-                       bench_fpu_ops_per_sec_val, CONF_HIGH, VERDICT_UNKNOWN);
+                       (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
     }
 
     sprintf(bench_fpu_us_per_op_val, "%lu.%03lu",

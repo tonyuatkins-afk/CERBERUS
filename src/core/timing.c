@@ -273,21 +273,32 @@ static unsigned int  measurement_start_ct  = 0xFFFF;
 
 /* --- Raw PIT I/O primitives --- */
 
+/* CLI around the latch+read sequence. Without this, an interrupt
+ * handler (INT 8 on BIOS tick, any TSR, mouse driver, etc.) that
+ * issues its own PIT command between our latch and our read would
+ * clobber the latched value — resulting in composite LSB/MSB reads
+ * from different time points. Observed symptom: phantom "up"
+ * transitions in the polling loop inflating the wrap count by ~50%
+ * on the 486DX2-66 bench box's chipset-integrated 8254. */
 static unsigned int pit_read_c2(void)
 {
     unsigned int lo, hi;
+    _disable();
     outp(PIT_CTRL, CTRL_C2_LATCH);
     lo = (unsigned int)(inp(PIT_CH2_DATA) & 0xFF);
     hi = (unsigned int)(inp(PIT_CH2_DATA) & 0xFF);
+    _enable();
     return (hi << 8) | lo;
 }
 
 static unsigned int pit_read_c0(void)
 {
     unsigned int lo, hi;
+    _disable();
     outp(PIT_CTRL, CTRL_C0_LATCH);
     lo = (unsigned int)(inp(PIT_CH0_DATA) & 0xFF);
     hi = (unsigned int)(inp(PIT_CH0_DATA) & 0xFF);
+    _enable();
     return (hi << 8) | lo;
 }
 
@@ -421,7 +432,7 @@ int timing_dual_measure(unsigned int target_bios_ticks,
     /* Watcom C89: hoist all locals to the function top (no mid-block
      * declarations allowed). */
     unsigned long bt_start, bt_now;
-    unsigned int  initial_c2, c2_prev, c2_now;
+    unsigned int  initial_c2, c2_prev, c2_now, c2_verify;
     unsigned long c2_wraps = 0;
 
     if (target_bios_ticks == 0) target_bios_ticks = 1;
@@ -455,27 +466,39 @@ int timing_dual_measure(unsigned int target_bios_ticks,
      * assumption. The wrap test: C2 counts DOWN; if this reading is
      * GREATER than the previous, the counter reloaded (passed zero).
      *
+     * Phantom-wrap defense: some chipsets (observed on the 486DX2-66
+     * bench box's integrated 8254) have non-atomic latch implementations
+     * where sporadic misreads return composite LSB/MSB from different
+     * time points, producing spurious c2_now > c2_prev observations. A
+     * genuine wrap continues to count DOWN from the reloaded 0xFFFF, so
+     * a follow-up read must be <= c2_now. If the follow-up is higher,
+     * the first read was garbage; discard it without incrementing the
+     * wrap counter. This catches the ~50% over-count symptom reported
+     * by rule 4a on Task 1.10 real-hardware validation.
+     *
      * Limitation: if a wrap occurs between two consecutive samples
      * (requires an interrupt handler running >55ms, implausible on
      * clean DOS but possible on a pathological TSR stack), the wrap
      * is silently lost. The sanity-check bail-out in timing_compute_dual
-     * catches gross undercount but NOT a single missed wrap. Rule 4a's
-     * WARN verdict handles the residual case — the 55ms bias on a
-     * 220ms measurement produces a 25% divergence, above the 15%
-     * threshold, so the user sees an alert rather than silent
-     * corruption. */
+     * catches gross undercount. */
     while (1) {
         c2_now = pit_read_c2();
         if (c2_now > c2_prev) {
-            c2_wraps++;
-            /* Bound the wrap counter to keep us_t math sane even under
-             * pathological scheduling. 8 wraps is already ~440ms which
-             * is 2x any target we'd use. This is a HW-only concern
-             * (real-time poll-loop cadence) so it stays here, not in
-             * the pure math kernel. */
-            if (c2_wraps > 8UL) {
-                c2_gate_off();
-                return 1;
+            /* Verify before accepting the wrap. */
+            c2_verify = pit_read_c2();
+            if (c2_verify <= c2_now) {
+                /* Genuine wrap — counter reloaded to 0xFFFF and kept
+                 * counting down. c2_verify is our new valid reading. */
+                c2_wraps++;
+                if (c2_wraps > 8UL) {
+                    c2_gate_off();
+                    return 1;
+                }
+                c2_now = c2_verify;
+            } else {
+                /* Phantom: first read was latch-race garbage. Trust
+                 * the verify read instead; don't count a wrap. */
+                c2_now = c2_verify;
             }
         }
         c2_prev = c2_now;
