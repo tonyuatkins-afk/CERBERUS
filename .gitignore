@@ -81,3 +81,8 @@ desktop.ini
 
 # CERBERUS runtime output (commit samples under samples/ instead)
 CERBERUS.INI
+
+# Sneaker-net drop folder — convenience copies of EXE + PHASE*.BAT.
+# Source of truth is the top-level build + tests/target/. Rebuild by
+# running `wmake` and `cp CERBERUS.EXE dist/`.
+dist/
