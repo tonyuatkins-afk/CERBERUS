@@ -25,6 +25,7 @@ static void print_help(void)
     puts("  /C[:n]          Calibrated mode, n runs (default 7)");
     puts("  /ONLY:DET|DIAG|BENCH   Run only that head");
     puts("  /SKIP:DET|DIAG|BENCH   Skip that head");
+    puts("  /SKIP:TIMING    Skip PIT/BIOS timing self-check (rule 4a)");
     puts("  /O:file         Output INI (default CERBERUS.INI)");
     puts("  /U              Upload via NetISA (non-zero exit if disabled)");
     puts("  /NOCYRIX        Skip Cyrix DIR probe (port 22h safety)");

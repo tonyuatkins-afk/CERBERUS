@@ -24,6 +24,26 @@
 #include "consist.h"
 #include "report.h"
 
+/* Static message buffers — report_add_str stores the pointer we pass it
+ * verbatim (see report.c:55 and the lifetime note in report.h). The
+ * result table is read both by report_write_ini and by ui_render_* long
+ * after each rule function returns, so stack-local sprintf scratch
+ * buffers dangle. Every rule that formats a dynamic message lives on
+ * one of these file-scope statics instead.
+ *
+ * Single-call contract: consist_check runs each rule exactly ONCE per
+ * cerberus run, and each listed rule emits at most one row using its
+ * dedicated buffer. Naming is per-rule + per-branch so two branches in
+ * the same rule never share storage. Future rules that format dynamic
+ * strings MUST declare their own dedicated statics here rather than
+ * reuse one of these — sharing would silently clobber the earlier
+ * rule's stored pointer in the result table. String-literal message
+ * arms are static-lifetime for free and do not need a buffer. */
+static char msg_rule5_warn[96];
+static char msg_rule6_fail[96];
+static char msg_rule9_fail[96];
+static char msg_rule4a_warn[120];
+
 static const result_t *find_key(const result_table_t *t, const char *key)
 {
     unsigned int i;
@@ -128,21 +148,20 @@ static void rule_fpu_diag_bench_agreement(result_table_t *t)
     int diag_pass  = diag  && diag->verdict == VERDICT_PASS;
     int bench_ok   = bench && bench->v.u > 0UL;
 
-    /* Rule only applies if BOTH paths ran — an "FPU absent" run skips
-     * both diag and bench, which is internally consistent and outside
-     * the scope of this cross-check. */
-    if (!diag && !bench) return;
+    /* Rule only applies if BOTH paths ran. If either head was skipped
+     * (/ONLY:*, /SKIP:DIAG, /SKIP:BENCH) the rule no-ops because we
+     * can't compare. This is intentional — absence is not a fault. */
+    if (!diag || !bench) return;
 
     if (diag_pass == bench_ok) {
         report_add_str(t, "consistency.fpu_diag_bench",
                        "pass (diag and bench agree on FPU liveness)",
                        CONF_HIGH, VERDICT_PASS);
     } else {
-        char msg[96];
-        sprintf(msg, "WARN: diag.fpu=%s but bench.fpu=%s",
+        sprintf(msg_rule5_warn, "WARN: diag.fpu:%s but bench.fpu:%s",
                 diag_pass ? "pass" : "no-pass",
                 bench_ok  ? "has-result" : "no-result");
-        report_add_str(t, "consistency.fpu_diag_bench", msg,
+        report_add_str(t, "consistency.fpu_diag_bench", msg_rule5_warn,
                        CONF_HIGH, VERDICT_WARN);
     }
 }
@@ -173,10 +192,9 @@ static void rule_extmem_implies_286(result_table_t *t)
     if (!cv) return;
     if (strcmp(cv, "8086") == 0 || strcmp(cv, "8088") == 0 ||
         strcmp(cv, "v20")  == 0 || strcmp(cv, "v30")  == 0) {
-        char msg[96];
-        sprintf(msg, "FAIL: extended memory %luKB reported on %s",
+        sprintf(msg_rule6_fail, "FAIL: extended memory %luKB reported on %s",
                 ext_kb, cv);
-        report_add_str(t, "consistency.extmem_cpu", msg,
+        report_add_str(t, "consistency.extmem_cpu", msg_rule6_fail,
                        CONF_HIGH, VERDICT_FAIL);
     } else {
         report_add_str(t, "consistency.extmem_cpu",
@@ -259,9 +277,8 @@ static void rule_8086_implies_isa8(result_table_t *t)
                        "WARN: 8086-class CPU but bus class unknown",
                        CONF_HIGH, VERDICT_WARN);
     } else {
-        char msg[96];
-        sprintf(msg, "FAIL: 8086-class CPU (%s) cannot be on a %s bus", cv, bv);
-        report_add_str(t, "consistency.8086_bus", msg,
+        sprintf(msg_rule9_fail, "FAIL: 8086-class CPU (%s) cannot be on a %s bus", cv, bv);
+        report_add_str(t, "consistency.8086_bus", msg_rule9_fail,
                        CONF_HIGH, VERDICT_FAIL);
     }
 }
@@ -311,11 +328,10 @@ static void rule_timing_independence(result_table_t *t)
                        "pass (PIT C2 and BIOS tick agree within 15%)",
                        CONF_HIGH, VERDICT_PASS);
     } else {
-        char msg[120];
         unsigned long pct = delta * 100UL / bios_us;
-        sprintf(msg, "WARN: PIT=%luus BIOS=%luus diverge %lu%% (timing.c suspect)",
+        sprintf(msg_rule4a_warn, "WARN: PIT %luus BIOS %luus diverge %lu%% (timing.c suspect)",
                 pit_us, bios_us, pct);
-        report_add_str(t, "consistency.timing_independence", msg,
+        report_add_str(t, "consistency.timing_independence", msg_rule4a_warn,
                        CONF_HIGH, VERDICT_WARN);
     }
 }

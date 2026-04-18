@@ -111,6 +111,13 @@ Each rule below names the key it emits (`consistency.<name>`), the prerequisite 
 - **PASS** — `|pit_us − bios_us| ≤ bios_us × 15 %`
 - **WARN** — divergence exceeds 15 %
 
+The BIOS tick is the reference denominator — PIT is tested against it. Absolute delta is compared against 15% of BIOS-derived µs, not of the mean. An equivalent delta reads as tighter when BIOS is smaller.
+
+**Status key (`timing.cross_check.status`):** the self-check also emits a status row so a reader of the INI can distinguish "skipped" from "attempted but unusable" from "attempted and passed/warned":
+- `"ok"` — self-check ran to completion; `pit_us` and `bios_us` are present and rule 4a compared them.
+- `"measurement_failed"` — self-check attempted but its wrap-sanity check failed (PIT poll loop missed wraps, or the HW layer's upper wrap cap tripped). Rule 4a then no-ops on the missing `pit_us`/`bios_us` keys, and a separate `consistency.timing_self_check` WARN row is emitted so the UI alert renderer (which filters on the `consistency.` prefix) surfaces the problem to the user instead of burying it in the INI.
+- absent — user passed `/SKIP:TIMING`, so `timing_self_check` was not called at all.
+
 **What it catches:**
 - Bugs in `timing.c`'s math, including the 16-bit integer overflow trap that recurs whenever someone writes `ticks * 838` without `UL` promotion (see `feedback_dos_16bit_int.md`). PIT C2 then reads low while the BIOS-tick path stays honest, producing asymmetric disagreement.
 - PIT C2 wrap-counter miscounts (too few → PIT reads low; too many → PIT reads high).
@@ -159,5 +166,7 @@ These are noted in the plan and will land as their prerequisite phases complete.
 4. Call the function from `consist_check()`.
 5. Add scenarios to `tests/host/test_consist.c` covering: positive case (PASS), negative case (FAIL or WARN), and prerequisite-absent case (no emit).
 6. Add a section to this document explaining the rule.
+
+**Key-uniqueness contract:** `report_add_*` has no dedup (see the note at the top of `src/core/report.h`). Two rules that emit the same `consistency.<name>` key will both render in the INI and in any UI view that iterates the table — the user sees a visual duplicate. Pick a `<name>` that does not collide with any existing rule in this document, and grep `src/core/consist.c` for `consistency.` before picking a new name.
 
 Contributions of new rules via pull request are welcome — especially rules grounded in specific real-hardware observations that existing rules would have missed.

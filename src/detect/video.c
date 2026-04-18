@@ -25,6 +25,12 @@
 #include "../core/display.h"
 #include "../core/report.h"
 
+/* VBE version display buffer. report_add_str stores the value pointer
+ * verbatim (report.c:55), so a stack-local sprintf target would dangle
+ * after detect_video returns. Only one dynamic string is emitted
+ * (video.vbe_version), so one static suffices. */
+static char video_vbe_version_val[16];
+
 /* ----------------------------------------------------------------------- */
 /* Adapter-class reporting                                                  */
 /* ----------------------------------------------------------------------- */
@@ -132,7 +138,6 @@ void detect_video(result_table_t *t)
     const char *adapter_tok = adapter_token(a);
     const video_db_entry_t *chip;
     unsigned int vbe_version = 0;
-    char scratch[16];
 
     report_add_str(t, "video.adapter", adapter_tok,
                    env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
@@ -159,10 +164,10 @@ void detect_video(result_table_t *t)
      * cards, absent on plain VGA. */
     if (a == ADAPTER_VGA_COLOR || a == ADAPTER_VGA_MONO || a == ADAPTER_MCGA) {
         if (probe_vbe(&vbe_version)) {
-            sprintf(scratch, "%u.%u",
+            sprintf(video_vbe_version_val, "%u.%u",
                     (vbe_version >> 8) & 0xFF,
                     vbe_version & 0xFF);
-            report_add_str(t, "video.vbe_version", scratch,
+            report_add_str(t, "video.vbe_version", video_vbe_version_val,
                            env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
         } else {
             report_add_str(t, "video.vbe_version", "none",

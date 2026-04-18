@@ -70,6 +70,175 @@ us_t timing_bios_ticks_to_us(unsigned long bios_ticks)
     return (us_t)(bios_ticks * 54925UL);
 }
 
+int timing_compute_dual(unsigned int initial_c2,
+                        unsigned int final_c2,
+                        unsigned long c2_wraps_observed,
+                        unsigned long bios_ticks_elapsed,
+                        unsigned int target_bios_ticks,
+                        us_t *out_pit_us,
+                        us_t *out_bios_us)
+{
+    /*
+     * Pure math kernel for the dual-clock self-check. Kept outside the
+     * CERBERUS_HOST_TEST guard so host builds can link and exercise it
+     * without poking PIT ports. timing_dual_measure calls this after
+     * the HW polling loop concludes. See timing_dual_measure for the
+     * semantics of each argument and why initial_c2 is the load-bearing
+     * reference (counter is mid-count after sync-to-edge).
+     *
+     * Watcom C89: hoist locals to the function top (no mid-block
+     * declarations allowed).
+     */
+    unsigned long c2_wraps;
+    unsigned long sub_ticks;
+    unsigned long c2_total_ticks;
+    us_t          pit_us, bios_us;
+
+    if (target_bios_ticks == 0) target_bios_ticks = 1;
+
+    /* Defense-in-depth: HW layer bails at c2_wraps>8, but a direct caller
+     * (host tests, future refactor) could hand us a pathological wrap count
+     * that overflows timing_ticks_to_us's 32-bit intermediate. Cap at 16
+     * (2x any realistic target_bios_ticks).
+     *
+     * Because the lower-bail requires `c2_wraps + 1 >= target_bios_ticks`
+     * AND the upper-bail rejects `c2_wraps > 16`, this kernel can only
+     * accommodate `target_bios_ticks <= 17`. Any future self-check variant
+     * that wants a longer interval (target=18+) must either (a) raise this
+     * cap or (b) chain multiple timing_dual_measure calls. The current
+     * timing_self_check uses target=4; well within the cap. */
+    if (c2_wraps_observed > 16UL) return 1;
+
+    c2_wraps = c2_wraps_observed;
+
+    /* Expected: one C2 wrap per BIOS tick (they share the crystal at
+     * 1:65536). If we counted materially fewer than target_bios_ticks,
+     * something caused the poll loop to miss wraps — could be a chatty
+     * TSR hogging INT 8, or just slow iron under load. Bail rather
+     * than emit biased data; rule 4a will then correctly no-op on key
+     * absence. The +1 tolerance accounts for the partial tick at the
+     * end that may not have rolled over yet.
+     *
+     * The `c2_wraps + 1` tolerance is calibrated for target_bios_ticks=4
+     * (the `timing_self_check` call site). Lower targets (1 or 2) may
+     * false-positive on fast machines where fewer wraps are observed
+     * than BIOS ticks elapsed; if we add a lower-target call site,
+     * re-derive this tolerance. */
+    if (c2_wraps + 1UL < (unsigned long)target_bios_ticks) {
+        return 1;
+    }
+
+    /* C2 counts DOWN. We measure elapsed sub-wrap ticks relative to
+     * initial_c2 (the post-sync starting value), NOT 0xFFFF — the
+     * counter was already mid-count when initial_c2 was captured, so
+     * assuming 0xFFFF would inflate pit_us by however many ticks had
+     * already elapsed since c2_gate_on() (up to one full wrap / 55 ms
+     * because of sync-to-edge). Total elapsed C2 ticks across the
+     * whole interval = wraps * 65536 + (initial_c2 - final_c2). */
+    if (final_c2 <= initial_c2) {
+        sub_ticks = (unsigned long)initial_c2 - (unsigned long)final_c2;
+    } else {
+        /* Defensive: if the loop's wrap-edge detection ever undercounts
+         * and we exit with final_c2 numerically greater than initial_c2
+         * (e.g. initial_c2 was captured low in the count, multiple
+         * wraps elapsed, final c2_now landed high), account for the
+         * extra wrap. */
+        c2_wraps++;
+        sub_ticks = 65536UL + (unsigned long)initial_c2
+                            - (unsigned long)final_c2;
+    }
+    c2_total_ticks = c2_wraps * 65536UL + sub_ticks;
+    pit_us  = timing_ticks_to_us(c2_total_ticks);
+    bios_us = timing_bios_ticks_to_us(bios_ticks_elapsed);
+
+    if (out_pit_us)  *out_pit_us  = pit_us;
+    if (out_bios_us) *out_bios_us = bios_us;
+    return 0;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Self-check emit helper — pure, host-testable                            */
+/* ----------------------------------------------------------------------- */
+
+/* Single-call contract: timing_self_check is invoked exactly ONCE per
+ * cerberus run (from main, during startup). report_add_* stores the
+ * pointer we hand it, so the display storage must outlive the call —
+ * hence file-scope static rather than stack-local. If this ever grows
+ * a second call site, each call site MUST have its own dedicated
+ * static buffer; reusing these would silently clobber the earlier
+ * entry's displayed value. The same contract applies to any future
+ * per-subsystem timing analyzers added to this file.
+ *
+ * Moved above the HW guard (alongside timing_emit_self_check) so host
+ * tests can exercise the emit path without pulling in <conio.h>. */
+static char self_check_pit_display[16];
+static char self_check_bios_display[16];
+
+void timing_emit_self_check(result_table_t *t,
+                            int dual_measure_rc,
+                            us_t pit_us,
+                            us_t bios_us)
+{
+    /*
+     * Pure emit helper for timing_self_check. Takes the result of a
+     * dual_measure attempt (rc + the two us_t outputs) and writes the
+     * appropriate rows into the result table:
+     *
+     *   failure path (rc != 0 || either us_t is zero):
+     *     timing.cross_check.status = "measurement_failed" (WARN)
+     *     consistency.timing_self_check WARN row (so the UI alert
+     *       renderer — which filters on "consistency." — surfaces
+     *       the problem to the user instead of burying it in the
+     *       INI where only a post-mortem reader would find it)
+     *
+     *   success path:
+     *     timing.cross_check.pit_us  (numeric)
+     *     timing.cross_check.bios_us (numeric)
+     *     timing.cross_check.status  = "ok"
+     *
+     * Note: string literals used for status + self-check message have
+     * static lifetime, so they're safe to hand to report_add_str.
+     * The numeric displays use self_check_*_display file-scope statics
+     * per the single-call contract documented above.
+     */
+    if (dual_measure_rc != 0 || pit_us == 0 || bios_us == 0) {
+        /* Status key is purely informational (VERDICT_UNKNOWN): no UI
+         * renderer surfaces raw timing.cross_check.* rows. The
+         * user-visible WARN lives on the consistency row below, which
+         * the TUI alert renderer picks up by filtering on the
+         * "consistency." prefix. Both branches of this function emit
+         * the status key with VERDICT_UNKNOWN for symmetry — the WARN
+         * semantic is carried exclusively by the consistency row on
+         * the failure path. */
+        report_add_str(t, "timing.cross_check.status",
+                       "measurement_failed",
+                       CONF_LOW, VERDICT_UNKNOWN);
+        /* Emit as consistency row ONLY on the failure path — the
+         * UI alert renderer filters on "consistency." prefix, so
+         * without this line the WARN is invisible in the TUI
+         * summary. On success, rule 4a's
+         * consistency.timing_independence PASS/WARN row already
+         * handles UI visibility, so we intentionally do NOT emit
+         * a consistency row here in the "ok" branch. */
+        report_add_str(t, "consistency.timing_self_check",
+                       "WARN: PIT/BIOS dual measurement unreliable "
+                       "- timing cross-check skipped",
+                       CONF_LOW, VERDICT_WARN);
+        return;
+    }
+
+    sprintf(self_check_pit_display,  "%lu", (unsigned long)pit_us);
+    sprintf(self_check_bios_display, "%lu", (unsigned long)bios_us);
+    report_add_u32(t, "timing.cross_check.pit_us",
+                   (unsigned long)pit_us, self_check_pit_display,
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(t, "timing.cross_check.bios_us",
+                   (unsigned long)bios_us, self_check_bios_display,
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(t, "timing.cross_check.status", "ok",
+                   CONF_LOW, VERDICT_UNKNOWN);
+}
+
 /* ----------------------------------------------------------------------- */
 /* Hardware layer — excluded from host tests                                */
 /* ----------------------------------------------------------------------- */
@@ -249,11 +418,11 @@ int timing_dual_measure(unsigned int target_bios_ticks,
                         us_t *out_pit_us,
                         us_t *out_bios_us)
 {
+    /* Watcom C89: hoist all locals to the function top (no mid-block
+     * declarations allowed). */
     unsigned long bt_start, bt_now;
-    unsigned int  c2_prev, c2_now;
+    unsigned int  initial_c2, c2_prev, c2_now;
     unsigned long c2_wraps = 0;
-    unsigned long c2_total_ticks;
-    us_t          pit_us, bios_us;
 
     if (target_bios_ticks == 0) target_bios_ticks = 1;
 
@@ -269,21 +438,41 @@ int timing_dual_measure(unsigned int target_bios_ticks,
         bt_now = read_bios_tick();
     } while (bt_now == bt_start);
     bt_start = bt_now;
-    c2_prev  = pit_read_c2();
+
+    /* Capture the ACTUAL starting C2 value AFTER sync-to-edge. The
+     * counter has been running since c2_gate_on() — which may have
+     * been up to ~55 ms ago because of the sync-to-edge wait — so we
+     * cannot assume the start-state is 0xFFFF. initial_c2 is the true
+     * reference and is never overwritten. c2_prev is the sliding
+     * predecessor used only for wrap-edge detection. */
+    initial_c2 = pit_read_c2();
+    c2_prev    = initial_c2;
 
     /* Poll both counters. We MUST poll C2 fast enough to observe every
      * wrap (one wrap per ~55ms). Reading the BIOS tick and comparing
      * c2_prev->c2_now on every loop iteration takes well under 55ms
      * even on an 8088, so single-wrap-between-samples is a safe
      * assumption. The wrap test: C2 counts DOWN; if this reading is
-     * GREATER than the previous, the counter reloaded (passed zero). */
+     * GREATER than the previous, the counter reloaded (passed zero).
+     *
+     * Limitation: if a wrap occurs between two consecutive samples
+     * (requires an interrupt handler running >55ms, implausible on
+     * clean DOS but possible on a pathological TSR stack), the wrap
+     * is silently lost. The sanity-check bail-out in timing_compute_dual
+     * catches gross undercount but NOT a single missed wrap. Rule 4a's
+     * WARN verdict handles the residual case — the 55ms bias on a
+     * 220ms measurement produces a 25% divergence, above the 15%
+     * threshold, so the user sees an alert rather than silent
+     * corruption. */
     while (1) {
         c2_now = pit_read_c2();
         if (c2_now > c2_prev) {
             c2_wraps++;
             /* Bound the wrap counter to keep us_t math sane even under
              * pathological scheduling. 8 wraps is already ~440ms which
-             * is 2x any target we'd use. */
+             * is 2x any target we'd use. This is a HW-only concern
+             * (real-time poll-loop cadence) so it stays here, not in
+             * the pure math kernel. */
             if (c2_wraps > 8UL) {
                 c2_gate_off();
                 return 1;
@@ -296,48 +485,42 @@ int timing_dual_measure(unsigned int target_bios_ticks,
 
     c2_gate_off();
 
-    /* C2 started at 0xFFFF, counts down, wraps to 0xFFFF at zero.
-     * Total elapsed C2 ticks = wraps * 65536 + (0xFFFF - c2_now). */
-    c2_total_ticks = c2_wraps * 65536UL +
-                     (0xFFFFUL - (unsigned long)c2_now);
-    pit_us  = timing_ticks_to_us(c2_total_ticks);
-    bios_us = timing_bios_ticks_to_us(bt_now - bt_start);
-
-    if (out_pit_us)  *out_pit_us  = pit_us;
-    if (out_bios_us) *out_bios_us = bios_us;
-    return 0;
+    /* Defer all post-loop math to the pure kernel so host tests can
+     * reach the sanity check and defensive-wrap branches without
+     * having to simulate PIT hardware. */
+    return timing_compute_dual(initial_c2, c2_now, c2_wraps,
+                               bt_now - bt_start, target_bios_ticks,
+                               out_pit_us, out_bios_us);
 }
 
 /* --- self-check entry point ------------------------------------------ */
-
-static char self_check_pit_display[16];
-static char self_check_bios_display[16];
 
 void timing_self_check(result_table_t *t)
 {
     /*
      * Target interval: 4 BIOS ticks. One tick would give ~3% resolution
      * on the bios_us side (one tick of noise out of four, on average,
-     * because sync-to-edge already trims one). Four ticks ≈ 220 ms —
+     * because sync-to-edge already trims one). Four ticks ~ 220 ms —
      * long enough that both clocks report ~220000 us with better than
      * 1% discretization noise, short enough not to stall startup.
      *
-     * If timing_dual_measure returns nonzero (wrap counter unreliable),
-     * we emit nothing — consist_check will see the key absence and
-     * skip rule 4a rather than flag a spurious inconsistency.
+     * Status emission gives the INI three distinct states so the user
+     * can tell "self-check skipped entirely" from "attempted but
+     * unreliable" from "attempted and succeeded":
+     *   absent               -> skipped (e.g. /SKIP:TIMING)
+     *   "measurement_failed" -> ran but wrap counter unreliable
+     *   "ok"                 -> ran and produced usable data
+     * The measurement_failed path intentionally does NOT emit the
+     * pit_us/bios_us keys, so rule 4a still correctly no-ops rather
+     * than flagging a spurious inconsistency on biased data.
+     *
+     * All emit logic lives in timing_emit_self_check (above the HW
+     * guard) so host tests can exercise both paths directly without
+     * having to simulate PIT hardware.
      */
     us_t pit_us = 0, bios_us = 0;
-    if (timing_dual_measure(4, &pit_us, &bios_us) != 0) return;
-    if (pit_us == 0 || bios_us == 0) return;
-
-    sprintf(self_check_pit_display,  "%lu", (unsigned long)pit_us);
-    sprintf(self_check_bios_display, "%lu", (unsigned long)bios_us);
-    report_add_u32(t, "timing.cross_check.pit_us",
-                   (unsigned long)pit_us, self_check_pit_display,
-                   CONF_HIGH, VERDICT_UNKNOWN);
-    report_add_u32(t, "timing.cross_check.bios_us",
-                   (unsigned long)bios_us, self_check_bios_display,
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    int rc = timing_dual_measure(4, &pit_us, &bios_us);
+    timing_emit_self_check(t, rc, pit_us, bios_us);
 }
 
 #endif  /* CERBERUS_HOST_TEST */

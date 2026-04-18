@@ -146,9 +146,20 @@ dhrystones_cov=0.012
 mips_equivalent=12.1
 
 [consistency]
-cpu_vs_fpu=ok
-detected_vs_benchmark=ok
-notes=none
+486dx_fpu=pass (486DX reports integrated FPU)
+fpu_diag_bench=pass (diag and bench agree on FPU liveness)
+extmem_cpu=pass (extended memory consistent with CPU class)
+timing_independence=pass (PIT C2 and BIOS tick agree within 15%)
+
+[thermal]
+cpu=pass (cpu bench: S=0, |S|<17, no significant trend at N=7)
+cpu.s=0
+cpu.direction=flat
+
+[timing]
+cross_check.pit_us=220214
+cross_check.bios_us=219700
+cross_check.status=ok
 ```
 
 ### Consistency Engine ("Truth Engine")
@@ -157,7 +168,7 @@ Cross-checks detection against diagnosis against benchmark. If a 486DX is detect
 
 ### Thermal Stability
 
-For calibrated runs, tracks drift across passes. A subsystem whose numbers trend monotonically down across five passes is flagged as thermally unstable. Useful for detecting marginal voltage regulators, failing capacitors, and dusty heatsinks.
+For calibrated runs, tracks drift across passes. A subsystem whose per-pass timing trends monotonically UP across at least five passes (numbers climb = CPU slowing) is flagged as thermally unstable. Down-trending (warmup) is treated as benign. Uses the Mann-Kendall non-parametric trend test at α=0.05. Useful for detecting marginal voltage regulators, failing capacitors, and dusty heatsinks.
 
 ### Upload
 

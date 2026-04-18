@@ -19,6 +19,12 @@
 #include "bios_db.h"
 #include "../core/report.h"
 
+/* BIOS date buffer — report_add_str stores the value pointer verbatim
+ * (report.c:55), so a stack-local date_buf would dangle after
+ * detect_bios returns. Promoted to a file-scope static so the INI
+ * writer and UI renderer see valid bytes. */
+static char bios_date_val[9];
+
 static int mem_match(const unsigned char __far *mem, const char *needle, unsigned int n)
 {
     unsigned int j;
@@ -77,11 +83,10 @@ static int scan_pnp_header(void)
 
 void detect_bios(result_table_t *t)
 {
-    char date_buf[9];
     const bios_db_entry_t *entry;
 
-    read_bios_date(date_buf);
-    report_add_str(t, "bios.date", date_buf,
+    read_bios_date(bios_date_val);
+    report_add_str(t, "bios.date", bios_date_val,
                    env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
 
     entry = scan_bios_for_family();

@@ -3,6 +3,26 @@
 
 #include "../cerberus.h"
 
+/*
+ * NOTE: report_add_* has NO dedup. Each call appends a fresh row to the
+ * result table — two calls with the same key produce two entries, and
+ * the INI writer emits both in insertion order. Any UI renderer that
+ * iterates the table will render both, which visually presents as a
+ * duplicate row to the user.
+ *
+ * Responsibility for key uniqueness lives with callers: every detect
+ * module, diag rule, bench rule, and consistency rule is expected to
+ * own a disjoint set of keys. If two rules contend for the same key,
+ * rename one (consistency rules keep a consistency.<rule_name> scheme
+ * specifically to avoid collisions). See docs/consistency-rules.md's
+ * "Adding a new rule" section for the convention.
+ *
+ * Future improvement: push_slot could check for an existing key and
+ * update in place instead of appending. Deferred for Phase 4 to keep
+ * the emit path allocation-free and predictable; revisit if a real
+ * collision ever lands in a rule set.
+ */
+
 /* Result-builder helpers — each covers one value_type_t variant */
 void report_add_str(result_table_t *t, const char *key, const char *value,
                     confidence_t conf, verdict_t verdict);

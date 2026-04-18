@@ -22,6 +22,17 @@
 #include "../core/timing.h"
 #include "../core/report.h"
 
+/* Display buffers per emitted key. report_add_* stores the display
+ * pointer verbatim (report.c:55,61), so a stack-local buf reused
+ * across four sprintfs would leave the first three keys pointing at
+ * whatever the fourth sprintf wrote — silent corruption in both the
+ * INI writer and the UI renderer. Each key gets its own dedicated
+ * file-scope static below. */
+static char bench_fpu_elapsed_us_val[24];
+static char bench_fpu_total_ops_val[24];
+static char bench_fpu_ops_per_sec_val[24];
+static char bench_fpu_us_per_op_val[32];
+
 #define FPU_ITERS 10000L
 
 static const result_t *find_key(const result_table_t *t, const char *key)
@@ -61,7 +72,6 @@ void bench_fpu(result_table_t *t, const opts_t *o)
     unsigned long ops_per_sec;
     unsigned long total_ops;
     unsigned long us_x1000_per_op;
-    char buf[32];
 
     (void)o;
     fpu_entry = find_key(t, "fpu.detected");
@@ -88,23 +98,23 @@ void bench_fpu(result_table_t *t, const opts_t *o)
     total_ops = FPU_ITERS * 4UL;
     us_x1000_per_op = ((unsigned long)elapsed * 1000UL) / total_ops;
 
-    sprintf(buf, "%lu", (unsigned long)elapsed);
-    report_add_u32(t, "bench.fpu.elapsed_us", (unsigned long)elapsed, buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
-    sprintf(buf, "%lu", total_ops);
-    report_add_u32(t, "bench.fpu.total_ops", total_ops, buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    sprintf(bench_fpu_elapsed_us_val, "%lu", (unsigned long)elapsed);
+    report_add_u32(t, "bench.fpu.elapsed_us", (unsigned long)elapsed,
+                   bench_fpu_elapsed_us_val, CONF_HIGH, VERDICT_UNKNOWN);
+    sprintf(bench_fpu_total_ops_val, "%lu", total_ops);
+    report_add_u32(t, "bench.fpu.total_ops", total_ops,
+                   bench_fpu_total_ops_val, CONF_HIGH, VERDICT_UNKNOWN);
 
     if (us_x1000_per_op > 0) {
         ops_per_sec = 1000000000UL / us_x1000_per_op;
-        sprintf(buf, "%lu", ops_per_sec);
-        report_add_u32(t, "bench.fpu.ops_per_sec", ops_per_sec, buf,
-                       CONF_HIGH, VERDICT_UNKNOWN);
+        sprintf(bench_fpu_ops_per_sec_val, "%lu", ops_per_sec);
+        report_add_u32(t, "bench.fpu.ops_per_sec", ops_per_sec,
+                       bench_fpu_ops_per_sec_val, CONF_HIGH, VERDICT_UNKNOWN);
     }
 
-    sprintf(buf, "%lu.%03lu",
+    sprintf(bench_fpu_us_per_op_val, "%lu.%03lu",
             us_x1000_per_op / 1000UL,
             us_x1000_per_op % 1000UL);
-    report_add_str(t, "bench.fpu.us_per_op", buf,
+    report_add_str(t, "bench.fpu.us_per_op", bench_fpu_us_per_op_val,
                    CONF_HIGH, VERDICT_UNKNOWN);
 }

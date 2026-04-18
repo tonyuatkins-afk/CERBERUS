@@ -36,6 +36,19 @@
 static unsigned char mem_src[MEM_BUF_BYTES];
 static unsigned char mem_dst[MEM_BUF_BYTES];
 
+/* Display buffers per emitted key. report_add_u32 stores the display
+ * pointer verbatim (report.c:61), so a stack-local buf reused across
+ * both sprintfs in each bench function would leave the first key
+ * (write_kbps / copy_kbps / read_kbps) pointing at whatever the second
+ * sprintf wrote — silent corruption in INI + UI. Six metrics, six
+ * dedicated statics — one per (operation, metric) pair. */
+static char bench_mem_write_kbps_val[24];
+static char bench_mem_write_us_val[24];
+static char bench_mem_copy_kbps_val[24];
+static char bench_mem_copy_us_val[24];
+static char bench_mem_read_kbps_val[24];
+static char bench_mem_read_us_val[24];
+
 /* Compute KB/s given bytes-moved and elapsed microseconds.
  * bytes_per_us * 1e6 / 1024 = bytes_per_us * 976.5625
  * Scale to avoid overflow: for 16KB at 10µs (fast), that's 1,600,000
@@ -54,26 +67,24 @@ static void bench_write(result_table_t *t)
 {
     us_t elapsed;
     unsigned long rate;
-    char buf[32];
 
     timing_start();
     memset(mem_dst, 0xA5, MEM_BUF_BYTES);
     elapsed = timing_stop();
 
     rate = kb_per_sec((unsigned long)MEM_BUF_BYTES, elapsed);
-    sprintf(buf, "%lu", rate);
-    report_add_u32(t, "bench.memory.write_kbps", rate, buf,
+    sprintf(bench_mem_write_kbps_val, "%lu", rate);
+    report_add_u32(t, "bench.memory.write_kbps", rate, bench_mem_write_kbps_val,
                    CONF_HIGH, VERDICT_UNKNOWN);
-    sprintf(buf, "%lu", (unsigned long)elapsed);
-    report_add_u32(t, "bench.memory.write_us", (unsigned long)elapsed, buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    sprintf(bench_mem_write_us_val, "%lu", (unsigned long)elapsed);
+    report_add_u32(t, "bench.memory.write_us", (unsigned long)elapsed,
+                   bench_mem_write_us_val, CONF_HIGH, VERDICT_UNKNOWN);
 }
 
 static void bench_copy(result_table_t *t)
 {
     us_t elapsed;
     unsigned long rate;
-    char buf[32];
 
     /* Seed src so we're copying real data (not zeros that might short-
      * circuit on some memory controllers) */
@@ -84,12 +95,12 @@ static void bench_copy(result_table_t *t)
     elapsed = timing_stop();
 
     rate = kb_per_sec((unsigned long)MEM_BUF_BYTES, elapsed);
-    sprintf(buf, "%lu", rate);
-    report_add_u32(t, "bench.memory.copy_kbps", rate, buf,
+    sprintf(bench_mem_copy_kbps_val, "%lu", rate);
+    report_add_u32(t, "bench.memory.copy_kbps", rate, bench_mem_copy_kbps_val,
                    CONF_HIGH, VERDICT_UNKNOWN);
-    sprintf(buf, "%lu", (unsigned long)elapsed);
-    report_add_u32(t, "bench.memory.copy_us", (unsigned long)elapsed, buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    sprintf(bench_mem_copy_us_val, "%lu", (unsigned long)elapsed);
+    report_add_u32(t, "bench.memory.copy_us", (unsigned long)elapsed,
+                   bench_mem_copy_us_val, CONF_HIGH, VERDICT_UNKNOWN);
 }
 
 static void bench_read(result_table_t *t)
@@ -98,7 +109,6 @@ static void bench_read(result_table_t *t)
     unsigned long rate;
     volatile unsigned long checksum = 0;
     unsigned int i;
-    char buf[32];
 
     /* Pre-fill so we're reading defined values */
     memset(mem_src, 0x3C, MEM_BUF_BYTES);
@@ -112,12 +122,12 @@ static void bench_read(result_table_t *t)
     elapsed = timing_stop();
 
     rate = kb_per_sec((unsigned long)MEM_BUF_BYTES, elapsed);
-    sprintf(buf, "%lu", rate);
-    report_add_u32(t, "bench.memory.read_kbps", rate, buf,
+    sprintf(bench_mem_read_kbps_val, "%lu", rate);
+    report_add_u32(t, "bench.memory.read_kbps", rate, bench_mem_read_kbps_val,
                    CONF_HIGH, VERDICT_UNKNOWN);
-    sprintf(buf, "%lu", (unsigned long)elapsed);
-    report_add_u32(t, "bench.memory.read_us", (unsigned long)elapsed, buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    sprintf(bench_mem_read_us_val, "%lu", (unsigned long)elapsed);
+    report_add_u32(t, "bench.memory.read_us", (unsigned long)elapsed,
+                   bench_mem_read_us_val, CONF_HIGH, VERDICT_UNKNOWN);
 }
 
 void bench_memory(result_table_t *t, const opts_t *o)

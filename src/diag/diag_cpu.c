@@ -31,6 +31,13 @@
 #include "diag.h"
 #include "../core/report.h"
 
+/* FAIL-path detail buffer. report_add_str stores the value pointer
+ * verbatim (report.c:55), so a stack-local detail[] would dangle after
+ * diag_cpu returns and the INI writer + UI renderer would read garbage.
+ * The three FAIL paths (alu / mul / shift) each early-return, so at
+ * most one sprintf writes this per call — one shared static is safe. */
+static char diag_cpu_detail[64];
+
 typedef struct {
     unsigned int a, b;
     unsigned int sum;
@@ -147,31 +154,30 @@ static int run_shift_tests(int *out_failed_vector)
 void diag_cpu(result_table_t *t)
 {
     int failed_vec = -1;
-    char detail[64];
 
     if (!run_alu_tests(&failed_vec)) {
-        sprintf(detail, "ALU vector %d failed (a=%04X b=%04X)",
+        sprintf(diag_cpu_detail, "ALU vector %d failed (a=%04X b=%04X)",
                 failed_vec,
                 alu_vectors[failed_vec].a, alu_vectors[failed_vec].b);
-        report_add_str(t, "diagnose.cpu.alu", detail,
+        report_add_str(t, "diagnose.cpu.alu", diag_cpu_detail,
                        CONF_HIGH, VERDICT_FAIL);
         report_set_verdict(t, "cpu.detected", VERDICT_FAIL);
         return;
     }
     if (!run_mul_tests(&failed_vec)) {
-        sprintf(detail, "MUL vector %d failed (a=%04X b=%04X)",
+        sprintf(diag_cpu_detail, "MUL vector %d failed (a=%04X b=%04X)",
                 failed_vec,
                 mul_vectors[failed_vec].a, mul_vectors[failed_vec].b);
-        report_add_str(t, "diagnose.cpu.mul", detail,
+        report_add_str(t, "diagnose.cpu.mul", diag_cpu_detail,
                        CONF_HIGH, VERDICT_FAIL);
         report_set_verdict(t, "cpu.detected", VERDICT_FAIL);
         return;
     }
     if (!run_shift_tests(&failed_vec)) {
-        sprintf(detail, "shift vector %d failed (a=%04X n=%u)",
+        sprintf(diag_cpu_detail, "shift vector %d failed (a=%04X n=%u)",
                 failed_vec,
                 shift_vectors[failed_vec].a, shift_vectors[failed_vec].shift);
-        report_add_str(t, "diagnose.cpu.shift", detail,
+        report_add_str(t, "diagnose.cpu.shift", diag_cpu_detail,
                        CONF_HIGH, VERDICT_FAIL);
         report_set_verdict(t, "cpu.detected", VERDICT_FAIL);
         return;

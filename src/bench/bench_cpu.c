@@ -34,7 +34,13 @@ static us_t         pass_results[MAX_PASSES];
 /* Key + display-value buffers per pass. report_add_* stores the
  * pointer we hand it (no copy), so these need to outlive the call —
  * stack-local sprintf targets would dangle. Static-duration arrays
- * are the simplest lifetime guarantee. */
+ * are the simplest lifetime guarantee.
+ *
+ * Single-pass branch statics: emit_single_pass formats four distinct
+ * keys via sprintf, each stored verbatim by report_add_*. The original
+ * char buf[32] was reused across all four, so the first three keys'
+ * display pointers aliased onto whatever the last sprintf wrote —
+ * silent corruption. Each key gets its own dedicated static below. */
 static char pass_keys[MAX_PASSES][40];
 static char pass_vals[MAX_PASSES][24];
 static char summary_val_min[24];
@@ -42,6 +48,10 @@ static char summary_val_max[24];
 static char summary_val_med[24];
 static char summary_val_range[16];
 static char summary_val_ips[24];
+static char bench_cpu_int_elapsed_us_val[24];
+static char bench_cpu_int_iterations_val[24];
+static char bench_cpu_int_iters_per_sec_val[24];
+static char bench_cpu_int_us_per_iter_val[32];
 
 static unsigned long run_int_loop(unsigned long iters)
 {
@@ -83,31 +93,30 @@ static void emit_single_pass(result_table_t *t, us_t elapsed)
 {
     unsigned long us_x1000_per_iter;
     unsigned long iters_per_sec;
-    char buf[32];
 
-    sprintf(buf, "%lu", (unsigned long)elapsed);
+    sprintf(bench_cpu_int_elapsed_us_val, "%lu", (unsigned long)elapsed);
     report_add_u32(t, "bench.cpu.int_elapsed_us",
-                   (unsigned long)elapsed, buf,
+                   (unsigned long)elapsed, bench_cpu_int_elapsed_us_val,
                    CONF_HIGH, VERDICT_UNKNOWN);
 
-    sprintf(buf, "%lu", BENCH_ITERS);
+    sprintf(bench_cpu_int_iterations_val, "%lu", BENCH_ITERS);
     report_add_u32(t, "bench.cpu.int_iterations",
-                   BENCH_ITERS, buf,
+                   BENCH_ITERS, bench_cpu_int_iterations_val,
                    CONF_HIGH, VERDICT_UNKNOWN);
 
     us_x1000_per_iter = ((unsigned long)elapsed * 1000UL) / BENCH_ITERS;
     if (us_x1000_per_iter > 0) {
         iters_per_sec = 1000000000UL / us_x1000_per_iter;
-        sprintf(buf, "%lu", iters_per_sec);
+        sprintf(bench_cpu_int_iters_per_sec_val, "%lu", iters_per_sec);
         report_add_u32(t, "bench.cpu.int_iters_per_sec",
-                       iters_per_sec, buf,
+                       iters_per_sec, bench_cpu_int_iters_per_sec_val,
                        CONF_HIGH, VERDICT_UNKNOWN);
     }
 
-    sprintf(buf, "%lu.%03lu",
+    sprintf(bench_cpu_int_us_per_iter_val, "%lu.%03lu",
             us_x1000_per_iter / 1000UL,
             us_x1000_per_iter % 1000UL);
-    report_add_str(t, "bench.cpu.int_us_per_iter", buf,
+    report_add_str(t, "bench.cpu.int_us_per_iter", bench_cpu_int_us_per_iter_val,
                    CONF_HIGH, VERDICT_UNKNOWN);
 }
 

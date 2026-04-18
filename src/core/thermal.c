@@ -35,12 +35,21 @@
 #define MIN_SERIES   5
 
 /* Two-tailed Mann-Kendall critical values, alpha = 0.05.
- * Indexed by N. Indexes 0..4 are unused (N<5 not supported). */
+ * Indexed by N. Indexes 0..4 are unused (N<5 not supported).
+ * Source: Gilbert 1987 / standard MK reference table (conservative variant
+ * — other tables use slightly different boundaries; this one gives the
+ * strict p<0.05 interpretation). */
 static const int mk_crit_2tail[MAX_SERIES + 1] = {
     0, 0, 0, 0, 0,
     10, 13, 17, 20, 24, 27,  /* N = 5..10 */
     31, 36, 40, 45, 49, 54   /* N = 11..16 */
 };
+
+/* Compile-time check: if MAX_SERIES grows past the table's range, the
+ * mk_crit_2tail[n] lookup at line ~103 would go out of bounds with no
+ * warning. Typedef-in-array trick triggers a compile error on mismatch. */
+typedef char mk_crit_size_check[
+    (sizeof(mk_crit_2tail) / sizeof(mk_crit_2tail[0]) == MAX_SERIES + 1) ? 1 : -1];
 
 static const result_t *find_key(const result_table_t *t, const char *key)
 {
@@ -88,7 +97,15 @@ static int mann_kendall_s(const unsigned long *x, int n)
  * it, so the storage has to outlive the call site. String literals
  * work; stack-local sprintf buffers do not. Giving each analyze_series
  * call its own static keeps the output readable while respecting the
- * lifetime contract. */
+ * lifetime contract.
+ *
+ * Single-call contract: thermal_check -> analyze_cpu_series is called
+ * exactly ONCE per cerberus run. These buffers are dedicated to the
+ * CPU series analysis. Any future per-subsystem analyzer added to this
+ * file (memory, FPU, etc.) MUST declare its own dedicated static
+ * buffers; reusing these would silently clobber the CPU analyzer's
+ * stored pointers in the result table. The "direction" field is a
+ * string literal so it has static lifetime for free. */
 static char thermal_cpu_msg[160];
 static char thermal_cpu_s_val[16];
 
@@ -96,12 +113,28 @@ static void analyze_cpu_series(result_table_t *t,
                                const unsigned long *series,
                                int n)
 {
-    int s = mann_kendall_s(series, n);
-    int abs_s = (s < 0) ? -s : s;
-    int critical = mk_crit_2tail[n];
+    /* Watcom C89: hoist locals to the function top. */
+    int s;
+    int abs_s;
+    int critical;
+    const char *direction;
+
+    s = mann_kendall_s(series, n);
+    abs_s = (s < 0) ? -s : s;
+    critical = mk_crit_2tail[n];
+
+    /* Human-readable summary of the sign of S, emitted alongside the
+     * numeric value so a reviewer scanning the INI can immediately
+     * see cold-start-warmup vs thermal-degradation without decoding
+     * the sign. Informational only — the verdict lives on thermal.cpu. */
+    if      (s > 0) direction = "up";
+    else if (s < 0) direction = "down";
+    else            direction = "flat";
 
     sprintf(thermal_cpu_s_val, "%d", s);
-    report_add_str(t, "thermal.cpu_s", thermal_cpu_s_val,
+    report_add_str(t, "thermal.cpu.s", thermal_cpu_s_val,
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(t, "thermal.cpu.direction", direction,
                    CONF_HIGH, VERDICT_UNKNOWN);
 
     if (abs_s < critical) {

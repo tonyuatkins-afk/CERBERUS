@@ -30,6 +30,15 @@
 #include "../core/timing.h"
 #include "../core/report.h"
 
+/* Display buffers per emitted key. report_add_str stores the value
+ * pointer verbatim (report.c:55), so stack-local sprintf targets would
+ * dangle after detect_audio returns. Two buffers at risk here:
+ *   - audio.sb_dsp_version  when SB probe succeeds
+ *   - audio.detected        on the DB-miss path (entry == NULL)
+ * Each gets its own static so INI write and UI render see valid bytes. */
+static char audio_sb_dsp_version_val[8];
+static char audio_match_key[24];
+
 #define OPL_ADDR 0x388
 #define OPL_DATA 0x389
 
@@ -168,7 +177,6 @@ void detect_audio(result_table_t *t)
     unsigned int sb_base = 0, dsp_major = 0, dsp_minor = 0;
     int          have_sb = 0;
     const char  *opl_token = "none";
-    char         match_key[24];
     const audio_db_entry_t *entry;
 
     /* PC speaker */
@@ -191,11 +199,10 @@ void detect_audio(result_table_t *t)
         have_sb = probe_sb_dsp(sb_base, &dsp_major, &dsp_minor);
     }
     if (have_sb) {
-        char dsp_buf[8];
-        sprintf(dsp_buf, "%u.%02u", dsp_major, dsp_minor);
+        sprintf(audio_sb_dsp_version_val, "%u.%02u", dsp_major, dsp_minor);
         report_add_str(t, "audio.sb_present", "yes",
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
-        report_add_str(t, "audio.sb_dsp_version", dsp_buf,
+        report_add_str(t, "audio.sb_dsp_version", audio_sb_dsp_version_val,
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
     } else {
         report_add_str(t, "audio.sb_present", "no",
@@ -204,14 +211,14 @@ void detect_audio(result_table_t *t)
 
     /* Build composite match key and look up friendly entry */
     if (!opl_present && !have_sb) {
-        strcpy(match_key, "pc-speaker-only");
+        strcpy(audio_match_key, "pc-speaker-only");
     } else if (have_sb) {
-        sprintf(match_key, "%s:%02X%02X", opl_token, dsp_major & 0xFF, dsp_minor & 0xFF);
+        sprintf(audio_match_key, "%s:%02X%02X", opl_token, dsp_major & 0xFF, dsp_minor & 0xFF);
     } else {
-        sprintf(match_key, "%s:none", opl_token);
+        sprintf(audio_match_key, "%s:none", opl_token);
     }
 
-    entry = audio_db_lookup(match_key);
+    entry = audio_db_lookup(audio_match_key);
     if (entry) {
         report_add_str(t, "audio.detected", entry->friendly,
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
@@ -224,7 +231,7 @@ void detect_audio(result_table_t *t)
                            env_clamp(CONF_MEDIUM), VERDICT_UNKNOWN);
         }
     } else {
-        report_add_str(t, "audio.detected", match_key,
+        report_add_str(t, "audio.detected", audio_match_key,
                        env_clamp(CONF_MEDIUM), VERDICT_UNKNOWN);
     }
 }

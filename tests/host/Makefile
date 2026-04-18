@@ -9,19 +9,23 @@
 CC       = wcl386
 CFLAGS   = -zq -bt=nt -w3 -DCERBERUS_HOST_TEST -I..\..\src
 
-TESTS = test_timing.exe test_consist.exe
+TESTS = test_timing.exe test_consist.exe test_thermal.exe
 
 all: $(TESTS) .SYMBOLIC
 
-test_timing.exe: test_timing.c ..\..\src\core\timing.c ..\..\src\core\timing.h
+test_timing.exe: test_timing.c ..\..\src\core\timing.c ..\..\src\core\timing.h ..\..\src\core\report.c ..\..\src\core\sha1.c
 	$(CC) $(CFLAGS) -fe=$@ test_timing.c
 
 test_consist.exe: test_consist.c ..\..\src\core\consist.c ..\..\src\core\consist.h ..\..\src\core\report.c ..\..\src\core\sha1.c
 	$(CC) $(CFLAGS) -fe=$@ test_consist.c
 
+test_thermal.exe: test_thermal.c ..\..\src\core\thermal.c ..\..\src\core\thermal.h ..\..\src\core\report.c ..\..\src\core\sha1.c
+	$(CC) $(CFLAGS) -fe=$@ test_thermal.c
+
 run: $(TESTS) .SYMBOLIC
 	@test_timing.exe
 	@test_consist.exe
+	@test_thermal.exe
 
 clean: .SYMBOLIC
 	-del *.exe

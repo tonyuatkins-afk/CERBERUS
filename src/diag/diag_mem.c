@@ -32,6 +32,14 @@
 
 static unsigned char diag_mem_buf[DIAG_MEM_BUF_SIZE];
 
+/* FAIL-path detail buffer. report_add_str stores the value pointer
+ * verbatim (report.c:55), so a stack-local detail[] would dangle after
+ * diag_mem returns and the INI writer + UI renderer would read garbage.
+ * The three FAIL paths (walking_1s / walking_0s / addr_in_addr) each
+ * early-return, so at most one sprintf writes this per call — one
+ * shared static is safe here. */
+static char diag_mem_detail[64];
+
 /* Walking-1s: for each bit position n in 0..7, fill the buffer with the
  * value 1<<n and verify. Catches a bit stuck at 0. */
 static int pattern_walking_1s(unsigned int *out_first_bad_offset)
@@ -91,25 +99,24 @@ static int pattern_addr_in_addr(unsigned int *out_first_bad_offset)
 void diag_mem(result_table_t *t)
 {
     unsigned int bad_off = 0;
-    char detail[64];
 
     if (!pattern_walking_1s(&bad_off)) {
-        sprintf(detail, "walking-1s failed at offset %u", bad_off);
-        report_add_str(t, "diagnose.memory.walking_1s", detail,
+        sprintf(diag_mem_detail, "walking-1s failed at offset %u", bad_off);
+        report_add_str(t, "diagnose.memory.walking_1s", diag_mem_detail,
                        CONF_HIGH, VERDICT_FAIL);
         report_set_verdict(t, "memory.conventional_kb", VERDICT_FAIL);
         return;
     }
     if (!pattern_walking_0s(&bad_off)) {
-        sprintf(detail, "walking-0s failed at offset %u", bad_off);
-        report_add_str(t, "diagnose.memory.walking_0s", detail,
+        sprintf(diag_mem_detail, "walking-0s failed at offset %u", bad_off);
+        report_add_str(t, "diagnose.memory.walking_0s", diag_mem_detail,
                        CONF_HIGH, VERDICT_FAIL);
         report_set_verdict(t, "memory.conventional_kb", VERDICT_FAIL);
         return;
     }
     if (!pattern_addr_in_addr(&bad_off)) {
-        sprintf(detail, "address-in-address failed at offset %u", bad_off);
-        report_add_str(t, "diagnose.memory.addr_in_addr", detail,
+        sprintf(diag_mem_detail, "address-in-address failed at offset %u", bad_off);
+        report_add_str(t, "diagnose.memory.addr_in_addr", diag_mem_detail,
                        CONF_HIGH, VERDICT_FAIL);
         report_set_verdict(t, "memory.conventional_kb", VERDICT_FAIL);
         return;

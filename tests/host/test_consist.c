@@ -109,6 +109,23 @@ int main(void)
     CHECK(v_of(k(&t, "consistency.fpu_diag_bench")) == VERDICT_WARN,
           "Scenario I: diag pass but bench=0 → rule 5 WARN");
 
+    /* Scenario I2: diag present, bench absent (/ONLY:DIAG or /SKIP:BENCH)
+     * → rule 5 no-op. Absence of either head is not a fault; the rule
+     * can't cross-check with only one side. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "diagnose.fpu.compound",  "pass",  CONF_HIGH, VERDICT_PASS);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.fpu_diag_bench") == NULL,
+          "Scenario I2: diag present, bench absent → rule 5 no-op");
+
+    /* Scenario I3: bench present, diag absent (/ONLY:BENCH or /SKIP:DIAG)
+     * → rule 5 no-op. Symmetric with I2. */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "bench.fpu.ops_per_sec",  50000UL, "50000", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.fpu_diag_bench") == NULL,
+          "Scenario I3: bench present, diag absent → rule 5 no-op");
+
     /* Scenario J: 386SX on ISA-8 → rule 3 FAIL */
     memset(&t, 0, sizeof(t));
     report_add_str(&t, "cpu.detected", "Intel i386SX-16", CONF_HIGH, VERDICT_UNKNOWN);
@@ -211,14 +228,20 @@ int main(void)
     CHECK(v_of(k(&t, "consistency.timing_independence")) == VERDICT_WARN,
           "Scenario U: 15.001% diff → rule 4a WARN");
 
-    /* Scenario V: PIT higher than BIOS by 20% (symmetric check — the
-     * rule must treat directionality the same way). */
+    /* Scenario V: PIT reads materially lower than BIOS. BIOS is the
+     * reference denominator, so the threshold is 15% of bios_us = 18750;
+     * the observed delta of 25000 clears it. This verifies the rule
+     * fires when PIT reads materially lower than BIOS, mirroring
+     * Scenario S in the opposite direction. (Note: not a "symmetric"
+     * check — absolute delta is compared against 15% of BIOS, never
+     * against the mean, so PIT-low and PIT-high of equal magnitude
+     * are not equivalent tests.) */
     memset(&t, 0, sizeof(t));
     report_add_u32(&t, "timing.cross_check.pit_us",  100000UL, "100000", CONF_HIGH, VERDICT_UNKNOWN);
     report_add_u32(&t, "timing.cross_check.bios_us", 125000UL, "125000", CONF_HIGH, VERDICT_UNKNOWN);
     consist_check(&t);
     CHECK(v_of(k(&t, "consistency.timing_independence")) == VERDICT_WARN,
-          "Scenario V: PIT < BIOS by 20% → rule 4a WARN (symmetric)");
+          "Scenario V: PIT 100000us vs BIOS 125000us (20% diff) → rule 4a WARN");
 
     /* Scenario W: pit_us=0 (self-check sentinel) → rule 4a no-op. */
     memset(&t, 0, sizeof(t));

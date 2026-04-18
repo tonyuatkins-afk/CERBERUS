@@ -126,6 +126,120 @@ int main(void)
               "No per-pass data → no emit");
     }
 
+    /* Scenario 8: thermal.cpu.direction emitted with correct label.
+     * A strictly ascending series has S > 0 → direction "up".
+     * (The direction key is informational and carries VERDICT_UNKNOWN;
+     * it coexists with the PASS/WARN verdict on thermal.cpu so a
+     * reviewer scanning the INI can see cold-start warmup vs thermal
+     * degradation even when the verdict is PASS.) */
+    {
+        static const unsigned long x[] = { 1000, 1010, 1020, 1030, 1040, 1050, 1060 };
+        const result_t *dir;
+        memset(&t, 0, sizeof(t));
+        add_series(&t, x, 7);
+        thermal_check(&t);
+        dir = k(&t, "thermal.cpu.direction");
+        CHECK(dir != NULL && strcmp(dir->v.s, "up") == 0,
+              "Ascending → direction=\"up\"");
+    }
+
+    /* Scenario 9: direction "down" on descending series (cold-start
+     * warmup — verdict is still PASS, direction exposes the context). */
+    {
+        static const unsigned long x[] = { 1100, 1080, 1060, 1045, 1030, 1020, 1015 };
+        const result_t *dir;
+        memset(&t, 0, sizeof(t));
+        add_series(&t, x, 7);
+        thermal_check(&t);
+        dir = k(&t, "thermal.cpu.direction");
+        CHECK(dir != NULL && strcmp(dir->v.s, "down") == 0,
+              "Descending → direction=\"down\"");
+    }
+
+    /* Scenario 10: direction "flat" on perfectly-steady series (S=0). */
+    {
+        static const unsigned long x[] = { 1000, 1000, 1000, 1000, 1000, 1000, 1000 };
+        const result_t *dir;
+        memset(&t, 0, sizeof(t));
+        add_series(&t, x, 7);
+        thermal_check(&t);
+        dir = k(&t, "thermal.cpu.direction");
+        CHECK(dir != NULL && strcmp(dir->v.s, "flat") == 0,
+              "Flat → direction=\"flat\"");
+    }
+
+    /* Scenario 11: negative-S stringification. A strictly descending
+     * series produces S < 0, which analyze_cpu_series formats with
+     * sprintf("%d", s) into thermal_cpu_s_val. Verify the stored
+     * display string for thermal.cpu.s starts with '-' — guards against
+     * a future refactor that accidentally uses %u and silently strips
+     * the sign (making warmup and degradation indistinguishable by
+     * numeric read). */
+    {
+        static const unsigned long x[] = { 1100, 1080, 1060, 1045, 1030, 1020, 1015 };
+        const result_t *r;
+        memset(&t, 0, sizeof(t));
+        add_series(&t, x, 7);
+        thermal_check(&t);
+        r = k(&t, "thermal.cpu.s");
+        CHECK(r != NULL && r->v.s != NULL && r->v.s[0] == '-',
+              "Descending series: thermal.cpu.s string starts with '-'");
+    }
+
+    /* Scenario 12: numeric-S exact-value assertion for strict-descending
+     * N=7. All C(7,2)=21 pair comparisons yield -1, so S = -21. This is
+     * a belt-and-suspenders guard against sign or arithmetic drift in
+     * the Mann-Kendall S accumulator — the S-starts-with-minus check
+     * above would still pass if, e.g., a refactor inverted the sign of
+     * the increments and emitted "-14" instead of "-21". */
+    {
+        static const unsigned long x[] = { 1100, 1080, 1060, 1045, 1030, 1020, 1015 };
+        const result_t *r;
+        memset(&t, 0, sizeof(t));
+        add_series(&t, x, 7);
+        thermal_check(&t);
+        r = k(&t, "thermal.cpu.s");
+        CHECK(r != NULL && r->v.s != NULL && strcmp(r->v.s, "-21") == 0,
+              "Descending series: thermal.cpu.s display == \"-21\"");
+    }
+
+    /* Scenario 13: tied-values series — ascending with repeats.
+     * {1000,1000,1050,1050,1100,1100,1150} produces S = +18 (21 pair
+     * comparisons minus 3 ties). Critical at N=7 is 17, so 18 >= 17
+     * → WARN, direction up. Verifies the emit happens and the direction
+     * key is set even when tied values are present in the series. */
+    {
+        static const unsigned long x[] = { 1000, 1000, 1050, 1050, 1100, 1100, 1150 };
+        const result_t *r, *dir;
+        memset(&t, 0, sizeof(t));
+        add_series(&t, x, 7);
+        thermal_check(&t);
+        r = k(&t, "thermal.cpu");
+        CHECK(r != NULL, "Tied-values series: thermal.cpu row emitted");
+        dir = k(&t, "thermal.cpu.direction");
+        CHECK(dir != NULL && strcmp(dir->v.s, "up") == 0,
+              "Tied-values series: direction=\"up\"");
+    }
+
+    /* Scenario 14: MAX_SERIES boundary (N=16). 16-pass strictly
+     * ascending series, S = C(16,2) = 120, critical at N=16 is 54.
+     * Must emit WARN without crashing the series reader or overflowing
+     * any fixed buffer. Guards against future refactors that change
+     * MAX_SERIES without updating the critical-value table. */
+    {
+        static const unsigned long x[] = {
+            1000, 1010, 1020, 1030, 1040, 1050, 1060, 1070,
+            1080, 1090, 1100, 1110, 1120, 1130, 1140, 1150
+        };
+        const result_t *r;
+        memset(&t, 0, sizeof(t));
+        add_series(&t, x, 16);
+        thermal_check(&t);
+        r = k(&t, "thermal.cpu");
+        CHECK(r != NULL && r->verdict == VERDICT_WARN,
+              "N=16 (MAX_SERIES) strict ascending → WARN");
+    }
+
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }

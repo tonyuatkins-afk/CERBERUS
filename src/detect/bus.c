@@ -15,6 +15,7 @@
  * we're inferring from CPU class, LOW when we're guessing at VLB.
  */
 
+#include <stdio.h>
 #include <string.h>
 #include <dos.h>
 #include <i86.h>
@@ -22,6 +23,15 @@
 #include "cpu.h"
 #include "env.h"
 #include "../core/report.h"
+
+/* Display buffers per emitted key. report_add_str stores the value
+ * pointer verbatim (report.c:55) and report_add_u32 stores the display
+ * pointer verbatim (report.c:61). INI writing and UI rendering happen
+ * after detect_bus returns, so stack-local sprintf targets would
+ * dangle. Each key that formats a dynamic string gets its own dedicated
+ * static — NEVER share one buffer across keys in the same function. */
+static char bus_pci_version_val[16];   /* "255.255" */
+static char bus_pci_last_bus_val[12];  /* "255" */
 
 static int probe_pci(unsigned int *out_major, unsigned int *out_minor,
                      unsigned int *out_last_bus)
@@ -55,7 +65,6 @@ void detect_bus(result_table_t *t)
     cpu_class_t   cls = cpu_get_class();
     unsigned int  pci_major = 0, pci_minor = 0, last_bus = 0;
     int           have_pci = 0;
-    char          scratch[32];
 
     /* PCI: authoritative when present */
     have_pci = probe_pci(&pci_major, &pci_minor, &last_bus);
@@ -65,12 +74,12 @@ void detect_bus(result_table_t *t)
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
         report_add_str(t, "bus.pci_present", "yes",
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
-        sprintf(scratch, "%u.%u", pci_major, pci_minor);
-        report_add_str(t, "bus.pci_version", scratch,
+        sprintf(bus_pci_version_val, "%u.%u", pci_major, pci_minor);
+        report_add_str(t, "bus.pci_version", bus_pci_version_val,
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
-        sprintf(scratch, "%u", last_bus);
+        sprintf(bus_pci_last_bus_val, "%u", last_bus);
         report_add_u32(t, "bus.pci_last_bus", (unsigned long)last_bus,
-                       scratch, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
+                       bus_pci_last_bus_val, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
         return;
     }
 

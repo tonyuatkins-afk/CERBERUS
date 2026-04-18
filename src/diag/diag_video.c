@@ -30,6 +30,13 @@
 #include "../core/display.h"
 #include "../core/report.h"
 
+/* FAIL-path detail buffer. report_add_str stores the value pointer
+ * verbatim (report.c:55), so a stack-local detail[] would dangle after
+ * diag_video returns and the INI writer + UI renderer would read
+ * garbage. Promoted to file-scope static; only one FAIL path exists so
+ * one buffer suffices. */
+static char diag_video_detail[80];
+
 #define PROBE_LEN 64
 
 static int vram_probe(unsigned int segment, unsigned int offset,
@@ -68,7 +75,6 @@ void diag_video(result_table_t *t)
     adapter_t    a = display_adapter();
     unsigned int seg, off;
     unsigned int bad_pattern = 0, bad_offset = 0;
-    char detail[80];
 
     switch (a) {
         case ADAPTER_MDA:
@@ -94,9 +100,9 @@ void diag_video(result_table_t *t)
                        CONF_HIGH, VERDICT_PASS);
         report_set_verdict(t, "video.adapter", VERDICT_PASS);
     } else {
-        sprintf(detail, "VRAM pattern %02X failed at %04X:%04X+%u",
+        sprintf(diag_video_detail, "VRAM pattern %02X failed at %04X:%04X+%u",
                 bad_pattern, seg, off, bad_offset);
-        report_add_str(t, "diagnose.video.pattern", detail,
+        report_add_str(t, "diagnose.video.pattern", diag_video_detail,
                        CONF_HIGH, VERDICT_FAIL);
         report_set_verdict(t, "video.adapter", VERDICT_FAIL);
     }

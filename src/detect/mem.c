@@ -31,6 +31,23 @@
 #include "env.h"
 #include "../core/report.h"
 
+/* Value-display buffers per emitted key. report_add_u32 stores the
+ * `display` pointer verbatim (see report.c:61 and the lifetime note in
+ * report.h). INI writing and UI rendering happen long after detect_mem
+ * returns, so a stack-local sprintf target would dangle. Every key that
+ * formats a dynamic display string gets its own dedicated file-scope
+ * static below — NEVER share one buffer across keys, because the second
+ * sprintf would silently clobber the first key's stored pointer.
+ *
+ * Critical: memory.conventional_kb and memory.extended_kb are canonical
+ * signature keys (see report_hardware_signature). Dangling bytes here
+ * mean the hardware identity hash varies run-to-run on the same
+ * machine — the R6 systemic fatal this block resolves. */
+static char mem_conv_val[12];       /* "65535" max */
+static char mem_ext_val[12];        /* "4294967295" max — unsigned long */
+static char mem_ems_total_val[12];
+static char mem_ems_free_val[12];
+
 /* ----------------------------------------------------------------------- */
 /* Individual probes                                                        */
 /* ----------------------------------------------------------------------- */
@@ -140,12 +157,11 @@ void detect_mem(result_table_t *t)
     unsigned long ems_total_pages = 0;
     unsigned long ems_free_pages  = 0;
     int           have_ems        = 0;
-    char scratch[24];
 
     conv_kb = probe_conventional_kb();
-    sprintf(scratch, "%u", conv_kb);
+    sprintf(mem_conv_val, "%u", conv_kb);
     report_add_u32(t, "memory.conventional_kb", (unsigned long)conv_kb,
-                   scratch, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
+                   mem_conv_val, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
 
     /* AH=88h is safe on 286+ (requires protected mode services the 8086
      * can't support). Gate accordingly. */
@@ -174,9 +190,9 @@ void detect_mem(result_table_t *t)
             }
             reported = e801_kb;
         }
-        sprintf(scratch, "%lu", reported);
+        sprintf(mem_ext_val, "%lu", reported);
         report_add_u32(t, "memory.extended_kb", reported,
-                       scratch, env_clamp(conf), VERDICT_UNKNOWN);
+                       mem_ext_val, env_clamp(conf), VERDICT_UNKNOWN);
         if (e801_disagreed) {
             report_add_str(t, "memory.ext_probe_disagreed", "yes",
                            env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
@@ -192,11 +208,11 @@ void detect_mem(result_table_t *t)
     report_add_str(t, "memory.ems_present", have_ems ? "yes" : "no",
                    env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
     if (have_ems) {
-        sprintf(scratch, "%lu", ems_total_pages);
+        sprintf(mem_ems_total_val, "%lu", ems_total_pages);
         report_add_u32(t, "memory.ems_total_pages", ems_total_pages,
-                       scratch, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
-        sprintf(scratch, "%lu", ems_free_pages);
+                       mem_ems_total_val, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
+        sprintf(mem_ems_free_val, "%lu", ems_free_pages);
         report_add_u32(t, "memory.ems_free_pages", ems_free_pages,
-                       scratch, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
+                       mem_ems_free_val, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
     }
 }

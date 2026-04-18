@@ -212,8 +212,14 @@ static int buf_write(const char *s)
 
 static int buf_writef(const char *fmt, ...)
 {
-    /* sprintf into a scratch buffer then append; keeps the call sites clean */
-    char tmp[192];
+    /* sprintf into a scratch buffer then append; keeps the call sites
+     * clean. Size: worst-case "<subkey>=<value>\n" with subkey up to
+     * 128 chars (split_key's buffer) and value up to 192 chars
+     * (emit_section's format_result_value buffer) plus formatting
+     * overhead (e.g. "signature_schema=%s\n") — 512 bytes leaves
+     * comfortable headroom. vsnprintf is not in the Watcom DOS libc,
+     * so we over-size the buffer rather than rely on bounded printf. */
+    char tmp[512];
     va_list ap;
     int n;
     va_start(ap, fmt);
