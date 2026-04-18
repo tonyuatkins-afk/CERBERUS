@@ -118,8 +118,19 @@ int main(int argc, char *argv[])
     /* PIT Channel 2 sanity probe — flags the emulator-or-broken hint
      * that detect_env consumes as its fallback when signature scans
      * return ambiguous. Quick (<1ms) + safe to call before anything
-     * else that touches C2. */
-    timing_init();
+     * else that touches C2.
+     *
+     * Gated by /SKIP:TIMING as a ship-hatch for motherboards where
+     * touching PIT C2 hangs the box (a real failure mode on some
+     * 386/486 boards with non-standard 8254-clone chips). The crumb
+     * enter/exit pair means a hang during the probe leaves a
+     * "timing.init" breadcrumb, so the next reboot of CERBERUS will
+     * print the NOTICE telling the user to pass /SKIP:TIMING. */
+    if (!crumb_skiplist_has("TIMING")) {
+        crumb_enter("timing.init");
+        timing_init();
+        crumb_exit();
+    }
 
     if (opts.do_detect)    detect_all(&table, &opts);
     if (opts.do_diagnose)  diag_all(&table, &opts);
@@ -128,8 +139,14 @@ int main(int argc, char *argv[])
     /* Timing self-check runs once per invocation, independent of which
      * heads ran. Writes the two cross-check values consist_check's rule
      * 4a reads. Skipped if /SKIP:TIMING was passed (ship-hatch for
-     * buggy real-hardware scenarios). */
-    if (!crumb_skiplist_has("TIMING")) timing_self_check(&table);
+     * buggy real-hardware scenarios). Wrapped in crumb enter/exit so
+     * a mid-measurement hang is diagnosable — same rationale as
+     * timing_init above. */
+    if (!crumb_skiplist_has("TIMING")) {
+        crumb_enter("timing.self_check");
+        timing_self_check(&table);
+        crumb_exit();
+    }
 
     /* Consistency cross-check runs after all three heads so it sees
      * everything that got populated. Thermal follows, consuming the

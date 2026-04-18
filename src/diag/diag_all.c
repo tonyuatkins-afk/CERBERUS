@@ -2,6 +2,9 @@
 #include "diag.h"
 #include "../core/crumb.h"
 
+/* NOTE: `name` MUST be a string literal — the "diag." name concatenation
+ * relies on C89 adjacent-literal fusion. Passing a `const char *` here
+ * would compile to pointer-tack-on and silently produce garbage. */
 #define WRAP_DIAG(name, call) do {                                      \
     if (!crumb_skiplist_has("diag." name)) {                            \
         crumb_enter("diag." name);                                      \

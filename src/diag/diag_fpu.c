@@ -36,9 +36,26 @@ typedef union {
     unsigned long u[2];
 } dp_t;
 
+#ifdef CERBERUS_HOST_TEST
+/* Host-test fault-injection hook. Tests set force_fail_test_idx to a 1-based
+ * index (1=add, 2=sub, 3=mul, 4=div, 5=compound) and double_bits_equal will
+ * return 0 on the Nth invocation regardless of the actual bits. Value 0
+ * (the default) disables injection and the function behaves normally.
+ * This exists solely so test_diag_fpu can exercise each branch of the
+ * any_failed aggregation logic without needing a broken physical FPU. */
+int force_fail_test_idx = 0;
+static int fail_call_counter = 0;
+#endif
+
 static int double_bits_equal(double a, double b)
 {
     dp_t da, db;
+#ifdef CERBERUS_HOST_TEST
+    fail_call_counter++;
+    if (force_fail_test_idx && fail_call_counter == force_fail_test_idx) {
+        return 0;
+    }
+#endif
     da.d = a;
     db.d = b;
     return (da.u[0] == db.u[0]) && (da.u[1] == db.u[1]);
@@ -58,7 +75,6 @@ void diag_fpu(result_table_t *t)
     const result_t *fpu_entry = find_key(t, "fpu.detected");
     const char *fpu_val;
     double a, b, result, expected;
-    long round_trip;
     int any_failed = 0;
 
     /* Skip if no FPU */
@@ -120,10 +136,10 @@ void diag_fpu(result_table_t *t)
         report_add_str(t, "diagnose.fpu.div", "pass", CONF_HIGH, VERDICT_PASS);
     }
 
-    (void)round_trip;  /* long-to-double round-trip test removed — pulled
-                        * in ~20KB of Watcom conversion runtime. Can be
-                        * added back in Phase 3 when the benchmark module
-                        * amortizes the library cost across many tests. */
+    /* NOTE: long-to-double round-trip test was removed here — pulled in
+     * ~20KB of Watcom conversion runtime. Can be added back in Phase 3
+     * when the benchmark module amortizes the library cost across many
+     * tests. */
 
     /* Test 5: compound expression — exercises multiple FPU ops and the
      * stack. (2.0 + 3.0) * 4.0 - 5.0 = 15.0, all exactly representable. */

@@ -2,6 +2,9 @@
 #include "bench.h"
 #include "../core/crumb.h"
 
+/* NOTE: `name` MUST be a string literal — the "bench." name concatenation
+ * relies on C89 adjacent-literal fusion. Passing a `const char *` here
+ * would compile to pointer-tack-on and silently produce garbage. */
 #define WRAP_BENCH(name, call) do {                                     \
     if (!crumb_skiplist_has("bench." name)) {                           \
         crumb_enter("bench." name);                                     \
