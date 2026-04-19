@@ -72,12 +72,23 @@ typedef Rec_Type *Rec_Pointer;
 /* Global storage                                                       */
 /* ------------------------------------------------------------------- */
 
-static Rec_Pointer Ptr_Glob, Next_Ptr_Glob;
-static int         Int_Glob;
-static Boolean     Bool_Glob;
-static char        Ch_1_Glob, Ch_2_Glob;
-static int         Arr_1_Glob[50];
-static int __far   Arr_2_Glob[50][50];  /* 5000B FAR per PF-2 convention */
+/* `volatile` on every loop-touched global is load-bearing for DCE
+ * suppression. Weicker 1984 §"Implementation Pitfalls" spells out the
+ * failure mode: an optimizing compiler that sees a write-only static
+ * is free to eliminate the store. Watcom -ox does exactly that and
+ * produced a 23× overreporting v7 run on the 486 DX-2 (782,472 vs
+ * CheckIt's 33,609). `volatile` here forces every read/write to memory
+ * regardless of what downstream code does with the value. Belt and
+ * braces: the anti-DCE checksum emit at the end of bench_dhrystone()
+ * below gives the optimizer an externally-linked consumer it cannot
+ * prove is unused. Either mechanism alone should suffice; both together
+ * guarantee correctness even if the compiler gets cleverer. */
+static volatile Rec_Pointer Ptr_Glob, Next_Ptr_Glob;
+static volatile int         Int_Glob;
+static volatile Boolean     Bool_Glob;
+static volatile char        Ch_1_Glob, Ch_2_Glob;
+static volatile int         Arr_1_Glob[50];
+static volatile int __far   Arr_2_Glob[50][50];  /* 5000B FAR per PF-2 */
 
 static Rec_Type    Rec_1_Storage, Rec_2_Storage;
 
@@ -102,7 +113,8 @@ static void        Proc_5(void);
 static void        Proc_6(Enumeration Enum_Val_Par, Enumeration *Enum_Ref_Par);
 static void        Proc_7(One_Fifty Int_1_Par_Val, One_Fifty Int_2_Par_Val,
                           One_Fifty *Int_Par_Ref);
-static void        Proc_8(Arr_1_Dim Arr_1_Par_Ref, int (__far *Arr_2_Par_Ref)[50],
+static void        Proc_8(volatile int *Arr_1_Par_Ref,
+                          volatile int (__far *Arr_2_Par_Ref)[50],
                           int Int_1_Par_Val, int Int_2_Par_Val);
 
 static void Proc_1(Rec_Pointer Ptr_Val_Par)
@@ -188,7 +200,8 @@ static void Proc_7(One_Fifty Int_1_Par_Val, One_Fifty Int_2_Par_Val,
     *Int_Par_Ref  = Int_2_Par_Val + Int_Loc;
 }
 
-static void Proc_8(Arr_1_Dim Arr_1_Par_Ref, int (__far *Arr_2_Par_Ref)[50],
+static void Proc_8(volatile int *Arr_1_Par_Ref,
+                   volatile int (__far *Arr_2_Par_Ref)[50],
                    int Int_1_Par_Val, int Int_2_Par_Val)
 {
     One_Fifty Int_Index;
@@ -337,6 +350,41 @@ void bench_dhrystone(result_table_t *t, const opts_t *o)
     timing_start();
     run_dhrystone_iterations(main_iters);
     main_us = timing_stop();
+
+    /* Anti-DCE observer — consume final Dhrystone state so Watcom -ox
+     * cannot eliminate the writes that produced it. Emitting the
+     * checksum via report_add_u32 (defined in an external translation
+     * unit: report.c) forms the barrier — Watcom cannot prove the
+     * checksum unused, so every read feeding it must be preserved,
+     * which cascades backward through the assignments in the main loop.
+     * Ptr_Glob struct-member reads force the chain of writes through
+     * Ptr_Val_Par / Next_Record in Proc_1 to be preserved.
+     *
+     * Anti-DCE row is not for consistency-engine use; it is a compiler
+     * barrier. Do not remove or inline. Do not filter from the INI. */
+    {
+        unsigned long checksum = 0UL;
+        unsigned int  k_cs;
+        checksum ^= (unsigned long)(unsigned int)Int_Glob;
+        checksum ^= (unsigned long)(unsigned int)Bool_Glob;
+        checksum ^= (unsigned long)(unsigned char)Ch_1_Glob;
+        checksum ^= (unsigned long)(unsigned char)Ch_2_Glob;
+        for (k_cs = 0; k_cs < 50; k_cs++) {
+            checksum ^= (unsigned long)(unsigned int)Arr_1_Glob[k_cs];
+            /* Sample one cell per row from Arr_2_Glob — full 2500-cell
+             * XOR would dominate reported runtime via __far access cost. */
+            checksum ^= (unsigned long)(unsigned int)Arr_2_Glob[k_cs][k_cs];
+        }
+        if (Ptr_Glob) {
+            checksum ^= (unsigned long)(unsigned int)Ptr_Glob->variant.var_1.Int_Comp;
+            checksum ^= (unsigned long)(unsigned int)Ptr_Glob->variant.var_1.Enum_Comp;
+            checksum ^= (unsigned long)(unsigned char)Ptr_Glob->variant.var_1.Str_Comp[0];
+            checksum ^= (unsigned long)(unsigned char)Ptr_Glob->variant.var_1.Str_Comp[29];
+        }
+        report_add_u32(t, "bench.cpu.dhrystones_checksum",
+                       checksum, (const char *)0,
+                       CONF_HIGH, VERDICT_UNKNOWN);
+    }
 
     /* Emit raw values */
     sprintf(bench_dhry_elapsed_val, "%lu", (unsigned long)main_us);

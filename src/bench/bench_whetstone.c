@@ -66,9 +66,16 @@ static int fpu_looks_present(const result_table_t *t)
 /* Whetstone reference workload                                         */
 /* ------------------------------------------------------------------- */
 
-static double T, T1, T2;
-static double E1[4];
-static int J, K, L;
+/* `volatile` on the accumulator statics is load-bearing for DCE
+ * suppression — Watcom -ox will otherwise eliminate arithmetic whose
+ * result is only observed via other volatile-less globals. The
+ * whetstones_checksum emit at the end of bench_whetstone() is the
+ * belt-and-braces observer; between the two, every loop iteration's
+ * work must be preserved. Removing either is a v7-class regression
+ * (30× overreport). */
+static volatile double T, T1, T2;
+static volatile double E1[4];
+static volatile int    J, K, L;
 
 /* Reference module iteration counts. Per Curnow 1976, these distribute
  * 1,000,000 Whetstone "operations" across the 11 modules according to
@@ -128,7 +135,11 @@ static void P0(void)
 
 static void run_whetstone_units(unsigned long units)
 {
-    double X1, X2, X3, X4, X, Y, Z;
+    /* volatile forces every accumulator read/write to memory regardless
+     * of register allocation pressure. Without it Watcom -ox hoists X1-X4
+     * / X / Y / Z into registers and DCEs intermediate values that aren't
+     * observed by the return-to-memory path. */
+    volatile double X1, X2, X3, X4, X, Y, Z;
     int    I_mod, N_mod;
     unsigned long unit_idx;
 
@@ -231,14 +242,17 @@ static void run_whetstone_units(unsigned long units)
             X = sqrt(exp(log(X) / T1));
         }
 
-        /* Prevent aggressive DCE: touch Z so the compiler can't elide
-         * the whole loop. Watcom -ox is patient but prudent. */
+        /* volatile accumulators + the post-loop checksum in
+         * bench_whetstone() form the DCE barrier now. These sink-assignments
+         * are redundant but kept as in-loop resistance to any future
+         * optimizer that gets more aggressive about volatile locals.
+         * Cheap; keep. */
+        N_mod = J;
+        (void)N_mod;
         (void)Z;
         (void)X4;
         (void)X3;
         (void)X2;
-        N_mod = J;
-        (void)N_mod;
     }
 }
 
@@ -281,6 +295,28 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
     timing_start();
     run_whetstone_units(units);
     main_us = timing_stop();
+
+    /* Anti-DCE observer — consume final FPU accumulator state via
+     * report_add_u32 (external linkage via report.c, opaque to Watcom
+     * -ox). Paired with volatile on T/T1/T2/E1/J/K/L and the volatile
+     * locals inside run_whetstone_units, the checksum read back here
+     * forces every loop iteration's work to be preserved. v7 produced
+     * k_whetstones=344,256 (30× CheckIt's 11,419.9) without these
+     * barriers — fully DCE'd workload. Do not remove; not for
+     * consistency-engine use, purely an optimization barrier. */
+    {
+        unsigned long checksum = 0UL;
+        checksum ^= (unsigned long)(long)E1[0];
+        checksum ^= (unsigned long)(long)E1[1];
+        checksum ^= (unsigned long)(long)E1[2];
+        checksum ^= (unsigned long)(long)E1[3];
+        checksum ^= (unsigned long)(unsigned int)J;
+        checksum ^= (unsigned long)(unsigned int)K;
+        checksum ^= (unsigned long)(unsigned int)L;
+        report_add_u32(t, "bench.fpu.whetstones_checksum",
+                       checksum, (const char *)0,
+                       CONF_HIGH, VERDICT_UNKNOWN);
+    }
 
     sprintf(whet_elapsed_val, "%lu", (unsigned long)main_us);
     report_add_u32(t, "bench.fpu.whetstone_elapsed_us",
