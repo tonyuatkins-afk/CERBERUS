@@ -474,14 +474,21 @@ void bench_dhrystone(result_table_t *t, const opts_t *o)
                            CONF_HIGH, VERDICT_UNKNOWN);
         } else {
             /* Sub-millisecond run — emulator too fast to measure
-             * meaningfully with BIOS-tick resolution. */
+             * meaningfully with BIOS-tick resolution. Token form
+             * standardized on the underscore convention used by
+             * bench_whetstone (`inconclusive_sub_ms`) so consumers
+             * doing `strncmp("inconclusive", ...)` prefix matches
+             * see a consistent shape across all bench emitters
+             * (round-4 M2 sweep). Avoids parens+space drift that
+             * would regress the moment a consumer tightens its
+             * match past the 12-char prefix. */
             report_add_str(t, "bench.cpu.dhrystones",
-                           "inconclusive (sub-millisecond run)",
+                           "inconclusive_sub_ms",
                            CONF_LOW, VERDICT_WARN);
         }
     } else {
         report_add_str(t, "bench.cpu.dhrystones",
-                       "inconclusive (elapsed=0)",
+                       "inconclusive_elapsed_zero",
                        CONF_LOW, VERDICT_WARN);
     }
 }

@@ -350,9 +350,17 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
                        CONF_HIGH, VERDICT_UNKNOWN);
     }
 
-    report_add_u32(t, "bench.fpu.whetstone_elapsed_us",
-                   (unsigned long)main_us, (const char *)0,
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    /* Gate the elapsed_us emit behind a real measurement. Previously
+     * this fired unconditionally, producing whetstone_elapsed_us=0
+     * alongside whetstone_status=inconclusive_elapsed_zero on the
+     * zero-elapsed path — a reader would see a "successful zero-time
+     * measurement" row that contradicts the inconclusive status. Only
+     * emit when we have a meaningful number (round-4 M4). */
+    if (main_us > 0) {
+        report_add_u32(t, "bench.fpu.whetstone_elapsed_us",
+                       (unsigned long)main_us, (const char *)0,
+                       CONF_HIGH, VERDICT_UNKNOWN);
+    }
 
     if (main_us > 0) {
         /* k_whet_per_sec = units * 1,000,000 / main_us.
@@ -373,22 +381,40 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
          *    Whetstone rate.
          *
          *  - Fallback (main_us < 1000): sub-millisecond emulator
-         *    run, can't be rescaled meaningfully. Emit 0 with
-         *    CONF_LOW. */
+         *    run, can't be rescaled meaningfully. Emit status only,
+         *    no k_whetstones row (round-4 M3 — gating the numeric
+         *    emit is cleaner than emitting a misleading 0). */
         if (main_us >= 1000UL) {
             unsigned long ms = (unsigned long)main_us / 1000UL;
             k_whet_per_sec = (units * 1000UL) / ms;
-            report_add_u32(t, "bench.fpu.k_whetstones",
-                           k_whet_per_sec, (const char *)0,
-                           CONF_HIGH, VERDICT_UNKNOWN);
-            report_add_str(t, "bench.fpu.whetstone_status", "ok",
-                           CONF_HIGH, VERDICT_UNKNOWN);
+            if (k_whet_per_sec == 0UL) {
+                /* Integer-division underflow on pathologically slow
+                 * hardware (round-4 M3). Example: 8088 with EM87
+                 * emulating FPU takes ~100 s for W_MIN_UNITS=10, so
+                 * (10 * 1000) / (100,000,000 / 1000) = 10,000 /
+                 * 100,000 = 0. Previously this emitted status=ok +
+                 * k_whetstones=0, which Rule 10 then caught as a
+                 * WARN implying an FPU-detection problem. The real
+                 * cause is measurement-granularity underflow, not a
+                 * detection disagreement — so emit an inconclusive
+                 * status (Rule 10's inconclusive-prefix handler
+                 * no-ops) and skip the k_whetstones row entirely. */
+                report_add_str(t, "bench.fpu.whetstone_status",
+                               "inconclusive_sub_kwhet",
+                               CONF_LOW, VERDICT_WARN);
+            } else {
+                report_add_u32(t, "bench.fpu.k_whetstones",
+                               k_whet_per_sec, (const char *)0,
+                               CONF_HIGH, VERDICT_UNKNOWN);
+                report_add_str(t, "bench.fpu.whetstone_status", "ok",
+                               CONF_HIGH, VERDICT_UNKNOWN);
+            }
         } else {
             /* Sub-millisecond run — emulator too fast to measure
-             * meaningfully at BIOS-tick resolution. */
-            report_add_u32(t, "bench.fpu.k_whetstones",
-                           0UL, (const char *)0,
-                           CONF_LOW, VERDICT_WARN);
+             * meaningfully at BIOS-tick resolution. Omit the
+             * k_whetstones row (round-4 M3 — gate the emit rather
+             * than emit 0; a reader sees no rate row at all, which
+             * aligns with the inconclusive status). */
             report_add_str(t, "bench.fpu.whetstone_status",
                            "inconclusive_sub_ms",
                            CONF_LOW, VERDICT_WARN);

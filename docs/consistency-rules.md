@@ -174,7 +174,7 @@ The BIOS tick is the reference denominator — PIT is tested against it. Absolut
 
 **Verdicts:**
 - **PASS** — FPU present (`fpu.detected != "none"`) and Whetstone ran to completion (`whetstone_status == "ok"`) with a non-zero `k_whetstones`.
-- **PASS** — FPU absent (`fpu.detected == "none"`) and Whetstone correctly skipped (`whetstone_status == "skipped_no_fpu"` or any non-"ok" non-inconclusive value).
+- **PASS** — FPU absent (`fpu.detected == "none"`) and Whetstone status is exactly `skipped_no_fpu` → PASS. Any other non-`ok` non-`inconclusive_*` status on the FPU-absent-detect side → no-op (rule not applicable — unknown state).
 - **WARN** — FPU present and Whetstone ran but `k_whetstones == 0` (suspicious but not proof of fault).
 - **FAIL** — FPU present but Whetstone reports skipped (or the mirror case: detect says "none" but Whetstone produced a number). Classic case for the latter: a socketed 8087 the FNINIT/FNSTSW probe under-reported.
 - **no-op** — whetstone_status starts with `"inconclusive"` (e.g. `inconclusive_elapsed_zero` — measurement loop finished inside one PIT tick, an emulator artifact already surfaced by the WARN verdict attached to the status row itself; not a detection-consistency issue). Also no-op when either prerequisite key is absent.

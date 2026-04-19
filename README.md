@@ -1,6 +1,6 @@
 # CERBERUS
 
-DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; current tip-of-tree is 99,804 bytes. Targets an 8088 with 256KB and an MDA card as the floor and scales up through a 486 with VGA.
+DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; current tip-of-tree is 99,828 bytes. Targets an 8088 with 256KB and an MDA card as the floor and scales up through a 486 with VGA.
 
 Part of the Barely Booting / NetISA ecosystem — CERBERUS is the tool, NetISA is the hardware card for uploading results from DOS over TLS 1.3.
 
@@ -80,7 +80,7 @@ Requires [Open Watcom C/C++ 2.0](http://open-watcom.github.io/) and [NASM 2.x](h
 wmake
 ```
 
-Produces `CERBERUS.EXE` — DOS real-mode, medium memory model. Current build is 99,804 bytes; DGROUP (near data) 50,256 / 65,536 bytes (23% headroom on the hard ceiling, under the 52,000-byte internal working-ceiling).
+Produces `CERBERUS.EXE` — DOS real-mode, medium memory model. Current build is 99,828 bytes; DGROUP (near data) 50,256 / 65,536 bytes (23% headroom on the hard ceiling, under the 52,000-byte internal working-ceiling).
 
 Host-side unit tests (run on Windows / Linux / macOS dev box, exercise the pure-math and database-lookup paths with 137 assertions across timing / consistency / thermal / diag_fpu):
 
