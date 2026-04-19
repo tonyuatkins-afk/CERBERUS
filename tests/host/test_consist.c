@@ -349,6 +349,21 @@ int main(void)
     CHECK(k(&t, "consistency.whetstone_fpu") == NULL,
           "Scenario GG: fpu.detected present, bench keys absent → rule 10 no-op");
 
+    /* Scenario HH: FPU present + Whetstone reported inconclusive_elapsed_zero
+     * (measurement loop finished in under a PIT tick — emulator-artifact
+     * territory, not a detection disagreement). Rule 10 must no-op on
+     * any "inconclusive*" status; the WARN verdict already attached to
+     * the status row by bench_whetstone surfaces the measurement issue
+     * without implicating consistency. Pre-fix, strcmp(st,"ok") returned
+     * false and the else branch FAILed the rule. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "fpu.detected", "integrated-486", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bench.fpu.whetstone_status", "inconclusive_elapsed_zero",
+                   CONF_LOW, VERDICT_WARN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.whetstone_fpu") == NULL,
+          "Scenario HH: FPU=integrated-486 + Whetstone=inconclusive_elapsed_zero → rule 10 no-op");
+
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }

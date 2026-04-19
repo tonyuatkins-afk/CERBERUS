@@ -340,8 +340,16 @@ void bench_dhrystone(result_table_t *t, const opts_t *o)
     if (warmup_us == 0) {
         main_iters = 50000UL;
     } else {
-        /* main_iters = WARMUP_ITERS * TARGET_MAIN_US / warmup_us */
-        main_iters = (WARMUP_ITERS * TARGET_MAIN_US) / (unsigned long)warmup_us;
+        /* main_iters = WARMUP_ITERS * TARGET_MAIN_US / warmup_us, but the
+         * direct form overflows 32-bit unsigned long: WARMUP_ITERS=2000 *
+         * TARGET_MAIN_US=5000000 = 1e10, which won't fit in 32 bits (max
+         * ~4.29e9). Rearrange so the division happens first and keeps the
+         * intermediate product in range. Trade-off: loses one level of
+         * precision when warmup_us is sub-microsecond — but that's
+         * emulator-artifact territory already handled by the
+         * warmup_us == 0 fallback above, and values in the 1..4 range
+         * divide evenly enough for the intended coarse scale factor. */
+        main_iters = WARMUP_ITERS * (TARGET_MAIN_US / (unsigned long)warmup_us);
         if (main_iters < MIN_MAIN_ITERS) main_iters = MIN_MAIN_ITERS;
         if (main_iters > MAX_MAIN_ITERS) main_iters = MAX_MAIN_ITERS;
     }

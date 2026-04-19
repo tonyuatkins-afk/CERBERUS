@@ -532,6 +532,17 @@ static void rule_whetstone_fpu_consistency(result_table_t *t)
      * or /ONLY:BENCH leaves one key absent; absence is not a fault. */
     if (!fpu_tag || !st) return;
 
+    /* Whetstone reports "inconclusive_elapsed_zero" when the measurement
+     * loop finished in under one PIT tick — emulator-artifact territory,
+     * not a disagreement between detection heads. The status string is
+     * defined in src/bench/bench_whetstone.c on the else branch of the
+     * elapsed-us guard. Early-return here so Rule 10 is a no-op on that
+     * axis; the WARN verdict already attached to the status row surfaces
+     * the measurement issue without implicating detection consistency.
+     * Strncmp on "inconclusive" covers any future inconclusive_* suffixes
+     * bench_whetstone might add without needing a new gate here. */
+    if (strncmp(st, "inconclusive", 12) == 0) return;
+
     fpu_present = (strcmp(fpu_tag, "none") != 0);
     whet_ran    = (strcmp(st, "ok") == 0);
 

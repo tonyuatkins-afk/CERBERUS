@@ -46,6 +46,16 @@ static char audio_match_key[24];
 #define OPL_DEFAULT_ADDR 0x388
 #define OPL_DEFAULT_DATA 0x389
 
+/* Forward declarations. probe_opl (below) calls parse_blaster before its
+ * body appears further down the file; without a prototype Watcom emits
+ * W131 "No prototype found for function" and the call falls under C89
+ * implicit-declaration rules (UB). Keeping function-body order reference-
+ * faithful with the original layout; the forward decls are the surgical
+ * fix. parse_blaster_t is forward-declared alongside for symmetry and
+ * future-proofing against call-site reordering. */
+static int parse_blaster(unsigned int *out_port);
+static int parse_blaster_t(int *out_t);
+
 /* ----------------------------------------------------------------------- */
 /* OPL probe (canonical 13-step sequence)                                   */
 /*                                                                          */
