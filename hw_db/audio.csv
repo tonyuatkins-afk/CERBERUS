@@ -1,8 +1,11 @@
 # CERBERUS audio identification database
 #
-# Matched by composite key: OPL type + SB DSP version + mixer type.
-# Lookup signature: "<opl>:<dsp_hex>" where <opl> is "opl2"/"opl3"/"none"
-# and <dsp_hex> is the DSP version byte as two hex chars, or "none".
+# Matched by composite key: OPL type + SB DSP version (+ optional T token).
+# Lookup signature: "<opl>:<dsp_hex>[:T<n>]" where <opl> is "opl2"/"opl3"/"none",
+# <dsp_hex> is the DSP version byte as two hex chars (major-minor, e.g. "040D"
+# for DSP 4.13) or "none", and T<n> is the optional BLASTER T value if parseable
+# (T6=SB16, T8=AWE32). Detect probes try the longer (T-augmented) key first
+# and fall back to the shorter key on miss.
 #
 # Columns:
 #   match_key       Composite signature for matching (see above)
@@ -18,11 +21,18 @@ opl2:0200,Sound Blaster 1.5 (CT1320B),Creative Technology,DSP v2.x — High-spee
 opl2:0201,Sound Blaster 2.0 (CT1350),Creative Technology,DSP v2.01 — Auto-init DMA
 opl3:0300,Sound Blaster Pro (CT1330),Creative Technology,DSP v3.xx — Stereo 8-bit + OPL2x2
 opl3:0302,Sound Blaster Pro 2 (CT1600),Creative Technology,DSP v3.02 — Single OPL3
-opl3:0400,Sound Blaster 16 (CT1740),Creative Technology,DSP v4.xx — 16-bit stereo
+opl3:0400,Sound Blaster 16 (CT1740),Creative Technology,DSP v4.00 — 16-bit stereo
 opl3:0404,Sound Blaster 16 (CT2230),Creative Technology,DSP v4.04
 opl3:0405,Sound Blaster 16 (CT2290),Creative Technology,DSP v4.05 — Value edition
-opl3:040C,Sound Blaster AWE32 (CT2760),Creative Technology,DSP v4.0C — EMU8000 wavetable
-opl3:040D,Sound Blaster AWE64 (CT4500),Creative Technology,DSP v4.0D
+opl3:040B,Sound Blaster 16 Vibra (CT2800),Creative Technology,DSP v4.11 — Vibra 16 early revision
+opl3:040C,Sound Blaster AWE32 (CT2760),Creative Technology,DSP v4.12 — EMU8000 wavetable
+opl3:040D:T6,Sound Blaster 16 or Vibra 16S,Creative Technology,DSP v4.13 T6 — CT2230+ SB16 or CT2800/2900 Vibra 16
+opl3:040D:T8,Sound Blaster AWE32,Creative Technology,DSP v4.13 T8 — EMU8000-equipped AWE32
+opl3:040D,Sound Blaster 16/Vibra/AWE32 family,Creative Technology,DSP v4.13 — ambiguous without BLASTER T token
+opl3:0410:T8,Sound Blaster AWE64 (CT4500),Creative Technology,DSP v4.16 — AWE64 with original AWE32 compat flag
+opl3:0410:T9,Sound Blaster AWE64 (CT4500),Creative Technology,DSP v4.16 — AWE64 with AWE64 T9 token
+opl3:0410,Sound Blaster AWE64 family,Creative Technology,DSP v4.16 — AWE64/Gold without T token
+opl3:0411,Sound Blaster AWE64 Gold (CT4540),Creative Technology,DSP v4.17 — AWE64 Gold premium variant
 opl3:none,OPL3-based card (unknown),various,OPL3 detected without recognizable DSP
 opl2:none-adlib,AdLib Gold,AdLib,1992 OPL3 + YMZ263 codec (later product)
 gus-classic,Gravis UltraSound (Classic),Advanced Gravis,GF1 synth — not OPL-based

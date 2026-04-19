@@ -43,6 +43,8 @@ static char msg_rule5_warn[96];
 static char msg_rule6_fail[96];
 static char msg_rule9_fail[96];
 static char msg_rule4a_warn[120];
+static char msg_rule4b_warn[160];
+static char msg_rule4b_pass[120];
 
 static const result_t *find_key(const result_table_t *t, const char *key)
 {
@@ -337,6 +339,81 @@ static void rule_timing_independence(result_table_t *t)
 }
 
 /* ----------------------------------------------------------------------- */
+/* Rule 4b: bench_cpu iters_per_sec must lie within the CPU DB's empirical
+ *          range for the detected family/model.
+ *
+ * Detects:
+ *   - Thermal throttle / broken cooling (chip downclocking itself).
+ *   - Cache disabled in BIOS (huge bench slowdown even at full clock).
+ *   - TSR / ISR interrupt storms stealing cycles — observed on the 486
+ *     DX-2 bench box where CTCM + mixer init cut the bench from ~8.4M
+ *     iters/sec down to ~2.2M. The WARN is the signal that SOMETHING
+ *     took a big bite out of compute, without claiming which.
+ *   - Under-identified overclocks / counterfeit repinned parts whose
+ *     bench sits ABOVE the expected range.
+ *   - Clock-doubler chips that failed to enter double-clocked mode.
+ *
+ * Does NOT detect:
+ *   - Biased-equally-across-both-paths issues (PIT miscalibration that
+ *     scales bench_cpu AND the wall clock the same way — the bench
+ *     reports its own normalized iters/sec so this cancels).
+ *   - Workloads that genuinely ARE in the range but pathological for a
+ *     specific app (the bench loop is a CPU-only integer micro, not
+ *     representative of mixed-FPU/MMU code).
+ *
+ * Input keys:
+ *   bench.cpu.int_iters_per_sec  — measured by bench_cpu (Phase 3)
+ *   cpu.bench_iters_low          — emitted by detect_cpu when DB has data
+ *   cpu.bench_iters_high         —       "         "        "        "
+ *
+ * Rule no-ops if any of the three keys is missing. This is intentional:
+ * most DB rows currently seed 0/0 until real-hardware data arrives, so
+ * most CPUs won't trigger the rule yet — a clean signal path rather than
+ * a wall of MEDIUM-confidence WARNs on unknowns.
+ *
+ * Verdict: PASS when in range, WARN when outside. We cannot distinguish
+ *          under-range-from-throttle vs under-range-from-TSR vs
+ *          under-range-from-miscalibration; the operator has to triage.
+ *          Above-range is rarer and usually indicates overclock or
+ *          counterfeit; same WARN, different message.                  */
+/* ----------------------------------------------------------------------- */
+
+static void rule_cpu_ipc_bench(result_table_t *t)
+{
+    const result_t *r_iters = find_key(t, "bench.cpu.int_iters_per_sec");
+    const result_t *r_low   = find_key(t, "cpu.bench_iters_low");
+    const result_t *r_high  = find_key(t, "cpu.bench_iters_high");
+    unsigned long iters, lo, hi;
+
+    if (!r_iters || !r_low || !r_high) return;  /* missing data — no-op */
+
+    iters = r_iters->v.u;
+    lo    = r_low->v.u;
+    hi    = r_high->v.u;
+    if (iters == 0 || lo == 0 || hi == 0 || lo > hi) return;
+
+    if (iters >= lo && iters <= hi) {
+        sprintf(msg_rule4b_pass,
+                "pass (bench %lu/sec within expected %lu-%lu for this CPU)",
+                iters, lo, hi);
+        report_add_str(t, "consistency.cpu_ipc_bench", msg_rule4b_pass,
+                       CONF_HIGH, VERDICT_PASS);
+    } else if (iters < lo) {
+        sprintf(msg_rule4b_warn,
+                "WARN: bench %lu/sec below expected %lu (throttle, cache disabled, or TSR stealing cycles)",
+                iters, lo);
+        report_add_str(t, "consistency.cpu_ipc_bench", msg_rule4b_warn,
+                       CONF_HIGH, VERDICT_WARN);
+    } else {
+        sprintf(msg_rule4b_warn,
+                "WARN: bench %lu/sec above expected %lu (overclock or CPU misidentified)",
+                iters, hi);
+        report_add_str(t, "consistency.cpu_ipc_bench", msg_rule4b_warn,
+                       CONF_HIGH, VERDICT_WARN);
+    }
+}
+
+/* ----------------------------------------------------------------------- */
 
 void consist_check(result_table_t *t)
 {
@@ -347,11 +424,10 @@ void consist_check(result_table_t *t)
     rule_extmem_implies_286(t);
     rule_8086_implies_isa8(t);
     rule_timing_independence(t);
+    rule_cpu_ipc_bench(t);
     /*
      * Rules landing as downstream phases complete:
      *
-     *   rule_mips_in_class_ipc_range      — needs class_ipc values in
-     *                                        cpu_db, needs bench mode
      *   rule_cache_stride_vs_cpuid_leaf2  — needs cache bench (Task 3.3)
      *                                        and CPUID leaf 2 decode
      *   rule_vga_bench_modes_available    — needs bench_video (Task 3.5)

@@ -112,6 +112,15 @@ def emit_entry(row) -> str:
     friendly = c_escape((row.get('friendly') or '').strip())
     notes    = c_escape((row.get('notes')    or '').strip())
 
+    # iters_low / iters_high are optional; default to 0 (no data → rule 4b no-ops).
+    try:
+        iters_low  = int((row.get('iters_low')  or '0').strip() or '0')
+        iters_high = int((row.get('iters_high') or '0').strip() or '0')
+    except ValueError:
+        iters_low = iters_high = 0
+    if iters_high and iters_low > iters_high:
+        iters_low, iters_high = 0, 0  # defensive: reject inverted pair
+
     if mk == 'cpuid':
         vendor = c_escape((row.get('vendor') or '').strip())
         family = int(row['family'])
@@ -120,13 +129,14 @@ def emit_entry(row) -> str:
         smax   = int(row['stepping_max'])
         return (
             f'    {{ CPU_DB_MATCH_CPUID, {vendor}, {family}, {model}, '
-            f'{smin}, {smax}, "", {friendly}, {notes} }},'
+            f'{smin}, {smax}, "", {friendly}, '
+            f'{iters_low}UL, {iters_high}UL, {notes} }},'
         )
     else:
         lc = c_escape((row.get('legacy_class') or '').strip())
         return (
             f'    {{ CPU_DB_MATCH_LEGACY, "", 0, 0, 0, 0, {lc}, '
-            f'{friendly}, {notes} }},'
+            f'{friendly}, {iters_low}UL, {iters_high}UL, {notes} }},'
         )
 
 

@@ -147,6 +147,31 @@ static int parse_blaster(unsigned int *out_port)
     return 0;
 }
 
+/* Parse BLASTER for the T<n> token, which Creative's install sets to
+ * identify the card family: T1 SB-orig, T3 SB Pro, T4 SB Pro 2, T6 SB16
+ * (including Vibra 16), T8 AWE32, T9 AWE64. Used as a secondary
+ * discriminator when DSP version alone isn't unique. Returns 1 and
+ * writes the decimal value into *out_t on success; returns 0 if T
+ * isn't present or isn't a valid single/two-digit decimal. */
+static int parse_blaster_t(int *out_t)
+{
+    const char *env = getenv("BLASTER");
+    const char *p;
+    if (!env) return 0;
+    for (p = env; *p; p++) {
+        if ((*p == 'T' || *p == 't') && p[1] >= '0' && p[1] <= '9') {
+            int v = 0;
+            const char *q = p + 1;
+            while (*q >= '0' && *q <= '9') { v = v*10 + (*q - '0'); q++; }
+            if (v > 0 && v < 100) {
+                *out_t = v;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 static int probe_sb_dsp(unsigned int base, unsigned int *out_major, unsigned int *out_minor)
 {
     /*
@@ -244,16 +269,33 @@ void detect_audio(result_table_t *t)
                        env_clamp(CONF_MEDIUM), VERDICT_UNKNOWN);
     }
 
-    /* Build composite match key and look up friendly entry */
+    /* Build composite match key and look up friendly entry. When we have
+     * SB DSP, try the T-augmented key first (splits e.g. DSP 4.13 Vibra
+     * from AWE32, both of which would otherwise land on opl3:040D). If
+     * the T-augmented key doesn't resolve, fall back to the bare key. */
     if (!opl_present && !have_sb) {
         strcpy(audio_match_key, "pc-speaker-only");
+        entry = audio_db_lookup(audio_match_key);
     } else if (have_sb) {
-        sprintf(audio_match_key, "%s:%02X%02X", opl_token, dsp_major & 0xFF, dsp_minor & 0xFF);
+        int blaster_t = 0;
+        entry = (const audio_db_entry_t *)0;
+        if (parse_blaster_t(&blaster_t)) {
+            sprintf(audio_match_key, "%s:%02X%02X:T%d", opl_token,
+                    dsp_major & 0xFF, dsp_minor & 0xFF, blaster_t);
+            entry = audio_db_lookup(audio_match_key);
+        }
+        if (!entry) {
+            sprintf(audio_match_key, "%s:%02X%02X", opl_token,
+                    dsp_major & 0xFF, dsp_minor & 0xFF);
+            entry = audio_db_lookup(audio_match_key);
+        }
     } else {
         sprintf(audio_match_key, "%s:none", opl_token);
+        entry = audio_db_lookup(audio_match_key);
     }
 
-    entry = audio_db_lookup(audio_match_key);
+    /* audio_match_key holds whichever key actually resolved (or the
+     * last-tried key if none resolved, which is the raw fallback). */
     if (entry) {
         report_add_str(t, "audio.detected", entry->friendly,
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);

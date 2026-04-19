@@ -12,43 +12,56 @@
 #   stepping_max  max stepping, inclusive (cpuid match only; decimal)
 #   legacy_class  class token (legacy match only; empty for cpuid)
 #   friendly      Human-readable name — what gets shown to the user
+#   iters_low     bench_cpu expected iters_per_sec LOW bound (0 = no data)
+#   iters_high    bench_cpu expected iters_per_sec HIGH bound (0 = no data)
 #   notes         Brief caveat, quirk, or source citation
 #
 # Lookup order: top-to-bottom, first match wins. Put more-specific rows
 # (narrow stepping ranges, specific models) before catch-alls.
 #
-match_kind,vendor,family,model,stepping_min,stepping_max,legacy_class,friendly,notes
-cpuid,GenuineIntel,4,0,0,15,,Intel i486DX (A-step),early i486DX with FDIV-like microcode quirks
-cpuid,GenuineIntel,4,1,0,15,,Intel i486DX (B/C-step),mainstream i486DX-25/33/50
-cpuid,GenuineIntel,4,2,0,15,,Intel i486SX,no integrated FPU
-cpuid,GenuineIntel,4,3,0,15,,Intel i486DX2,clock-doubled i486DX
-cpuid,GenuineIntel,4,4,0,15,,Intel i486SL,SL-enhanced mobile variant
-cpuid,GenuineIntel,4,5,0,15,,Intel i486SX2,clock-doubled i486SX (rare)
-cpuid,GenuineIntel,4,7,0,15,,Intel i486DX2 Write-Back Enhanced,
-cpuid,GenuineIntel,4,8,0,15,,Intel i486DX4,clock-tripled i486DX
-cpuid,GenuineIntel,4,9,0,15,,Intel i486DX4 Write-Back Enhanced,
-cpuid,GenuineIntel,5,1,0,15,,Intel Pentium 60/66,FDIV bug on stepping 0-3
-cpuid,GenuineIntel,5,2,0,15,,Intel Pentium P54C,
-cpuid,GenuineIntel,5,4,0,15,,Intel Pentium MMX,
-cpuid,GenuineIntel,6,1,0,15,,Intel Pentium Pro,
-cpuid,GenuineIntel,6,3,0,15,,Intel Pentium II,
-cpuid,AuthenticAMD,4,3,0,15,,AMD Am486DX2,
-cpuid,AuthenticAMD,4,7,0,15,,AMD Am486DX2 Write-Back,
-cpuid,AuthenticAMD,4,8,0,15,,AMD Am486DX4,
-cpuid,AuthenticAMD,4,9,0,15,,AMD Am486DX4 Write-Back,
-cpuid,AuthenticAMD,4,14,0,15,,AMD Am5x86-P75,486 platform 133MHz
-cpuid,AuthenticAMD,4,15,0,15,,AMD Am5x86 Write-Back,
-cpuid,AuthenticAMD,5,0,0,15,,AMD K5 SSA/5,
-cpuid,AuthenticAMD,5,1,0,15,,AMD K5 PR90/100/120/133,
-cpuid,AuthenticAMD,5,6,0,15,,AMD K6,
-cpuid,CyrixInstead,4,4,0,15,,Cyrix MediaGX,
-cpuid,CyrixInstead,5,2,0,15,,Cyrix 6x86 (M1),
-cpuid,CyrixInstead,5,4,0,15,,Cyrix GXm,
-cpuid,CyrixInstead,6,0,0,15,,Cyrix 6x86MX (M2),
-legacy,,,,,,8086,Intel 8086 or compatible,
-legacy,,,,,,8088,IBM PC-class 8088 or compatible,
-legacy,,,,,,v20,NEC V20 (8088-compatible with 80186 superset),
-legacy,,,,,,v30,NEC V30 (8086-compatible with 80186 superset),
-legacy,,,,,,286,Intel or AMD 80286,
-legacy,,,,,,386,Intel/AMD/Cyrix 80386 class (CPUID absent),
-legacy,,,,,,486-no-cpuid,Early i486DX without CPUID support (SX327/SX328),
+# iters_low / iters_high: rule 4b (cpu_ipc_bench) reads these from the
+# matched entry, emits cpu.bench_iters_low/high keys, and consist.c
+# compares against bench.cpu.iters_per_sec. 0/0 means "no empirical data
+# yet" and rule 4b no-ops. Submit refinements via hw_db/submissions.
+#
+# Calibration notes:
+#   486 DX-2 (f4m3): observed ~8.4M iters/sec clean on a 66MHz part with
+#     DOS 6.22 + HIMEM only, and ~2.2M under CTCM + TSR load. Range
+#     picked so clean machines PASS and heavy-TSR machines WARN — a real
+#     signal that something is stealing cycles.
+#
+match_kind,vendor,family,model,stepping_min,stepping_max,legacy_class,friendly,iters_low,iters_high,notes
+cpuid,GenuineIntel,4,0,0,15,,Intel i486DX (A-step),0,0,early i486DX with FDIV-like microcode quirks
+cpuid,GenuineIntel,4,1,0,15,,Intel i486DX (B/C-step),0,0,mainstream i486DX-25/33/50
+cpuid,GenuineIntel,4,2,0,15,,Intel i486SX,0,0,no integrated FPU
+cpuid,GenuineIntel,4,3,0,15,,Intel i486DX2,4700000,10500000,clock-doubled i486DX; range seeded from 486DX2-66 bench box
+cpuid,GenuineIntel,4,4,0,15,,Intel i486SL,0,0,SL-enhanced mobile variant
+cpuid,GenuineIntel,4,5,0,15,,Intel i486SX2,0,0,clock-doubled i486SX (rare)
+cpuid,GenuineIntel,4,7,0,15,,Intel i486DX2 Write-Back Enhanced,4700000,10500000,
+cpuid,GenuineIntel,4,8,0,15,,Intel i486DX4,0,0,clock-tripled i486DX
+cpuid,GenuineIntel,4,9,0,15,,Intel i486DX4 Write-Back Enhanced,0,0,
+cpuid,GenuineIntel,5,1,0,15,,Intel Pentium 60/66,0,0,FDIV bug on stepping 0-3
+cpuid,GenuineIntel,5,2,0,15,,Intel Pentium P54C,0,0,
+cpuid,GenuineIntel,5,4,0,15,,Intel Pentium MMX,0,0,
+cpuid,GenuineIntel,6,1,0,15,,Intel Pentium Pro,0,0,
+cpuid,GenuineIntel,6,3,0,15,,Intel Pentium II,0,0,
+cpuid,AuthenticAMD,4,3,0,15,,AMD Am486DX2,4700000,10500000,
+cpuid,AuthenticAMD,4,7,0,15,,AMD Am486DX2 Write-Back,4700000,10500000,
+cpuid,AuthenticAMD,4,8,0,15,,AMD Am486DX4,0,0,
+cpuid,AuthenticAMD,4,9,0,15,,AMD Am486DX4 Write-Back,0,0,
+cpuid,AuthenticAMD,4,14,0,15,,AMD Am5x86-P75,0,0,486 platform 133MHz
+cpuid,AuthenticAMD,4,15,0,15,,AMD Am5x86 Write-Back,0,0,
+cpuid,AuthenticAMD,5,0,0,15,,AMD K5 SSA/5,0,0,
+cpuid,AuthenticAMD,5,1,0,15,,AMD K5 PR90/100/120/133,0,0,
+cpuid,AuthenticAMD,5,6,0,15,,AMD K6,0,0,
+cpuid,CyrixInstead,4,4,0,15,,Cyrix MediaGX,0,0,
+cpuid,CyrixInstead,5,2,0,15,,Cyrix 6x86 (M1),0,0,
+cpuid,CyrixInstead,5,4,0,15,,Cyrix GXm,0,0,
+cpuid,CyrixInstead,6,0,0,15,,Cyrix 6x86MX (M2),0,0,
+legacy,,,,,,8086,Intel 8086 or compatible,0,0,
+legacy,,,,,,8088,IBM PC-class 8088 or compatible,0,0,
+legacy,,,,,,v20,NEC V20 (8088-compatible with 80186 superset),0,0,
+legacy,,,,,,v30,NEC V30 (8086-compatible with 80186 superset),0,0,
+legacy,,,,,,286,Intel or AMD 80286,0,0,
+legacy,,,,,,386,Intel/AMD/Cyrix 80386 class (CPUID absent),0,0,
+legacy,,,,,,486-no-cpuid,Early i486DX without CPUID support (SX327/SX328),0,0,

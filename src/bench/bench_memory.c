@@ -45,17 +45,31 @@ static unsigned char mem_dst[MEM_BUF_BYTES];
  * garbage on the 486DX2-66 bench box). */
 
 /* Compute KB/s given bytes-moved and elapsed microseconds.
- * bytes_per_us * 1e6 / 1024 = bytes_per_us * 976.5625
- * Scale to avoid overflow: for 16KB at 10µs (fast), that's 1,600,000
- * KB/s (1.6 GB/s) — well within 32-bit range. For slow 8088 runs at
- * say 50KB/s, we're fine at any realistic buffer/time combo. */
+ *
+ * Previous implementation truncated `elapsed / 1000` (µs → ms), which
+ * floored every sub-millisecond measurement to 0 then clamped to 1 ms.
+ * Net effect: any memcpy/memset fast enough to finish in <1 ms reported
+ * the same 4000 KB/s regardless of how fast it actually was. Observed
+ * on the 486 DX-2 at turbo-on: write_us=189 and read_us=921 BOTH came
+ * out as 4000 KB/s even though they were ~5× apart in wall time.
+ *
+ * New math works at microsecond precision end-to-end:
+ *   KB/s = (bytes / 1024) * 1e6 / elapsed_us
+ *
+ * To stay in 32-bit: compute in two steps with intermediate scaling.
+ *   step1 = bytes * 1000 / 1024   -- bytes-to-KB at 1-ms resolution
+ *   result = step1 * 1000 / elapsed_us
+ * For 4 KB at 189 µs:  step1 = 4000 → result = 4000*1000/189 ≈ 21164 KB/s.
+ * For 16 KB at 100 µs: step1 = 15625 → 15625*1000/100 ≈ 156250 KB/s.
+ * Largest intermediate: 65536*1000/1024 = 64000, then *1000 = 64M — fits
+ * in unsigned long (max ~4.29 B). No overflow for any realistic bench. */
 static unsigned long kb_per_sec(unsigned long bytes, us_t elapsed)
 {
-    unsigned long elapsed_ms;
+    unsigned long elapsed_us, step1;
     if (elapsed == 0) return 0;
-    elapsed_ms = (unsigned long)elapsed / 1000UL;
-    if (elapsed_ms == 0) elapsed_ms = 1;  /* sub-ms rounds up */
-    return (bytes * 1000UL / 1024UL) / elapsed_ms;
+    elapsed_us = (unsigned long)elapsed;
+    step1 = (bytes * 1000UL) / 1024UL;
+    return (step1 * 1000UL) / elapsed_us;
 }
 
 static void bench_write(result_table_t *t)
@@ -94,35 +108,41 @@ static void bench_copy(result_table_t *t)
                    (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
 }
 
-/* File-scope sink prevents the optimizer from eliding the read loop
- * without forcing volatile stores inside the inner loop. volatile inside
- * the loop makes each iteration do a memory write-back of the checksum
- * (~20+ cycles added per byte on 486), which turns a memory-read bench
- * into a checksum-spill bench — reported 7400 us on the 486DX2-66 when
- * the real read should be under 1 ms. A module-level sink written once
- * after the loop keeps the compiler honest without distorting timing. */
-static unsigned long bench_read_sink;
+/* File-scope sink prevents DCE without the overhead of volatile-in-loop. */
+static unsigned char bench_read_sink;
+
+/* REP LODSB read helper. Symmetric to memset/memcpy which compile to
+ * REP STOSB / REP MOVSB respectively; prior pure-C checksum loop added
+ * ~20 cycles of spill/reload per byte that swamped the memory itself.
+ *
+ * Returns AL = last byte read. Caller MUST use the return value
+ * (assigned to bench_read_sink below) so DCE can't elide the call.
+ *
+ * Watcom medium model: DS already points at DGROUP where mem_src lives,
+ * so near-pointer SI suffices. CX = count. No register clobbers beyond
+ * SI (moves) and AL (load target). */
+extern unsigned char mem_rep_lodsb(const unsigned char *buf, unsigned int count);
+#pragma aux mem_rep_lodsb = \
+    "cld" \
+    "rep lodsb" \
+    parm [si] [cx] \
+    value [al] \
+    modify [];
 
 static void bench_read(result_table_t *t)
 {
     us_t elapsed;
     unsigned long rate;
-    unsigned long checksum = 0;
-    unsigned int i;
+    unsigned char last;
 
     /* Pre-fill so we're reading defined values */
     memset(mem_src, 0x3C, MEM_BUF_BYTES);
 
     timing_start();
-    for (i = 0; i < MEM_BUF_BYTES; i++) {
-        checksum += mem_src[i];
-    }
+    last = mem_rep_lodsb(mem_src, MEM_BUF_BYTES);
     elapsed = timing_stop();
 
-    /* Commit the result to the module-level sink AFTER timing stops.
-     * This prevents dead-code elimination of the loop without the
-     * per-iteration store overhead that volatile forced. */
-    bench_read_sink = checksum;
+    bench_read_sink = last;   /* prevent DCE of the call */
 
     rate = kb_per_sec((unsigned long)MEM_BUF_BYTES, elapsed);
     report_add_u32(t, "bench.memory.read_kbps", rate, (const char *)0,

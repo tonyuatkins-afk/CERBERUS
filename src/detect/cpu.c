@@ -193,6 +193,20 @@ void detect_cpu(result_table_t *t, const opts_t *o)
             report_add_str(t, "cpu.notes", entry->notes,
                            env_clamp(CONF_MEDIUM), VERDICT_UNKNOWN);
         }
+        /* Rule 4b inputs: empirical iters/sec range for bench_cpu on a
+         * clean system. Only emitted when the DB has real data (both
+         * nonzero); consist.c rule 4b no-ops on either key's absence.
+         * File-scope static display buffers for the same lifetime
+         * reason as cpu.family_model_stepping above. */
+        if (entry->iters_low > 0 && entry->iters_high > 0) {
+            static char iters_low_buf[16], iters_high_buf[16];
+            sprintf(iters_low_buf,  "%lu", entry->iters_low);
+            sprintf(iters_high_buf, "%lu", entry->iters_high);
+            report_add_u32(t, "cpu.bench_iters_low",  entry->iters_low,
+                           iters_low_buf,  env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
+            report_add_u32(t, "cpu.bench_iters_high", entry->iters_high,
+                           iters_high_buf, env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
+        }
     } else {
         static char unk_detail[80];
         report_add_str(t, "cpu.detected",

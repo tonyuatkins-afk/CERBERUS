@@ -40,6 +40,15 @@ typedef struct {
 
     /* Output (common) */
     const char   *friendly;       /* Human-readable: "Intel i486DX2-66" */
+
+    /* Rule 4b (cpu_ipc_bench) expected bench_cpu iters_per_sec range.
+     * Zero on both means "no empirical data for this CPU yet" and rule
+     * 4b no-ops on absence. detect_cpu emits these as
+     * cpu.bench_iters_low/high so consist.c can compare against the
+     * bench output without touching the DB. */
+    unsigned long iters_low;
+    unsigned long iters_high;
+
     const char   *notes;          /* Brief caveat / quirk reference */
 } cpu_db_entry_t;
 
