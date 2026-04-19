@@ -53,6 +53,7 @@ OBJS = src\main.obj                                                  &
        src\core\report.obj    src\core\sha1.obj                      &
        src\core\consist.obj   src\core\thermal.obj                   &
        src\core\crumb.obj     src\core\ui.obj                        &
+       src\core\cache_buffers.obj                                    &
        src\detect\detect_all.obj                                     &
        src\detect\env.obj     src\detect\unknown.obj                 &
        src\detect\cpu.obj     src\detect\cpu_a.obj                   &
@@ -70,6 +71,7 @@ OBJS = src\main.obj                                                  &
        src\diag\diag_cache.obj src\diag\diag_dma.obj                 &
        src\bench\bench_all.obj src\bench\bench_cpu.obj               &
        src\bench\bench_memory.obj src\bench\bench_fpu.obj            &
+       src\bench\bench_cache.obj                                     &
        src\bench\bench_dhrystone.obj src\bench\bench_whetstone.obj   &
        src\upload\upload.obj
 
@@ -105,6 +107,9 @@ src\core\crumb.obj: src\core\crumb.c src\core\crumb.h
 
 src\core\ui.obj: src\core\ui.c src\core\ui.h src\core\display.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\ui.c
+
+src\core\cache_buffers.obj: src\core\cache_buffers.c src\core\cache_buffers.h
+	$(CC) $(CFLAGS) -fo=$^@ src\core\cache_buffers.c
 
 src\detect\detect_all.obj: src\detect\detect_all.c src\detect\detect.h src\core\crumb.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\detect_all.c
@@ -194,7 +199,7 @@ src\diag\diag_fpu.obj: src\diag\diag_fpu.c src\diag\diag.h src\core\report.h src
 src\diag\diag_video.obj: src\diag\diag_video.c src\diag\diag.h src\core\display.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_video.c
 
-src\diag\diag_cache.obj: src\diag\diag_cache.c src\diag\diag.h src\core\timing.h src\core\report.h src\cerberus.h
+src\diag\diag_cache.obj: src\diag\diag_cache.c src\diag\diag.h src\core\timing.h src\core\report.h src\core\cache_buffers.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_cache.c
 
 src\diag\diag_dma.obj: src\diag\diag_dma.c src\diag\diag.h src\core\report.h src\cerberus.h
@@ -211,6 +216,9 @@ src\bench\bench_memory.obj: src\bench\bench_memory.c src\bench\bench.h src\core\
 
 src\bench\bench_fpu.obj: src\bench\bench_fpu.c src\bench\bench.h src\core\timing.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_fpu.c
+
+src\bench\bench_cache.obj: src\bench\bench_cache.c src\bench\bench.h src\core\timing.h src\core\report.h src\core\cache_buffers.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_cache.c
 
 src\bench\bench_dhrystone.obj: src\bench\bench_dhrystone.c src\bench\bench.h src\core\timing.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_dhrystone.c

@@ -48,17 +48,16 @@
 #include "diag.h"
 #include "../core/report.h"
 #include "../core/timing.h"
+#include "../core/cache_buffers.h"
 
-/* FAR-segment buffers per the PF-2 far-buffer convention. Near data would
- * push DGROUP well over ceiling (32 KB large alone is half the 64 KB near
- * data limit, and we already use ~50 KB). */
-#define DIAG_CACHE_SMALL_BYTES   2048U
-#define DIAG_CACHE_LARGE_BYTES   32768U
-#define DIAG_CACHE_STRIDE        16      /* 486 cache line size — each
-                                           read touches a distinct line */
-
-static unsigned char __far small_buf[DIAG_CACHE_SMALL_BYTES];
-static unsigned char __far large_buf[DIAG_CACHE_LARGE_BYTES];
+/* FAR-segment buffers live in cache_buffers.c so bench_cache can share
+ * the same 34 KB of storage rather than duplicating the allocation. The
+ * DIAG_CACHE_* names are preserved as local aliases for read-site
+ * clarity; they resolve to the CACHE_BUFFERS_* constants from the shared
+ * header. */
+#define DIAG_CACHE_SMALL_BYTES   CACHE_BUFFERS_SMALL_BYTES
+#define DIAG_CACHE_LARGE_BYTES   CACHE_BUFFERS_LARGE_BYTES
+#define DIAG_CACHE_STRIDE        CACHE_BUFFERS_LINE_SIZE
 
 /* Display buffers — report_add_str stores the pointer verbatim. */
 static char diag_cache_small_us_val[16];
@@ -204,12 +203,14 @@ void diag_cache(result_table_t *t)
 
     /* Small-buffer timed run */
     timing_start();
-    stride_read_loop(small_buf, DIAG_CACHE_SMALL_BYTES, DIAG_CACHE_SMALL_ITERS);
+    stride_read_loop(cache_buffers_small(), DIAG_CACHE_SMALL_BYTES,
+                     DIAG_CACHE_SMALL_ITERS);
     t_small = timing_stop();
 
     /* Large-buffer timed run */
     timing_start();
-    stride_read_loop(large_buf, DIAG_CACHE_LARGE_BYTES, DIAG_CACHE_LARGE_ITERS);
+    stride_read_loop(cache_buffers_large(), DIAG_CACHE_LARGE_BYTES,
+                     DIAG_CACHE_LARGE_ITERS);
     t_large = timing_stop();
 
     /* Emit raw elapsed values — useful for debugging / regression triage

@@ -21,6 +21,7 @@
 
 #include "../../src/core/sha1.c"
 #include "../../src/core/report.c"
+#include "../../src/core/cache_buffers.c"
 
 /* Stub the hardware-touching timing primitives that diag_cache.c calls.
  * The real diag_cache() path uses timing_start / timing_stop for the

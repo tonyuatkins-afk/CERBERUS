@@ -18,4 +18,12 @@ void bench_fpu(result_table_t *t, const opts_t *o);
 void bench_dhrystone(result_table_t *t, const opts_t *o);
 void bench_whetstone(result_table_t *t, const opts_t *o);
 
+/* v0.4 cache bandwidth — see docs/plans/v0.4-benchmarks-and-polish.md §1 */
+void bench_cache(result_table_t *t, const opts_t *o);
+
+/* Pure math kernel used by bench_cache's emit path. Exposed for host
+ * tests so the rate arithmetic can be exercised without PIT hardware. */
+unsigned long bench_cache_kb_per_sec(unsigned long bytes,
+                                     unsigned long elapsed_us);
+
 #endif

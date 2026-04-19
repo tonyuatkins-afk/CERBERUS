@@ -116,6 +116,7 @@ void bench_all(result_table_t *t, const opts_t *o)
     WRAP_BENCH("cpu",        bench_cpu(t, o));
     WRAP_BENCH("memory",     bench_memory(t, o));
     WRAP_BENCH("fpu",        bench_fpu(t, o));
+    WRAP_BENCH("cache",      bench_cache(t, o));
     WRAP_BENCH("dhrystone",  bench_dhrystone(t, o));
     WRAP_BENCH("whetstone",  bench_whetstone(t, o));
 
@@ -126,5 +127,5 @@ void bench_all(result_table_t *t, const opts_t *o)
      * implied consistency rule via detect_fpu cross-check (Rule 10). */
     emit_xt_ratios(t);
 
-    /* bench_cache / bench_video land as Phase 3 continues. */
+    /* bench_video lands in the v0.4 sequence alongside this module. */
 }
