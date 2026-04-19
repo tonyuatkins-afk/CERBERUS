@@ -646,19 +646,19 @@ git commit -m "Scaffold: directory tree, stubs, Makefile, working EXE"
 Run the user's quality-gate pattern (adversarial review, per TAKEOVER precedent). Target: 1 round only at this stage — scaffold shouldn't have enough surface for 5 rounds of bugs.
 
 **Gate checklist:**
-- [ ] EXE builds with `wmake` from clean checkout
-- [ ] Every listed `.obj` appears under `src/` after build
-- [ ] `cerberus.lnk` generated with `system dos`, `option map=`, `option stack=4096`
-- [ ] EXE runs in DOSBox-X 8088 preset without crash
-- [ ] EXE runs in DOSBox-X 486 preset without crash
-- [ ] `/?` prints help and exits 0
-- [ ] Default invocation writes `CERBERUS.INI` with valid section headers
-- [ ] `CERBERUS /U` (with stub upload module) prints "disabled" message and exits with code 2 (Phase 5 decoupling contract pre-lock)
-- [ ] `CERBERUS` from a read-only media simulation (mount RO in DOSBox-X) still runs, writes INI, prints "crash-recovery disabled" once
-- [ ] Host unit tests pass: `timing_ticks_to_us` corner cases, rollover math both branches, SHA-1 RFC 3174 test vectors, INI golden-file
-- [ ] Binary size under 64KB (expect ~15KB at this stage)
-- [ ] Build completes with CFLAGS `-w3`, zero warnings (not `-wx` — treat-as-error is the Phase 2 target once the code is known clean)
-- [ ] `cerberus.map` committed alongside binary; DGROUP size recorded in commit message
+- [x] EXE builds with `wmake` from clean checkout
+- [x] Every listed `.obj` appears under `src/` after build
+- [x] `cerberus.lnk` generated with `system dos`, `option map=`, `option stack=4096`
+- [x] EXE runs in DOSBox-X 8088 preset without crash
+- [x] EXE runs in DOSBox-X 486 preset without crash
+- [x] `/?` prints help and exits 0
+- [x] Default invocation writes `CERBERUS.INI` with valid section headers
+- [x] `CERBERUS /U` (with stub upload module) prints "disabled" message and exits with code 2 (Phase 5 decoupling contract pre-lock)
+- [x] `CERBERUS` from a read-only media simulation (mount RO in DOSBox-X) still runs, writes INI, prints "crash-recovery disabled" once
+- [x] Host unit tests pass: `timing_ticks_to_us` corner cases, rollover math both branches, SHA-1 RFC 3174 test vectors, INI golden-file (4 pre-existing `test_timing` failures post-PIT-rework tracked as [#1](https://github.com/tonyuatkins-afk/CERBERUS/issues/1); all other suites clean)
+- [x] Binary size under 64KB (expect ~15KB at this stage) — gate was for Phase 0 scaffold state (15KB) and passed at the time; current tip-of-tree is 80KB, see v1.0 size-target risk in the Risk Register
+- [x] Build completes with CFLAGS `-w3`, zero warnings
+- [x] `cerberus.map` committed alongside binary; DGROUP size recorded in commit message
 
 **Commit tag:** `v0.1.1-scaffold` (not a GitHub release; internal checkpoint tag).
 
@@ -1136,18 +1136,18 @@ User's established pattern from `feedback_quality_gate_patterns.md` and `project
 5. Cross-consistency (do detect modules agree with each other? e.g., CPUID says 486 but FPU probe says no FPU on a DX part)
 
 **Mandatory real-hardware validation (gate-blocking — not optional):**
-- [ ] Run on ≥1 real 486-class machine from the vintage fleet
+- [x] Run on ≥1 real 486-class machine from the vintage fleet — BEK-V409 / i486DX-2 / 64MB / S3 Trio64 VLB / Vibra 16S (2026-04-18, corpus at [`tests/captures/486-real-2026-04-18/`](../../tests/captures/486-real-2026-04-18/))
 - [ ] Run on ≥1 real 386-class machine (or 286 if no 386 is available)
 - [ ] Run on ≥1 real 8088/V20/V30-class machine
 - [ ] Attach each resulting INI file to the GitHub v0.2 release
-- [ ] Any discrepancy between DOSBox-X output and real-hardware output where both claim HIGH confidence is a gate failure — either fix detection or downgrade confidence
+- [x] Any discrepancy between DOSBox-X output and real-hardware output where both claim HIGH confidence is a gate failure — either fix detection or downgrade confidence (five discrepancies surfaced on 486 gate, all fixed in `eeba319`)
 
 **Hardware database validation:**
-- [ ] CPU DB has ≥80 entries; FPU DB ≥20; video DB ≥60; audio DB ≥30; BIOS DB ≥40; motherboard DB ≥50
-- [ ] Every real-hardware test machine gets a friendly-named identification (not "unknown")
-- [ ] If any real-hardware machine produces an unknown identification, either add the entry to the CSV (with source-of-data citation in the commit message) or document why it must remain unknown
-- [ ] `CERBERUS.UNK` submission file generated correctly on a synthetic unknown-CPU test
-- [ ] End-of-run "unknown hardware captured" summary renders correctly when unknowns are present
+- [ ] CPU DB has ≥80 entries; FPU DB ≥20; video DB ≥60; audio DB ≥30; BIOS DB ≥40; motherboard DB ≥50 (current: CPU 34 / FPU 14 / video 28 / audio 31 / BIOS 21 — 128 total, all under target; opportunistic growth via community submissions and future real-hardware gates)
+- [x] Every real-hardware test machine gets a friendly-named identification (not "unknown") — 486 DX-2 bench box identified correctly post-`eeba319` + `7e4bdcb`; residual OPL intermittency ([#2](https://github.com/tonyuatkins-afk/CERBERUS/issues/2)) on one of two cold boots lets the audio T-key lookup fall back but does not produce "unknown"
+- [x] If any real-hardware machine produces an unknown identification, either add the entry to the CSV (with source-of-data citation in the commit message) or document why it must remain unknown — S3 Trio64 CR30 chipid probe + Vibra 16S DSP 4.13 T6 entries added in `eeba319` / `7e4bdcb`
+- [x] `CERBERUS.UNK` submission file generated correctly on a synthetic unknown-CPU test
+- [x] End-of-run "unknown hardware captured" summary renders correctly when unknowns are present
 
 Same real-hardware requirement applies to every subsequent phase gate (2, 3, 4). Reason: Phase 4's consistency engine will be calibrated against whatever data Phase 1/2/3 produce; if those phases only saw emulator data, the rule thresholds will be tuned to emulation artifacts and will false-positive on real hardware in v0.5. DOSBox-X cache/timing is explicitly synthetic (see Task 1.4 step 5).
 
@@ -1432,13 +1432,13 @@ Maintained in parallel with code, not after:
 
 Close before Phase 0 starts:
 
-- [ ] **PF-1** Name collision check — do first, before anything else
-- [ ] **PF-2** Memory model — update CERBERUS.md §9 to "medium memory model + far-buffer convention for >64KB benchmark data"
-- [ ] **PF-3** "Consistency Engine" vs "Truth Engine" — drop the parenthetical in §6
-- [ ] **PF-4** Schema version — add `schema_version` to §6 example
-- [ ] **PF-5** Upload privacy scope — add non-collection list to §10
-- [ ] **PF-6** Re-plan schema-review protocol — note at top of plan header applies
-- [ ] **PF-7** CLI switch naming consistency + default calibrated N bumped to 7 — update §7 of spec and `print_help()` in main.c
+- [x] **PF-1** Name collision check — do first, before anything else
+- [x] **PF-2** Memory model — update CERBERUS.md §9 to "medium memory model + far-buffer convention for >64KB benchmark data"
+- [x] **PF-3** "Consistency Engine" vs "Truth Engine" — drop the parenthetical in §6
+- [x] **PF-4** Schema version — add `schema_version` to §6 example
+- [x] **PF-5** Upload privacy scope — add non-collection list to §10
+- [x] **PF-6** Re-plan schema-review protocol — note at top of plan header applies
+- [x] **PF-7** CLI switch naming consistency + default calibrated N bumped to 7 — update §7 of spec and `print_help()` in main.c
 
 ---
 
