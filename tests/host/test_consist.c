@@ -484,6 +484,105 @@ int main(void)
               "Scenario NN: narration uses over-range message (cache status ignored)");
     }
 
+    /* ---- Rule 11: dma_class_coherence ---------------------------------- */
+
+    /* Scenario OO: XT-class CPU (8088) + slave correctly skipped by diag_dma
+     * → PASS (coherent). */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class", "8088", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "diagnose.dma.ch5_status",
+                   "skipped_no_slave (XT-class machine)",
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.dma_class_coherence")) == VERDICT_PASS,
+          "Scenario OO: 8088 + ch5 skipped → rule 11 PASS");
+
+    /* Scenario PP: XT-class CPU but diag_dma reports ch5 responded with
+     * the test pattern — contradiction between detection paths. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class", "8088", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "diagnose.dma.ch5_status", "pass",
+                   CONF_HIGH, VERDICT_PASS);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.dma_class_coherence")) == VERDICT_WARN,
+          "Scenario PP: 8088 + ch5 pass → rule 11 WARN (contradiction)");
+
+    /* Scenario QQ: NEC V20 is an 8088-compatible; treat as XT. Same WARN
+     * shape as Scenario PP. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class", "v20", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "diagnose.dma.ch5_status", "pass",
+                   CONF_HIGH, VERDICT_PASS);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.dma_class_coherence")) == VERDICT_WARN,
+          "Scenario QQ: V20 + ch5 pass → rule 11 WARN (contradiction)");
+
+    /* Scenario RR: V30 (8086-compatible but still XT-class) + safely
+     * skipped slave → PASS. Covers the V30 branch of the cpu.class match. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class", "v30", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "diagnose.dma.ch5_status",
+                   "skipped_no_slave (XT-class machine)",
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.dma_class_coherence")) == VERDICT_PASS,
+          "Scenario RR: V30 + ch5 skipped → rule 11 PASS");
+
+    /* Scenario SS: AT-class CPU (486) with slave passing the probe. Rule
+     * doesn't apply — no emit, no contradiction (this is the normal case
+     * on modern AT hardware). */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class", "intel", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "diagnose.dma.ch5_status", "pass",
+                   CONF_HIGH, VERDICT_PASS);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.dma_class_coherence") == NULL,
+          "Scenario SS: AT-class CPU + ch5 pass → rule 11 no-op");
+
+    /* Scenario TT: AT-class CPU with ch5 safety-skipped by some future
+     * code path. Rule stays silent — AT-class doesn't invoke rule 11
+     * regardless of what the slave channel says. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class", "486-no-cpuid",
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "diagnose.dma.ch5_status",
+                   "skipped_no_slave (XT-class machine)",
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.dma_class_coherence") == NULL,
+          "Scenario TT: AT-class + ch5 skipped → rule 11 no-op");
+
+    /* Scenario UU: cpu.class present but no ch5_status key (diag_dma
+     * didn't run — /SKIP:DMA, or module dropped from build). Rule must
+     * no-op rather than assume coherence. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class", "8088", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.dma_class_coherence") == NULL,
+          "Scenario UU: XT-class + ch5_status absent → rule 11 no-op");
+
+    /* Scenario VV: ch5_status present but cpu.class absent (detect_cpu
+     * failed). Rule no-op — cannot judge coherence without the CPU
+     * claim to check against. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "diagnose.dma.ch5_status", "pass",
+                   CONF_HIGH, VERDICT_PASS);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.dma_class_coherence") == NULL,
+          "Scenario VV: ch5 present + cpu.class absent → rule 11 no-op");
+
+    /* Scenario WW: XT-class CPU but ch5 reported FAIL (implausible —
+     * slave port responded but with wrong pattern). Rule must stay
+     * silent: the per-channel FAIL row already surfaces the anomaly;
+     * emitting a second WARN here would be double-counting. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "cpu.class", "8088", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "diagnose.dma.ch5_status", "fail",
+                   CONF_HIGH, VERDICT_FAIL);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.dma_class_coherence") == NULL,
+          "Scenario WW: XT + ch5 fail → rule 11 no-op (avoid double-counting)");
+
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }

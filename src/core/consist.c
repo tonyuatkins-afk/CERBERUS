@@ -616,6 +616,74 @@ static void rule_whetstone_fpu_consistency(result_table_t *t)
 }
 
 /* ----------------------------------------------------------------------- */
+/* Rule 11: dma_class_coherence.
+ *
+ * XT-class CPUs (8086 / 8088 / NEC V20 / V30) were shipped in systems
+ * with only the master 8237 DMA controller at 0x00-0x1F. The slave
+ * controller (channels 5-7 at 0xC0-0xDF) appeared with the PC/AT (286).
+ * If detect_cpu reports XT-class AND diag_dma finds channel 5
+ * responsive, the two detection paths contradict.
+ *
+ * Detects:
+ *   - Misidentified CPU (real 286 being reported as 8088 by a broken
+ *     CPUID-fallback path).
+ *   - Misidentified bus/board (XT with a retrofit ISA-16 slot + slave
+ *     DMA — rare but has been seen on collector frankenboards).
+ *   - A diag_dma readback false-positive on ch5 (the pattern byte
+ *     happened to match on a floating bus).
+ *
+ * Does NOT detect:
+ *   - An AT-class CPU with a broken slave (diag_dma would report the
+ *     slave channels as FAIL; that's caught by the dma.summary verdict,
+ *     not here).
+ *   - Legitimately XT hardware where diag_dma safety-skipped the
+ *     slave (the skipped_no_slave status matches the XT claim — PASS).
+ *
+ * Input keys:
+ *   cpu.class                  — "8086"/"8088"/"v20"/"v30" for XT-class
+ *   diagnose.dma.ch5_status    — emitted by diag_dma in three forms:
+ *                                 "pass" (controller responded)
+ *                                 "fail" (write-readback mismatch)
+ *                                 "skipped_no_slave (XT-class machine)"
+ *
+ * Rule no-ops if either key is absent (missing data, not a
+ * contradiction). Rule also no-ops for AT-class CPUs.                 */
+/* ----------------------------------------------------------------------- */
+
+static void rule_dma_class_coherence(result_table_t *t)
+{
+    const result_t *r_cls = find_key(t, "cpu.class");
+    const result_t *r_ch5 = find_key(t, "diagnose.dma.ch5_status");
+    const char *cv, *c5;
+    int is_xt;
+
+    if (!r_cls || !r_ch5) return;
+    cv = r_cls->v.s;
+    c5 = r_ch5->v.s;
+    if (!cv || !c5) return;
+
+    is_xt = (strcmp(cv, "8088") == 0 || strcmp(cv, "8086") == 0 ||
+             strcmp(cv, "v20")  == 0 || strcmp(cv, "v30")  == 0);
+    if (!is_xt) return;  /* rule only applies to XT-class CPUs */
+
+    /* Exact token match against diag_dma's emitted strings. The
+     * skipped_no_slave form carries a parenthetical tail; match on
+     * substring so a future message tweak doesn't silently break the
+     * coherence path. */
+    if (strstr(c5, "skipped_no_slave")) {
+        report_add_str(t, "consistency.dma_class_coherence",
+                       "pass (XT-class CPU with no DMA slave, as expected)",
+                       CONF_HIGH, VERDICT_PASS);
+    } else if (strcmp(c5, "pass") == 0) {
+        report_add_str(t, "consistency.dma_class_coherence",
+                       "WARN: XT-class CPU but DMA slave channel responsive — detection contradiction",
+                       CONF_HIGH, VERDICT_WARN);
+    }
+    /* else: fail / unknown token — silent no-op, surface via
+     * the per-channel status row rather than a second WARN. */
+}
+
+/* ----------------------------------------------------------------------- */
 
 void consist_check(result_table_t *t)
 {
@@ -629,6 +697,7 @@ void consist_check(result_table_t *t)
     rule_cpu_ipc_bench(t);
     rule_audio_mixer_chip(t);
     rule_whetstone_fpu_consistency(t);
+    rule_dma_class_coherence(t);
     /*
      * Rules landing as downstream phases complete:
      *
