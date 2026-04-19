@@ -101,6 +101,26 @@ Each rule below names the key it emits (`consistency.<name>`), the prerequisite 
 **What it does not catch:**
 - Wrong extended-memory values on a correctly-detected 286+ system. Size verification requires actual memory probing under diagnostic pattern testing, which is `diag_mem`'s domain.
 
+### Rule 7 — `consistency.audio_mixer_chip`
+
+**Claim:** When the audio database names an expected mixer chip for the matched row, the hardware mixer probe must observe the same chip.
+
+**Prerequisites:** `audio.mixer_chip_expected` (from `audio_db` row) and `audio.mixer_chip_observed` (from `probe_mixer_chip` at BLASTER-base + 4 / + 5 reg 0x80) both present.
+
+**Verdicts:**
+- **PASS** — `expected` equals `observed` (e.g. both `CT1745`).
+- **WARN** — `expected` is `unknown` (DB row has not yet been populated with verified mixer data) but `observed` is a named chip. Logged so real-hardware contributions feeding back into `hw_db/audio.csv` are visible.
+- **FAIL** — `expected` is a named chip and `observed` is `none` or a different named chip.
+- **no-op** — one or both keys absent (e.g. the audio card has no mixer to probe, or `/ONLY:DIAG` skipped the audio probe).
+
+**What it catches:**
+- A DB row mis-assigned to a given BLASTER-base/DSP-version composite key — the OPL+DSP family alone cannot fully discriminate SB16 / Vibra 16S / AWE32 / AWE64, and the CT1745 mixer presence splits the SB16 / Vibra 16 family from the older CT1335 / no-mixer Sound Blaster Pro family.
+- Counterfeit rebrands where the DSP fingerprint matches a card that should carry a CT1745 but the mixer probe doesn't find one.
+
+**What it does not catch:**
+- Two CT1745-bearing cards from the same family (e.g. two SB16 variants with different CTxxxx mixer silicon revisions). Mixer-chip granularity is family-level, not part-number-level.
+- A CT1745 mixer whose register map was altered by a PnP driver after CERBERUS's probe — the observed value is a single snapshot.
+
 ### Rule 4a — `consistency.timing_independence`
 
 **Claim:** Two timekeeping paths that share a crystal but use different PIT channels should agree on the duration of any given real-time interval.
@@ -146,13 +166,35 @@ The BIOS tick is the reference denominator — PIT is tested against it. Absolut
 **What it does not catch:**
 - Any correctly-detected 8086-class system. The rule is a bounds check, not a diagnostic.
 
+### Rule 10 — `consistency.whetstone_fpu`
+
+**Claim:** The `bench_whetstone` completion state must agree with the `detect_fpu` report.
+
+**Prerequisites:** `fpu.detected` and `bench.fpu.whetstone_status` both present.
+
+**Verdicts:**
+- **PASS** — FPU present (`fpu.detected != "none"`) and Whetstone ran to completion (`whetstone_status == "ok"`) with a non-zero `k_whetstones`.
+- **PASS** — FPU absent (`fpu.detected == "none"`) and Whetstone correctly skipped (`whetstone_status == "skipped_no_fpu"` or any non-"ok" non-inconclusive value).
+- **WARN** — FPU present and Whetstone ran but `k_whetstones == 0` (suspicious but not proof of fault).
+- **FAIL** — FPU present but Whetstone reports skipped (or the mirror case: detect says "none" but Whetstone produced a number). Classic case for the latter: a socketed 8087 the FNINIT/FNSTSW probe under-reported.
+- **no-op** — whetstone_status starts with `"inconclusive"` (e.g. `inconclusive_elapsed_zero` — measurement loop finished inside one PIT tick, an emulator artifact already surfaced by the WARN verdict attached to the status row itself; not a detection-consistency issue). Also no-op when either prerequisite key is absent.
+
+**What it catches:**
+- `detect_fpu` under-reporting a present FPU. The benchmark successfully executed x87 instructions, which cannot happen without hardware or a coprocessor emulator loaded — either way, "no FPU" is wrong.
+- Memory-corruption-class bugs where one head sees the FPU and the other does not.
+
+**What it does not catch:**
+- A broken FPU that completes Whetstone with wrong numbers. Rule 10 treats "completed" as PASS; bit-exact correctness is `diag_fpu`'s domain and covered by Rule 5.
+- A software FPU emulator (correctly classified as "present" at the ISA level). Consumers needing hardware-vs-emulator distinction read `fpu.vendor` / `fpu.friendly` directly.
+
+**Slot rationale:** the plan originally reserved Rule 8 for cache-stride vs CPUID-leaf-2 cross-check (still reserved, see Deferred rules). Rule 9 was already taken by `8086_bus`. Rule 10 is the next free slot — same off-by-one pattern as Rule 7.
+
 ## Deferred rules
 
 These are noted in the plan and will land as their prerequisite phases complete. Each is correctly no-op today.
 
 - **Rule 4b — MIPS within class_ipc range.** Compare `bench.cpu.iters_per_sec` against `cpu.clock_mhz × class_ipc_low..high` from `cpu_db`. Blocked on (a) `cpu_db` rows gaining `class_ipc_low_q16` and `class_ipc_high_q16` fields, and (b) Phase 3 calibrated-mode MIPS-equivalent reporting.
-- **Rule 7 — VGA adapter implies VGA benchmark modes available.** Blocked on `bench_video` landing.
-- **Rule 8 — Cache stride-knee locations match CPUID leaf 2 descriptors.** Blocked on (a) cache-bandwidth stride tests in `bench_cache`, and (b) CPUID leaf 2 descriptor decode on Pentium+.
+- **Rule 8 — Cache stride-knee locations match CPUID leaf 2 descriptors.** Blocked on (a) cache-bandwidth stride tests in `bench_cache`, and (b) CPUID leaf 2 descriptor decode on Pentium+. Slot remains reserved even though Rule 10 has since been assigned above it.
 
 ## Adding a new rule
 

@@ -43,7 +43,7 @@ These are designed so that when CERBERUS starts producing benchmark numbers (v0.
 
 ## What the consistency engine checks today
 
-CERBERUS's signature feature: it cross-checks detection claims against benchmark reality. Nine rules currently in force, each emitting a `consistency.*` row in the INI with PASS / WARN / FAIL:
+CERBERUS's signature feature: it cross-checks detection claims against benchmark reality. Ten rules currently in force, each emitting a `consistency.*` row in the INI with PASS / WARN / FAIL:
 
 1. **`486dx_fpu`** — 486DX CPUs must report an integrated FPU (catches counterfeit 486SX-as-DX silkscreens).
 2. **`486sx_fpu`** — 486SX CPUs must NOT report an integrated FPU (catches detection confusion).
@@ -54,10 +54,11 @@ CERBERUS's signature feature: it cross-checks detection claims against benchmark
 6. **`extmem_cpu`** — reported extended memory implies the CPU is 286 or later (extended memory on 8088 is impossible).
 7. **`audio_mixer_chip`** — audio DB `mixer_chip` column agrees with the hardware mixer probe (CT1745 discriminator for SB16 / Vibra 16S family; WARN when DB lacks data and probe sees a mixer, FAIL on explicit mismatch).
 9. **`8086_bus`** — 8086-class CPUs must be on an ISA-8 bus (PCI on an 8088 is impossible).
+10. **`whetstone_fpu`** — `bench_whetstone` completion state agrees with `detect_fpu` report (catches detect under-reporting of socketed FPUs — if Whetstone produced a number, x87 executed, and a "no FPU" detection is wrong).
 
 Plus `thermal.cpu` — Mann-Kendall rank trend test on per-pass benchmark timings (monotonic upward drift at α=0.05 ⇒ WARN — possible thermal throttling / dusty heatsink / failing regulator). Tracked separately from the numbered consistency rules; lives in `thermal.c`, emits `thermal.*` rows.
 
-Rule 8 (`cache_stride_vs_cpuid_leaf2`) is reserved pending Phase 3 cache-bench work.
+Rule 8 (`cache_stride_vs_cpuid_leaf2`) is reserved pending Phase 3 cache-bench work (slot preserved even though Rule 10 now lives above it — same off-by-one pattern as Rule 7).
 
 Every rule documents what it catches AND what it structurally cannot — see [`docs/consistency-rules.md`](docs/consistency-rules.md).
 

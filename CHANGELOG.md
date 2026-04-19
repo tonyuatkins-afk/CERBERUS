@@ -55,11 +55,19 @@ All five surfaced on contact with an actual BEK-V409 / i486DX-2 / S3 Trio64 / Vi
 
 **Status: 3 of 5 subsystems covered (integer, memory, FPU). Cache-bandwidth + video-throughput deferred.**
 
+### Historical benchmarks
+
+- Dhrystone 2.1 port (`e897c15`) — Weicker's reference workload ported to Watcom medium model with full original structure (`Ptr_Comp` linked list, `Record` variant union, `Arr_1_Glob` / `Arr_2_Glob` global arrays). Emits `bench.cpu.dhrystones`, indexed off a PC-XT baseline so PC-class machines get a recognizable relative-rating number. v0.4 plan landed alongside.
+- Whetstone port (`525f65b`) — the 1970s floating-point synthetic, eight modules (Module 1 through 8), FPU-presence gate so machines without an FPU emit `bench.fpu.whetstone_status=skipped_no_fpu` without attempting any x87 instructions. Emits `bench.fpu.k_whetstones`.
+- Anti-DCE guards for both Dhrystone and Whetstone (`97d24e6`) — Watcom `-ox` was eliminating the synthetic loops that produced no externally-observable output. Fix: volatile globals plus an end-of-run checksum emitted via `report_add_u32`, whose call into report.c (separate TU) prevents Watcom from proving the chain unused.
+- NULL-display pattern for Whetstone V_U32 emits (`8552c6d`) — Whetstone uses the same dangling-pointer-safe static-buffer pattern the bench_memory rework established in `6c3a023`.
+- Makefile `CFLAGS_NOOPT -od` pinned on `bench_dhrystone` and `bench_whetstone` (`1788561`) — the two benchmarks are the only objects built unoptimized; opt-level drift on those files would silently change the synthetic numbers.
+
 ### Consistency engine
 
-Engine + first four rules (`fac1500`). Alert-box UI for WARN/FAIL renders (`7b1a9b0`). Rules 3 + 9 (`4a9f24e`). Methodology documentation (`bb760c8`). Thermal stability — Mann-Kendall α=0.05 (`d5e7400`). Rule 4a PIT/BIOS timing independence (`111347a`). Rule 4b `cpu_ipc_bench` (`7e4bdcb`). Rule 7 `audio_mixer_chip` (`c22e886`).
+Engine + first four rules (`fac1500`). Alert-box UI for WARN/FAIL renders (`7b1a9b0`). Rules 3 + 9 (`4a9f24e`). Methodology documentation (`bb760c8`). Thermal stability — Mann-Kendall α=0.05 (`d5e7400`). Rule 4a PIT/BIOS timing independence (`111347a`). Rule 4b `cpu_ipc_bench` (`7e4bdcb`). Rule 7 `audio_mixer_chip` (`c22e886`). Rule 10 `whetstone_fpu_consistency` (`f0cebde`) — `bench_whetstone` completion state agrees with `detect_fpu` report, catching detect under-reporting of socketed FPUs.
 
-**Nine rules live** (1, 2, 3, 4a, 4b, 5, 6, 7, 9). Rule 8 (`cache_stride_vs_cpuid_leaf2`) reserved pending Phase 3 cache work.
+**Ten rules live** (1, 2, 3, 4a, 4b, 5, 6, 7, 9, 10). Rule 8 (`cache_stride_vs_cpuid_leaf2`) reserved pending Phase 3 cache work; slot preserved even with Rule 10 numerically above it.
 
 ### Infrastructure
 
