@@ -137,10 +137,58 @@ Proposed `/LOG:<minutes>` flag for v0.7+:
 
 Not v0.2. Not v0.3. Candidate for v0.7 after the NetISA upload path (v0.6) is live — the two features are mutually enabling: `/LOG` produces the volume of data that makes upload interesting, and NetISA provides the authenticated channel so a 3-hour run isn't wasted by a transient network blip.
 
-## 6. Where this plan lands in the roadmap
+## 6. Known limitations — post-v13 real-iron verification
 
-- **v0.2-rc1 (this RC).** CHANGELOG references this doc as a known future direction. No code changes required.
-- **v0.4 phase re-plan.** Dhrystone 2.1, Whetstone, and PC-XT ratio adopted as part of bench expansion. `bench.cpu.dhrystones` and `bench.fpu.k_whetstones` land as INI rows. Rules 3.1 / 3.2 / 3.3 seeded with DB-backed expected bands.
+Dhrystone 2.1 + Whetstone shipped in v0.2-rc1 (`e897c15` / `525f65b`) per the adoption plan above. Subsequent real-hardware validation on the BEK-V409 i486DX-2 bench box produced the following gap analysis against CheckIt 3.0's reference values measured on the same machine:
+
+| Benchmark | CheckIt 3.0 | CERBERUS v13 | Ratio | Status |
+|---|---|---|---|---|
+| Dhrystones/sec | 33,609 | 32,810 | **97.6%** | **Acceptable** — within ±5%, CONF_HIGH on the emit. |
+| K-Whetstones/sec | 11,420 | 109 | **0.95%** | **Not CheckIt-comparable.** CONF_LOW on the emit. |
+
+### Dhrystone — CheckIt-comparable
+
+The Dhrystone port hits CheckIt's reference within 2.4% at `CFLAGS_NOOPT = -ot -oi` (favor time + intrinsic). The anti-DCE scaffolding (`volatile` globals + `dhrystones_checksum` observer + non-DCE-inducing flag subset) successfully prevents Watcom from eliding the loop while allowing register allocation for locals. No follow-up required.
+
+### Whetstone — not CheckIt-comparable in v0.2
+
+The Whetstone port at the same flag set produces ~109 K-Whetstones — **~104× below CheckIt's 11,420 reference.** Iterative real-hardware investigation (v7 through v14 captures) isolated the bottleneck:
+
+- Attempt 1 — `volatile` on all accumulators, default `-ox` compile. DCE wins, reports 30× OVER reference (the v7/v8 pattern).
+- Attempt 2 — `-od` (disable all optimization) with `volatile` preserved. DCE defeated, but every FPU op goes through memory. Reports 130× UNDER reference. (v9/v10)
+- Attempt 3 — Move FPU accumulator locals from `volatile` to non-volatile with publishing statics + checksum observer. Restores x87 register allocation for X1-X4 / X / Y / Z locals. Small net improvement but still ~100× below reference. (v12)
+- Attempt 4 — Add `-om` (inline 80x87 math) to enable FPU-native transcendentals. Zero measurable effect — Watcom already applied equivalent optimization via `-oi`, OR library wrappers around `fsin`/`fcos` retain call-boundary overhead. (v13)
+- Attempt 5 — Add `-oe` (function expansion / inlining) to flatten helper call overhead. Halved the measured elapsed time (calibration hit fewer units) but did NOT change per-unit throughput — confirmed the bottleneck is INSIDE each unit's inner loops, not at call boundaries. (v14)
+
+**Root cause inferred**: the volatile-qualified `static double E1[4]` is accessed aggressively inside Modules 2, 3 (via `PA(E)`), and 9 (via `P0()`). At any non-aggressive optimization level, every read and write of `E1[]` is a full memory FST/FLD round-trip. On a 486 DX-2 those are ~10 cycles each vs x87-register ops at ~3 cycles, and the ~2,400 volatile E1-accesses per unit × 900 units/run = ~2.16M memory-round-tripped FP operations. That's the structural floor.
+
+Relaxing the `volatile` on `E1[]` would bring Whetstone's per-unit throughput back into CheckIt range but would reintroduce DCE risk (the checksum observer only catches writes that are never observed at all; it does not prevent hoisting repeated writes to the same array slots out of inner loops). Without hand-rolled FPU-assembly inner loops, there is no middle ground with Watcom 2.0 at any flag combination.
+
+### v0.2-rc1 decision: ship with CONF_LOW + documented divergence
+
+- `bench.fpu.k_whetstones` is emitted at **CONF_LOW** so downstream consumers (NetISA-uploaded DB, VOGONS community, future web dashboard) treat it as informational rather than cross-tool comparable.
+- `bench.fpu_xt_factor` is similarly **CONF_LOW** — it's directly derived from the low-confidence Whetstone rate.
+- `bench.fpu.whetstone_status` remains **CONF_HIGH** — the status itself (`ok` / `skipped_no_fpu` / `inconclusive_*`) is reliable regardless of the rate magnitude.
+- Rule 10 (`whetstone_fpu_consistency`) remains active and useful — its logic compares detection-head liveness to benchmark-head liveness, which is scale-invariant.
+- The Whetstone number is **reproducible cross-run on the same machine** — thermal-tracking and same-machine regression detection still work, just not cross-tool comparison.
+
+### v0.4 rework plan
+
+Replace `PA()`, `P0()`, and Modules 2 / 3's inner loops with hand-rolled FPU assembly. Structure:
+
+- `src/bench/bench_whetstone_a.asm` — NASM-compiled 8087 inner kernels taking non-volatile double pointers, FLD/FADD/FMUL/FST in straight-line FPU-register code, no memory round-tripping for intermediate results.
+- The outer `run_whetstone_units` stays in C for iteration control + module orchestration.
+- `E1[]` stays volatile at file scope for the DCE barrier (checksum reads it), but the inner module bodies use register-local working copies via the asm kernel's FPU stack.
+- Acceptance: v15 real-hardware capture on BEK-V409 shows `bench.fpu.k_whetstones` within ±5% of CheckIt's 11,420.
+
+Target landing: v0.4 completion pass, alongside cache-bandwidth + video-throughput benchmarks.
+
+Tracked as GitHub issue filed alongside this document update.
+
+## 7. Where this plan lands in the roadmap
+
+- **v0.2-rc1 (this RC).** Dhrystone shipped CheckIt-comparable. Whetstone shipped with CONF_LOW + documented caveat (§6). CHANGELOG Known Issues cross-references this doc.
+- **v0.4 phase re-plan.** FPU-assembly rework of Whetstone inner loops per §6's rework plan. `bench.cpu.dhrystones` stays; `bench.fpu.k_whetstones` confidence upgrades to CONF_HIGH once ±5% match is verified on real iron. Rules 3.1 / 3.2 / 3.3 seeded with DB-backed expected bands.
 - **v0.5 phase re-plan.** Bar-graph comparison UI lands as the three-pane summary polish, contingent on UI-hang resolution from session 2026-04-18 (see `docs/sessions/SESSION_REPORT_2026-04-18-evening.md`).
 - **v0.7+.** `/LOG` activity-log mode contingent on NetISA upload channel being live and usable.
 

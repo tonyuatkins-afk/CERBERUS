@@ -94,8 +94,11 @@ static void emit_xt_ratios(result_table_t *t)
             factor_x100 = (r_kwhet->v.u * 1000UL) / PC_XT_K_WHETSTONES_X10;
         }
         format_x100(xt_fpu_val, factor_x100);
+        /* CONF_LOW mirrors bench.fpu.k_whetstones — the fpu_xt_factor is
+         * directly derived from it, so it inherits the same "not CheckIt-
+         * comparable" caveat. See docs/plans/checkit-comparison.md. */
         report_add_str(t, "bench.fpu_xt_factor", xt_fpu_val,
-                       CONF_HIGH, VERDICT_UNKNOWN);
+                       CONF_LOW, VERDICT_UNKNOWN);
     }
 
     /* Memory ratio */

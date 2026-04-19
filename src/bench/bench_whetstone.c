@@ -430,9 +430,21 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
                                "inconclusive_sub_kwhet",
                                CONF_LOW, VERDICT_WARN);
             } else {
+                /* CONF_LOW on the rate emit — real-iron validation on the
+                 * BEK-V409 bench box surfaced a systematic ~100× divergence
+                 * from CheckIt 3.0's reference (11,420 K-Whet) that cannot
+                 * be closed with Watcom compiler-flag alone. The number is
+                 * reproducible on-CERBERUS across cold boots (useful for
+                 * thermal tracking + same-machine regression detection) but
+                 * is NOT directly comparable to CheckIt's reference or to
+                 * Whetstone numbers from other DOS-era benchmark tools.
+                 * Closing this gap needs hand-rolled FPU-assembly inner
+                 * loops for Modules 2/3/9's volatile-E1 hot paths — tracked
+                 * as a v0.4 task. See docs/plans/checkit-comparison.md
+                 * "Known limitations" for the full rationale. */
                 report_add_u32(t, "bench.fpu.k_whetstones",
                                k_whet_per_sec, (const char *)0,
-                               CONF_HIGH, VERDICT_UNKNOWN);
+                               CONF_LOW, VERDICT_UNKNOWN);
                 report_add_str(t, "bench.fpu.whetstone_status", "ok",
                                CONF_HIGH, VERDICT_UNKNOWN);
             }
