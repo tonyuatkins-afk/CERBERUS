@@ -94,9 +94,20 @@ static const result_t *find_local(const result_table_t *t, const char *key)
  * (iter_low_byte ^ offset_low_byte) so each byte stored is a function
  * of both loop indices and the Watcom optimizer cannot hoist any store
  * across iterations even at -ox (which bench_video doesn't use — see
- * CFLAGS_NOOPT note in the module header). */
+ * CFLAGS_NOOPT note in the module header).
+ *
+ * observer_mask convention (avoids per-iter 32-bit modulo):
+ *   - non-zero: AND the iteration index with this mask to pick an
+ *     observer offset. Callers whose buffers are powers of two pass
+ *     (size - 1U). The text loop (size=4096) passes 4095U.
+ *   - zero: use the iteration index directly as the offset. Callers
+ *     MUST guarantee iters <= size so the index never walks past the
+ *     buffer. The mode 13h loop (size=64000, iters=300) uses this.
+ * Prior implementation used `i % size` which invoked Watcom's _U4D
+ * helper (~150 cycles on 8088); at 5000 iterations that was ~15%
+ * measurement bias on floor hardware. */
 static void vram_write_loop(unsigned char __far *vram, unsigned int size,
-                             unsigned long iters)
+                             unsigned long iters, unsigned int observer_mask)
 {
     unsigned long i;
     unsigned int j;
@@ -108,58 +119,60 @@ static void vram_write_loop(unsigned char __far *vram, unsigned int size,
         }
         /* Per-iter volatile observer — matches bench_cache_iter_observer.
          * Defeats cross-iteration DSE by forcing each iteration's writes
-         * to be observable (reads back a byte just written at a wrapped
-         * offset). Belt-and-braces alongside the CFLAGS_NOOPT compile.
-         *
-         * Modulo, not bitmask: bench_cache uses (size - 1U) as a mask
-         * because its buffers are powers of two. bench_video's mode 13h
-         * buffer is 64000 (NOT a power of two), so a mask would produce
-         * a non-uniform wrap that could walk past size. The 32-bit
-         * divide costs ~5300 total (5000 text + 300 mode13h) ≈ 0.5 ms
-         * on a 486 — negligible against ~1-2 sec run times. */
-        bench_video_iter_observer = vram[(unsigned int)(i % (unsigned long)size)];
+         * to be observable. Belt-and-braces alongside CFLAGS_NOOPT. */
+        bench_video_iter_observer = vram[observer_mask
+            ? (unsigned int)(i & (unsigned long)observer_mask)
+            : (unsigned int)i];
     }
 }
 
-/* Text-mode benchmark. Picks the segment by adapter class (same mapping
- * diag_video uses), saves the 4 KB, runs the timed write loop, restores.
- * Returns 0 on success, 1 if the measurement is degenerate (adapter
- * unknown, zero elapsed, or kbps math returned 0). */
+/* Text-mode benchmark. Picks the segment by the CURRENT video mode
+ * (INT 10h AH=0Fh) rather than adapter class: an EGA-color adapter
+ * running mode 7 has text VRAM at B000, not B800; a prior program may
+ * have left the adapter in a graphics mode; and the active display
+ * page may not be page 0. Saves the 4 KB, runs the timed write loop,
+ * restores. Returns 0 on success, 1 if the measurement is degenerate
+ * (zero elapsed or kbps math returned 0). */
 static int bench_video_text(result_table_t *t)
 {
-    adapter_t a = display_adapter();
     unsigned int seg;
     unsigned char __far *vram;
     us_t elapsed;
     unsigned long rate;
     unsigned int j;
+    union REGS regs;
+    unsigned char cur_mode;
+    unsigned char active_page;
 
-    switch (a) {
-        case ADAPTER_MDA:
-        case ADAPTER_HERCULES:
-        case ADAPTER_EGA_MONO:
-        case ADAPTER_VGA_MONO:
-            seg = 0xB000;
-            break;
-        case ADAPTER_CGA:
-        case ADAPTER_EGA_COLOR:
-        case ADAPTER_VGA_COLOR:
-        case ADAPTER_MCGA:
+    /* INT 10h AH=0Fh returns AL=current mode, AH=columns, BH=active
+     * page. Mask bit 7 of AL — some BIOSes set it to signal "no-clear"
+     * on the last mode set, which confuses a raw switch(). */
+    memset(&regs, 0, sizeof(regs));
+    regs.h.ah = 0x0F;
+    int86(0x10, &regs, &regs);
+    cur_mode = (unsigned char)(regs.h.al & 0x7FU);
+    active_page = regs.h.bh;
+
+    switch (cur_mode) {
+        case 0: case 1: case 2: case 3:
             seg = 0xB800;
             break;
+        case 7:
+            seg = 0xB000;
+            break;
         default:
-            /* Skip path returns 0: a skip is NOT a measurement failure.
-             * Returning 1 here would OR into bench_video's any_zero and
-             * publish bench.video.status=warn_zero_elapsed, which means
-             * "timing came back degenerate" — a different signal entirely.
-             * The legitimate degenerate-rate path at the end of this
-             * function still returns 1 (rate == 0 after measurement). */
+            /* Graphics mode or unknown text mode — skip. A skip returns
+             * 0 because it is NOT a measurement failure; returning 1
+             * would propagate into bench_video's any_zero and publish
+             * warn_zero_elapsed, which means "timing degenerate". */
             report_add_str(t, "bench.video.text_status",
-                           "skipped_unknown_adapter",
+                           "skipped_not_text_mode",
                            CONF_HIGH, VERDICT_UNKNOWN);
             return 0;
     }
-    vram = (unsigned char __far *)MK_FP(seg, 0x0000);
+    /* Each text page is 4096 bytes; write to whichever page is live. */
+    vram = (unsigned char __far *)MK_FP(seg,
+        (unsigned int)active_page * 0x1000U);
 
     /* Capture the live display bytes so they can be put back after. */
     for (j = 0U; j < BENCH_VIDEO_TEXT_BYTES; j++) {
@@ -167,7 +180,9 @@ static int bench_video_text(result_table_t *t)
     }
 
     timing_start_long();
-    vram_write_loop(vram, BENCH_VIDEO_TEXT_BYTES, BENCH_VIDEO_TEXT_ITERS);
+    vram_write_loop(vram, BENCH_VIDEO_TEXT_BYTES,
+                    BENCH_VIDEO_TEXT_ITERS,
+                    BENCH_VIDEO_TEXT_BYTES - 1U);
     elapsed = timing_stop_long();
 
     /* Restore display. This happens AFTER timing_stop, so the restore
@@ -233,12 +248,20 @@ static int bench_video_mode13h(result_table_t *t)
      * whatever the user was running (mode 07 mono, a non-default text
      * mode, etc.) — the previous unconditional AL=03h restore dropped
      * mode 07 users into mode 03h. INT 10h AH=0Fh returns: AL=current
-     * video mode, AH=column count, BH=active display page. */
+     * video mode, AH=column count, BH=active display page.
+     *
+     * Zero the REGS union before each int86 call: otherwise residual BL/
+     * BH/CX state from the prior call leaks into the next BIOS call.
+     * Some BIOSes treat AL bit 7 on AH=00h as "preserve VRAM"; carrying
+     * garbage into unrelated registers risks triggering vendor-specific
+     * paths. */
+    memset(&regs, 0, sizeof(regs));
     regs.h.ah = 0x0F;
     int86(0x10, &regs, &regs);
     saved_mode = regs.h.al;
 
     /* INT 10h AH=00h AL=13h — set mode 13h (320x200x256, VGA). */
+    memset(&regs, 0, sizeof(regs));
     regs.h.ah = 0x00;
     regs.h.al = 0x13;
     int86(0x10, &regs, &regs);
@@ -246,7 +269,10 @@ static int bench_video_mode13h(result_table_t *t)
     vram = (unsigned char __far *)MK_FP(0xA000, 0x0000);
 
     timing_start_long();
-    vram_write_loop(vram, BENCH_VIDEO_M13H_BYTES, BENCH_VIDEO_M13H_ITERS);
+    /* observer_mask=0: iters (300) < size (64000), so i is always a
+     * valid offset; skip the mask AND avoid a per-iter 32-bit modulo. */
+    vram_write_loop(vram, BENCH_VIDEO_M13H_BYTES,
+                    BENCH_VIDEO_M13H_ITERS, 0U);
     elapsed = timing_stop_long();
 
     /* Restore the entry mode. Happens after timing_stop so the mode-
@@ -258,6 +284,7 @@ static int bench_video_mode13h(result_table_t *t)
      * already wiped the text-mode buffer). What THIS fix addresses is
      * geometry/attribute mismatch: a mode-07 user now gets mode 07 back
      * instead of being dumped into mode 03. */
+    memset(&regs, 0, sizeof(regs));
     regs.h.ah = 0x00;
     regs.h.al = saved_mode;
     int86(0x10, &regs, &regs);
@@ -279,8 +306,16 @@ void bench_video(result_table_t *t, const opts_t *o)
 {
     int any_zero = 0;
     (void)o;
+    /* Warn the user before obliterating their display: the text-mode
+     * bench writes ~20 MB through live VRAM (visible garble for ~1 sec)
+     * and the mode 13h bench clears the screen via INT 10h mode switch.
+     * Without this line users panic and Ctrl-C. */
+    puts("[bench.video] display will flicker for ~2 sec - mode 13h will clear screen");
     any_zero |= bench_video_text(t);
     any_zero |= bench_video_mode13h(t);
+    /* After mode 13h round-trip, screen is cleared. Identify the
+     * transition so subsequent bench output isn't confusing. */
+    puts("[bench.video] mode 13h done; screen restored");
     if (any_zero) {
         report_add_str(t, "bench.video.status",
                        "warn_zero_elapsed",
