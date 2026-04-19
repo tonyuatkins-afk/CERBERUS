@@ -45,6 +45,8 @@ static char msg_rule9_fail[96];
 static char msg_rule4a_warn[120];
 static char msg_rule4b_warn[160];
 static char msg_rule4b_pass[120];
+static char msg_rule7_warn[120];
+static char msg_rule7_fail[120];
 
 static const result_t *find_key(const result_table_t *t, const char *key)
 {
@@ -414,6 +416,74 @@ static void rule_cpu_ipc_bench(result_table_t *t)
 }
 
 /* ----------------------------------------------------------------------- */
+/* Rule 7: audio DB mixer_chip column agrees with the hardware mixer probe.
+ *
+ * Detects:
+ *   - A Sound Blaster family card that the DB identifies as CT1745-backed
+ *     (SB16 CT2230+, Vibra 16S — today's seeded set) but whose mixer port
+ *     doesn't answer like a CT1745. Classic fingerprint of a counterfeit
+ *     or repackaged OEM card advertising an SB16 DSP version while
+ *     actually carrying a cheaper mixer.
+ *   - An audio entry whose DB row says "unknown" but where the probe sees
+ *     a plausible CT1745 byte. Read as: "you have real data, please
+ *     contribute it back to hw_db/audio.csv so the DB matures."
+ *
+ * Does NOT detect:
+ *   - Mixer chips other than CT1745 (e.g., CT1345 on SB Pro). The probe
+ *     returns "unknown" or "none" in that range today. Widening coverage
+ *     is a follow-up — add discriminators in probe_mixer_chip and the
+ *     CT1345 column value simultaneously.
+ *   - Cards that faithfully clone a CT1745 to the point of returning
+ *     plausible Interrupt Setup bytes. The rule is an additional
+ *     consistency axis, not a counterfeit-proof credential check.
+ *
+ * Brief from session 2026-04-18 offered "Rule 8 or extend Rule 5". Rule
+ * 5 (fpu_diag_bench) is a different subsystem and doesn't fit; Rule 8 is
+ * reserved above for the future cache-stride cross-check. Rule 7 is the
+ * free slot and used here.
+ *
+ * Verdict: PASS on match, WARN when DB is unknown-with-mixer-observed,
+ *          FAIL when DB expects a specific chip and probe contradicts.   */
+/* ----------------------------------------------------------------------- */
+
+static void rule_audio_mixer_chip(result_table_t *t)
+{
+    const result_t *exp = find_key(t, "audio.mixer_chip_expected");
+    const result_t *obs = find_key(t, "audio.mixer_chip_observed");
+    const char *ev = key_value(exp);
+    const char *ov = key_value(obs);
+
+    if (!exp || !obs || !ev || !ov) return;  /* rule not applicable */
+
+    /* DB has no mixer data, probe saw nothing either — no usable signal;
+     * stay silent rather than emit a dozen WARNs on every non-SB card. */
+    if (strcmp(ev, "unknown") == 0 && strcmp(ov, "none") == 0) return;
+
+    /* DB is uncertain but probe saw a mixer — prompt human to seed DB. */
+    if (strcmp(ev, "unknown") == 0) {
+        sprintf(msg_rule7_warn,
+                "WARN: audio DB mixer_chip=unknown for this card; probe observed '%s' (contribute to hw_db/audio.csv)",
+                ov);
+        report_add_str(t, "consistency.audio_mixer_chip", msg_rule7_warn,
+                       CONF_MEDIUM, VERDICT_WARN);
+        return;
+    }
+
+    /* DB expects a specific chip. Compare. */
+    if (strcmp(ev, ov) == 0) {
+        report_add_str(t, "consistency.audio_mixer_chip",
+                       "pass (mixer chip matches DB expectation)",
+                       CONF_HIGH, VERDICT_PASS);
+    } else {
+        sprintf(msg_rule7_fail,
+                "FAIL: audio DB expects mixer '%s' but probe observed '%s'",
+                ev, ov);
+        report_add_str(t, "consistency.audio_mixer_chip", msg_rule7_fail,
+                       CONF_HIGH, VERDICT_FAIL);
+    }
+}
+
+/* ----------------------------------------------------------------------- */
 
 void consist_check(result_table_t *t)
 {
@@ -425,6 +495,7 @@ void consist_check(result_table_t *t)
     rule_8086_implies_isa8(t);
     rule_timing_independence(t);
     rule_cpu_ipc_bench(t);
+    rule_audio_mixer_chip(t);
     /*
      * Rules landing as downstream phases complete:
      *

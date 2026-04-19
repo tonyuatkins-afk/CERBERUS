@@ -63,11 +63,12 @@ def emit_c(rows, out_path):
         'const audio_db_entry_t audio_db[] = {',
     ]
     for r in rows:
-        mk  = c_escape((r.get('match_key') or '').strip())
-        frn = c_escape((r.get('friendly')  or '').strip())
-        ven = c_escape((r.get('vendor')    or '').strip())
-        nts = c_escape((r.get('notes')     or '').strip())
-        lines.append(f'    {{ {mk}, {frn}, {ven}, {nts} }},')
+        mk  = c_escape((r.get('match_key')   or '').strip())
+        frn = c_escape((r.get('friendly')    or '').strip())
+        ven = c_escape((r.get('vendor')      or '').strip())
+        nts = c_escape((r.get('notes')       or '').strip())
+        mix = c_escape((r.get('mixer_chip')  or 'unknown').strip() or 'unknown')
+        lines.append(f'    {{ {mk}, {frn}, {ven}, {nts}, {mix} }},')
     lines += [
         '};',
         '',

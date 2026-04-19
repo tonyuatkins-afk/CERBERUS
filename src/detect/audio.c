@@ -35,7 +35,11 @@
  * dangle after detect_audio returns. Two buffers at risk here:
  *   - audio.sb_dsp_version  when SB probe succeeds
  *   - audio.detected        on the DB-miss path (entry == NULL)
- * Each gets its own static so INI write and UI render see valid bytes. */
+ * Each gets its own static so INI write and UI render see valid bytes.
+ *
+ * mixer_chip_observed and mixer_chip_expected both point at string
+ * literals (from probe_mixer_chip's static returns and from the audio_db
+ * entry's mixer_chip field), so they don't need buffers of their own. */
 static char audio_sb_dsp_version_val[8];
 static char audio_match_key[24];
 
@@ -228,6 +232,41 @@ static int probe_sb_dsp(unsigned int base, unsigned int *out_major, unsigned int
 }
 
 /* ----------------------------------------------------------------------- */
+/* Mixer chip probe (CT1745 discriminator)                                  */
+/*                                                                          */
+/* SB16 family carries a CT1745 mixer chip at BLASTER-base+4 (address) and  */
+/* base+5 (data). Register 0x80 is the Interrupt Setup Register on CT1745; */
+/* it encodes the programmed IRQ as a bitmap in the low nibble (IRQ 2/9 =  */
+/* 0x01, 5 = 0x02, 7 = 0x04, 10 = 0x08) with the high nibble clear. SB Pro */
+/* (CT1345) has no register at that index — open-bus reads return 0xFF, or */
+/* on some bus-contention cases the index byte (0x80) is echoed back.      */
+/*                                                                          */
+/* Reference: Creative Labs Sound Blaster 16 Series Hardware Programming   */
+/* Reference Manual, April 1994, §3.1 "Mixer Chip Registers".              */
+/*                                                                          */
+/* Returns a classification string (static lifetime, safe for report_add): */
+/*   "CT1745"  — read looks like a valid Interrupt Setup byte              */
+/*   "none"    — open-bus / index-echo / zero — no CT1745 at this base     */
+/*   "unknown" — byte doesn't fit either bucket (weird mixer, not CT1745   */
+/*              but also not clearly absent — needs human triage via       */
+/*              Rule 7 WARN)                                                */
+/* ----------------------------------------------------------------------- */
+
+static const char *probe_mixer_chip(unsigned int sb_base)
+{
+    unsigned int addr = sb_base + 0x04;
+    unsigned int data = sb_base + 0x05;
+    unsigned char v;
+
+    outp(addr, 0x80);
+    v = (unsigned char)inp(data);
+
+    if (v == 0xFF || v == 0x80 || v == 0x00) return "none";
+    if ((v & 0xF0) == 0x00 && (v & 0x0F) != 0) return "CT1745";
+    return "unknown";
+}
+
+/* ----------------------------------------------------------------------- */
 /* Orchestration                                                            */
 /* ----------------------------------------------------------------------- */
 
@@ -264,6 +303,13 @@ void detect_audio(result_table_t *t)
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
         report_add_str(t, "audio.sb_dsp_version", audio_sb_dsp_version_val,
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
+        /* Mixer chip probe runs only when SB DSP answered — otherwise
+         * there's no meaningful I/O base to probe against. Emitted
+         * independently of DB lookup so Rule 7 can compare observed
+         * against expected even when DB has no mixer_chip record. */
+        report_add_str(t, "audio.mixer_chip_observed",
+                       probe_mixer_chip(sb_base),
+                       env_clamp(CONF_MEDIUM), VERDICT_UNKNOWN);
     } else {
         report_add_str(t, "audio.sb_present", "no",
                        env_clamp(CONF_MEDIUM), VERDICT_UNKNOWN);
@@ -306,6 +352,10 @@ void detect_audio(result_table_t *t)
         if (entry->notes && *entry->notes) {
             report_add_str(t, "audio.notes", entry->notes,
                            env_clamp(CONF_MEDIUM), VERDICT_UNKNOWN);
+        }
+        if (entry->mixer_chip && *entry->mixer_chip) {
+            report_add_str(t, "audio.mixer_chip_expected", entry->mixer_chip,
+                           env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
         }
     } else {
         report_add_str(t, "audio.detected", audio_match_key,

@@ -251,6 +251,57 @@ int main(void)
     CHECK(k(&t, "consistency.timing_independence") == NULL,
           "Scenario W: pit_us=0 → rule 4a no-op (self-check bailed)");
 
+    /* Scenario X: mixer DB says CT1745, probe confirms CT1745 → rule 7 PASS.
+     * Models the healthy Vibra 16S / SB16 CT2230+ case on real hardware
+     * where the DB's seeded value and the Interrupt Setup Register read
+     * agree. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "audio.mixer_chip_expected", "CT1745", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "audio.mixer_chip_observed", "CT1745", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.audio_mixer_chip")) == VERDICT_PASS,
+          "Scenario X: mixer expected=CT1745 + observed=CT1745 → rule 7 PASS");
+
+    /* Scenario Y: DB expects CT1745 but probe returned "none" (mixer absent
+     * or open-bus). Models a counterfeit card advertising SB16 DSP version
+     * while physically missing the CT1745 mixer, or a hardware fault where
+     * the mixer port doesn't respond. Rule 7 FAILs. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "audio.mixer_chip_expected", "CT1745", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "audio.mixer_chip_observed", "none",   CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.audio_mixer_chip")) == VERDICT_FAIL,
+          "Scenario Y: mixer expected=CT1745 + observed=none → rule 7 FAIL");
+
+    /* Scenario Z: DB has mixer_chip=unknown (most rows today), probe saw a
+     * CT1745 on hardware → rule 7 WARN inviting the user to contribute a
+     * DB entry. The specific text is not asserted; the verdict + presence
+     * is sufficient. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "audio.mixer_chip_expected", "unknown", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "audio.mixer_chip_observed", "CT1745",  CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.audio_mixer_chip")) == VERDICT_WARN,
+          "Scenario Z: mixer expected=unknown + observed=CT1745 → rule 7 WARN");
+
+    /* Scenario AA: DB unknown, probe also saw no mixer (e.g. a card without
+     * a CT1745 where the DB correctly doesn't claim one either). Rule 7
+     * should stay silent — no useful signal. Prevents a wall of WARNs on
+     * every run with a non-SB16 card. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "audio.mixer_chip_expected", "unknown", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "audio.mixer_chip_observed", "none",    CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.audio_mixer_chip") == NULL,
+          "Scenario AA: mixer expected=unknown + observed=none → rule 7 no-op");
+
+    /* Scenario BB: neither expected nor observed populated (e.g. /ONLY:DIAG
+     * or a run without an SB detected) → rule 7 no-op. */
+    memset(&t, 0, sizeof(t));
+    consist_check(&t);
+    CHECK(k(&t, "consistency.audio_mixer_chip") == NULL,
+          "Scenario BB: mixer keys absent → rule 7 no-op");
+
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }
