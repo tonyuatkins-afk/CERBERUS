@@ -80,7 +80,7 @@ Requires [Open Watcom C/C++ 2.0](http://open-watcom.github.io/) and [NASM 2.x](h
 wmake
 ```
 
-Produces `CERBERUS.EXE` — DOS real-mode, medium memory model. Current build is 100,020 bytes; DGROUP (near data) 50,512 / 65,536 bytes (23% headroom on the hard ceiling, under the 52,000-byte internal working-ceiling).
+Produces `CERBERUS.EXE` — DOS real-mode, medium memory model. Current build is 135,438 bytes; DGROUP (near data) 51,744 / 65,536 bytes (21% headroom on the hard ceiling, under the 56,000-byte internal working-ceiling — lifted from 52,000 at v0.4 kickoff to absorb `bench_cache` + `bench_video` + Whetstone-asm deltas).
 
 Host-side unit tests (run on Windows / Linux / macOS dev box, exercise the pure-math and database-lookup paths with 138 assertions across timing / consistency / thermal / diag_fpu):
 
