@@ -302,6 +302,53 @@ int main(void)
     CHECK(k(&t, "consistency.audio_mixer_chip") == NULL,
           "Scenario BB: mixer keys absent → rule 7 no-op");
 
+    /* Scenario CC: FPU reported present + Whetstone ran with nonzero
+     * result → rule 10 PASS. Models the healthy 486DX or 8088+8087 path. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "fpu.detected",               "integrated-486", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bench.fpu.whetstone_status", "ok",             CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "bench.fpu.k_whetstones",     11420UL, "11420", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.whetstone_fpu")) == VERDICT_PASS,
+          "Scenario CC: FPU=integrated-486 + Whetstone=ok/11420 → rule 10 PASS");
+
+    /* Scenario DD: FPU reported absent + Whetstone skipped → rule 10 PASS.
+     * The normal no-8087 8088 path. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "fpu.detected",               "none",           CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bench.fpu.whetstone_status", "skipped_no_fpu", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.whetstone_fpu")) == VERDICT_PASS,
+          "Scenario DD: FPU=none + Whetstone=skipped → rule 10 PASS");
+
+    /* Scenario EE: FPU reported present but Whetstone skipped — detection
+     * disagreement → rule 10 FAIL. Would indicate fpu.detected changed
+     * between detect and bench (memory-corruption class of bug). */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "fpu.detected",               "387",            CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bench.fpu.whetstone_status", "skipped_no_fpu", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.whetstone_fpu")) == VERDICT_FAIL,
+          "Scenario EE: FPU=387 + Whetstone=skipped → rule 10 FAIL");
+
+    /* Scenario FF: FPU reported absent but Whetstone produced a number —
+     * detect under-reported. Classic socketed-8087-missed-by-probe case.
+     * → rule 10 FAIL. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "fpu.detected",               "none",       CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bench.fpu.whetstone_status", "ok",         CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "bench.fpu.k_whetstones",     500UL, "500", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.whetstone_fpu")) == VERDICT_FAIL,
+          "Scenario FF: FPU=none + Whetstone=ok/500 → rule 10 FAIL (detect under-reported)");
+
+    /* Scenario GG: fpu.detected present, bench keys absent → rule 10 no-op. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "fpu.detected", "integrated-486", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.whetstone_fpu") == NULL,
+          "Scenario GG: fpu.detected present, bench keys absent → rule 10 no-op");
+
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }

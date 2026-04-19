@@ -46,7 +46,10 @@ static const display_row_t rows[] = {
     { "bios.family",                  "bios" },
     { "bios.date",                    "  date" },
     { "bench.cpu.dhrystones",         "dhrystones" },
-    { "bench.fpu.k_whetstones",       "  k-whet" }
+    { "bench.fpu.k_whetstones",       "  k-whet" },
+    { "bench.cpu_xt_factor",          "x PC-XT cpu" },
+    { "bench.fpu_xt_factor",          "  fpu" },
+    { "bench.mem_xt_factor",          "  mem" }
 };
 #define ROW_COUNT (sizeof(rows) / sizeof(rows[0]))
 

@@ -47,6 +47,7 @@ static char msg_rule4b_warn[160];
 static char msg_rule4b_pass[120];
 static char msg_rule7_warn[120];
 static char msg_rule7_fail[120];
+static char msg_rule10_fail[120];
 
 static const result_t *find_key(const result_table_t *t, const char *key)
 {
@@ -484,6 +485,80 @@ static void rule_audio_mixer_chip(result_table_t *t)
 }
 
 /* ----------------------------------------------------------------------- */
+/* Rule 10: Whetstone completion state agrees with detect_fpu's report.
+ *
+ * Detects:
+ *   - detect_fpu says "none" but Whetstone ran to completion and
+ *     produced a number. x87 instructions executed successfully, so an
+ *     FPU (or emulator TSR) is present and detect under-reported. Classic
+ *     case: socketed 8087 the FNINIT/FNSTSW probe somehow missed.
+ *   - detect names an FPU but Whetstone reported skipped_no_fpu.
+ *     bench_whetstone consumes the same fpu.detected row, so the two
+ *     sides should only disagree on a memory-corruption-class bug —
+ *     still worth flagging if it ever happens.
+ *
+ * Does NOT detect:
+ *   - Broken FPU that completes Whetstone with wrong numbers. Rule 10
+ *     treats "completed" as PASS. Rule 5 (fpu_diag_bench) and diag_fpu's
+ *     known-answer bit-exact tests cover that axis.
+ *   - Software FPU emulator — classified as "present" (correctly, at the
+ *     ISA level). Consumers wanting hardware-vs-emulator distinction
+ *     consult fpu.vendor / fpu.friendly.
+ *
+ * Slot rationale: session brief wrote "Rule 9" but Rule 9 is already
+ * rule_8086_implies_isa8, and Rule 8 is reserved in this footer for
+ * the future cache-stride cross-check. Rule 10 is the next free slot.
+ * Same off-by-one pattern as Rule 7. Noted here and in commit body.
+ *
+ * Input keys:
+ *   fpu.detected                  — detect_fpu ("none" or a tag)
+ *   bench.fpu.whetstone_status    — bench_whetstone ("ok" or skipped_*)
+ *   bench.fpu.k_whetstones        — bench_whetstone (present when status=ok)
+ */
+/* ----------------------------------------------------------------------- */
+
+static void rule_whetstone_fpu_consistency(result_table_t *t)
+{
+    const result_t *fpu    = find_key(t, "fpu.detected");
+    const result_t *status = find_key(t, "bench.fpu.whetstone_status");
+    const result_t *kwhet  = find_key(t, "bench.fpu.k_whetstones");
+
+    const char *fpu_tag = key_value(fpu);
+    const char *st      = key_value(status);
+    int fpu_present;
+    int whet_ran;
+
+    /* Rule applies only when both heads produced a verdict. /ONLY:DET
+     * or /ONLY:BENCH leaves one key absent; absence is not a fault. */
+    if (!fpu_tag || !st) return;
+
+    fpu_present = (strcmp(fpu_tag, "none") != 0);
+    whet_ran    = (strcmp(st, "ok") == 0);
+
+    if (fpu_present && whet_ran) {
+        if (kwhet && kwhet->type == V_U32 && kwhet->v.u == 0UL) {
+            report_add_str(t, "consistency.whetstone_fpu",
+                           "WARN: FPU reported present and Whetstone ran, but k_whetstones=0",
+                           CONF_MEDIUM, VERDICT_WARN);
+        } else {
+            report_add_str(t, "consistency.whetstone_fpu",
+                           "pass (FPU present and Whetstone produced a result)",
+                           CONF_HIGH, VERDICT_PASS);
+        }
+    } else if (!fpu_present && !whet_ran) {
+        report_add_str(t, "consistency.whetstone_fpu",
+                       "pass (no FPU, Whetstone correctly skipped)",
+                       CONF_HIGH, VERDICT_PASS);
+    } else {
+        sprintf(msg_rule10_fail,
+                "FAIL: detect says fpu=%s but Whetstone status=%s",
+                fpu_tag, st);
+        report_add_str(t, "consistency.whetstone_fpu", msg_rule10_fail,
+                       CONF_HIGH, VERDICT_FAIL);
+    }
+}
+
+/* ----------------------------------------------------------------------- */
 
 void consist_check(result_table_t *t)
 {
@@ -496,6 +571,7 @@ void consist_check(result_table_t *t)
     rule_timing_independence(t);
     rule_cpu_ipc_bench(t);
     rule_audio_mixer_chip(t);
+    rule_whetstone_fpu_consistency(t);
     /*
      * Rules landing as downstream phases complete:
      *
