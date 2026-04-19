@@ -40,6 +40,18 @@ Next milestones:
 - **v0.6**: NetISA upload path live
 - **v1.0**: First tagged release, itch.io launch, VOGONS announcement
 
+## Why real hardware
+
+DOSBox-X carries CERBERUS day-to-day. The iteration loop is seconds instead of minutes, and for the large class of bugs the emulator models correctly, there is no reason to boot a 486. But every real-iron validation session on the BEK-V409 / i486DX-2 / S3 Trio64 / Vibra 16S bench box surfaces bugs DOSBox-X cannot reproduce. From the 2026-04-18 session alone, five of them:
+
+- **HIMEM.SYS intercepts INT 15h AX=E801h.** Symptom: extended memory reported as 0 KB on a 64 MB machine. Cause: once HIMEM is resident it claims the BIOS extended-memory interrupts, and CERBERUS was trusting the BIOS answer. Fix: acquire the XMS entry point via INT 2Fh AX=4310h and query AH=08h directly. (`eeba319`)
+- **S3 Trio64 option ROM advertises "IBM VGA" before "S3"/"Trio64".** Symptom: S3 Trio64 identified as IBM VGA — vendor, chipset, and family all wrong. Cause: the card's option ROM carries an IBM-VGA compatibility string for real-mode fallback, and the substring scan matched the first hit. Fix: unlock S3 extended CRTC registers and read CR30 (0xE1 = Trio64, 0xE6 = Virge) ahead of any BIOS-string scan. (`eeba319`)
+- **Vibra 16S DSP status is at base+0x0E, not base+0x0A.** Symptom: DSP version probe returned garbage on a known-working Vibra 16S. Cause: base+0x0A is the DSP DATA register, not STATUS; Creative's documented status port is base+0x0E. Fix: poll the right port. (`eeba319`)
+- **OPL 0x388 mirror disabled by CTCM on Vibra 16 PnP.** Symptom: OPL3 undetected on a card that plays OPL in DOOM without issue. Cause: after CTCM's PnP init, the legacy 0x388 Adlib mirror can be switched off — OPL only answers at BLASTER-base+8. Fix: probe BLASTER-base+8 first, fall back to 0x388. (`eeba319`)
+- **UMC491-integrated 8254 produces biased latch-race phantom wraps DOSBox never synthesizes.** Symptom: PIT-C2 vs BIOS-tick cross-check reports 49% divergence every run, repeatable to the microsecond. Cause: the integrated 8254's composite LSB/MSB misreads cluster at consistent mid-range values that a naive wrap detector treats as real counter transitions. Fix: upper-bound the wrap count, require a low-band→high-band shape for a valid wrap, and reject the whole measurement if post-hoc PIT/BIOS divergence exceeds 25% rather than reporting biased data. (`eeba319`, refined in `6c3a023`)
+
+DOSBox-X is necessary for iteration speed and insufficient for correctness. Real-hardware validation is a non-negotiable gate on every version tag. The emulator is the dress rehearsal. The bench box is opening night.
+
 ## 4. Design Principles
 
 These are non-negotiable and override scope expansion arguments.
