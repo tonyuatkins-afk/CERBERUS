@@ -1,92 +1,90 @@
-# Session Report — 2026-04-18 Afternoon → 2026-04-19 Morning Weekend
+# Session Report — 2026-04-18 Afternoon → 2026-04-19 Evening Weekend
 
 **Operator:** Tony Atkins
-**Duration:** ~22 hours wall-clock across three contiguous sessions (Saturday afternoon, Saturday evening, Sunday morning)
-**Arc:** v0.2 real-hardware gate through v0.2-rc1 tag through v0.3 feature-complete + first-data-point validation. Twenty-eight commits. One release-candidate tag (v0.2-rc1). Five GitHub issues filed. One quality-gate cycle.
+**Duration:** ~30 hours wall-clock across five contiguous sessions (Saturday afternoon, Saturday evening, Sunday morning, Sunday afternoon, Sunday evening)
+**Arc:** v0.2 real-hardware gate → v0.2-rc1 tag → v0.3 feature-complete + threshold-recalibrated validation → v0.3-rc1 tag → v0.4 benchmarks and polish → v0.4-rc1 tag. Three release candidates in one weekend.
 
 ---
 
 ## What shipped
 
-### Tags
+### Tags (three RCs)
 
-- **`v0.2-rc1`** at `311c19e` — first real-hardware-validated CERBERUS release candidate. Ten consistency rules live. Dhrystone matches CheckIt within ±2.4%. Whetstone shipped CONF_LOW with documented divergence.
-- **`v0.3-rc1`** — NOT TAGGED. First real-hardware validation of v0.3 on BEK-V409 (2026-04-19 Sunday morning) produced mixed results:
-  - ✅ `diag.dma.summary=ok (6/6 channels responsive, 2 safety-skipped)` — target met.
-  - ✅ `CERBERUS.LAST` absent — 4th clean run in a row, UI-hang non-regression.
-  - ✅ Zero FAIL consistency rules (five WARNs, all pre-documented).
-  - ⚠️ `diag.cache.status=WARN (ratio=27.39 × — partial)` — **threshold miscalibration, not diagnostic failure.** The 27.39× ratio is above the 16× linear-scaling baseline (so cache IS being observed) but below the 40× PASS threshold. Root cause: the PASS threshold was chosen based on theoretical 5-10× per-line cache-hit-vs-miss speedup; BEK-V409's TSR-contended BIOS configuration produces only 1.71× per-line speedup, landing the ratio in the WARN band. Filed as issue #5 for threshold recalibration.
-  - Corpus INI archived at `tests/captures/486-real-2026-04-19-v0.3/CERBERUS.INI`.
-  - v0.3-rc1 tag waits on threshold recalibration + re-validation run, next session.
+- **`v0.2-rc1`** at `311c19e` — first real-hardware-validated CERBERUS RC. Ten consistency rules. Dhrystone ±2.4% of CheckIt. Whetstone CONF_LOW with documented divergence.
+- **`v0.3-rc1`** at `dee7360` — diagnostics complete (6/6 subsystems). diag_cache classifier recalibrated per-line after first-iron data. diag_dma 8237 count-register probe. Three-pane UI polish. BEK-V409 validation: `cache.status=pass (ratio=1.70 × — cache_working)`.
+- **`v0.4-rc1`** at `ab67703` — benchmarks and polish. bench_cache + bench_video + DGROUP lift 52K→56K + Rule 4b narration extension + Rule 11 `dma_class_coherence` + version macro consolidation. Five of six planned deliverables; Whetstone FPU-asm rework (issue #4) deferred.
 
-### Commit arc (28 commits since `7da102e`)
+### Commit arc (~75 commits since `7da102e`)
 
-Grouped by sub-arc rather than chronologically — the day's shape was thematic, not linear.
+Grouped by sub-arc. The weekend's shape was layered — each arc's stop conditions informed the next arc's scope.
 
 #### Saturday afternoon — real-hardware gate (`eeba319` → `7da102e`)
 
-Three commits on Saturday before the evening session started, all at the bench box:
+Three commits, all at the bench box:
 
-- `eeba319` — Real-iron Task 1.10 gate: **five bugs fixed on contact with the BEK-V409**. HIMEM.SYS intercepting INT 15h AX=E801h (extended_kb=0 → 63076). S3 Trio64 BIOS-string collision ("IBM VGA" matched first). Vibra 16S DSP status port at base+0x0E (was wrongly polling base+0x0A). OPL 0x388 mirror gating under CTCM (added BLASTER-base+8 fallback). UMC491 8254 latch race (added upper-bound + shape-check + 25% divergence rejection). Iteration refined in `6c3a023` and `4d28e8e` earlier in the week; this commit was the landing.
-- `7e4bdcb` — Phase 4 Rule 4b + audio DB T-key split + bench_memory corrections. Audio DSP-4.13 disambiguation (SB16 vs AWE32 via BLASTER `Tn` token). Rule 4b `cpu_ipc_bench` seeded. bench_memory `kb_per_sec` precision fix + REP LODSB read helper.
-- `7da102e` — `/NOUI` escape hatch + `unknown_finalize` moved pre-UI. Surfaced the UI hang observed on v5; not a root-cause fix, a workaround.
+- `eeba319` — **Five bugs fixed on contact with BEK-V409.** HIMEM.SYS intercepting INT 15h AX=E801h (extended_kb=0 → 63076). S3 Trio64 BIOS-string collision ("IBM VGA" matched first). Vibra 16S DSP status port at base+0x0E. OPL 0x388 mirror gating under CTCM. UMC491 8254 latch race.
+- `7e4bdcb` — Rule 4b + audio DB T-key split + bench_memory `kb_per_sec` precision fix.
+- `7da102e` — `/NOUI` escape hatch + `unknown_finalize` moved pre-UI. Workaround for the UI hang observed on v5.
 
-#### Saturday evening — Arc 1 (mixer) + Arc 2 (historical benchmarks)
+#### Saturday evening — mixer probe + historical benchmarks (`98c07d5` → `311c19e`)
 
-- `98c07d5` — 486 real-hardware run corpus: six INIs at `tests/captures/486-real-2026-04-18/` + narrative README.
-- `0161e99` — CERBERUS.md "Why real hardware" H2 section naming the five `eeba319` bugs.
-- `c22e886` — CT1745 mixer-chip probe at BLASTER-base+4/+5 reg 0x80 + new consist Rule 7 (`audio_mixer_chip`).
-- `3fc4e50` — `docs/sessions/SESSION_REPORT_2026-04-18-evening.md`.
-- `4415c63` — v0.2-rc1 prep bundle: CHANGELOG + README refresh + `docs/plans/checkit-comparison.md` + `docs/sessions/NEXT-PLATFORMS.md` + plan-doc checkbox updates.
-- `e897c15` — bench_dhrystone.c: Dhrystone 2.1 port + v0.4 plan doc.
-- `525f65b` — bench_whetstone.c: Whetstone port with FPU-presence gate.
-- `f0cebde` — PC-XT relative ratings (`cpu/fpu/mem_xt_factor`) + consist Rule 10 (`whetstone_fpu_consistency`).
-- `97d24e6` — anti-DCE `volatile` + checksum observers for both benchmarks. **Proved insufficient on v8 real-iron** (volatile didn't defeat Watcom's internal DCE inside non-volatile-qualified Proc_1/2/3/7 bodies).
-- `8552c6d` — NULL-display pattern for Whetstone V_U32 emits. **Proved sufficient** — fixed the `fpu.whetstone_elapsed_us=(�` display corruption class.
-- `1788561` — Makefile `CFLAGS_NOOPT -od` on bench_dhrystone + bench_whetstone only. The accepted fallback after volatile alone failed.
+- `98c07d5` — 486 run corpus (six INIs at `tests/captures/486-real-2026-04-18/`).
+- `0161e99` — CERBERUS.md "Why real hardware" H2 naming the five `eeba319` bugs.
+- `c22e886` — CT1745 mixer probe + Rule 7 `audio_mixer_chip`.
+- `e897c15` / `525f65b` / `f0cebde` — Dhrystone 2.1 + Whetstone + PC-XT relative ratings + Rule 10.
+- `97d24e6` / `8552c6d` — anti-DCE iterations. volatile + checksum observers **proved insufficient**; NULL-display V_U32 pattern **proved sufficient** for display-corruption class.
+- `1788561` — Makefile `CFLAGS_NOOPT -od` on bench_dhrystone + bench_whetstone.
 
-#### Saturday evening — quality gate (6 rounds)
+**Six-round quality gate on the v0.2-rc1 candidate.** Round 2 surfaced the biggest defect of the session: `timing_elapsed_ticks` only handled one PIT wrap (~55ms), so 5-second Dhrystone/Whetstone targets were measuring modulo-garbage. Fixed via `timing_start_long` / `timing_stop_long` (`af2b6cd`). Rounds 3-6 closed everything else. Final gate: 0 Fatal, 0 Significant.
 
-User called `/quality-gate` after Arc 2 landed. Six red-team rounds across eight fix commits:
+**Real-iron bench tuning ladder** ending in `311c19e`: Dhrystone nailed (32,810 = ±2.4% of CheckIt), Whetstone unfixable at pure-flag level (109 K-Whet vs 11,420 reference → ~100× low); ship CONF_LOW with full divergence documentation. Honest trade.
 
-- `b3b54d9` / `d3de045` — round 1 fix (F1 + S1 + S2 + S3: parse_blaster forward decl, Rule 10 inconclusive handling, Dhrystone warmup overflow, doc drift).
-- `af2b6cd` — round 2 Fatal fix: `timing_start_long` / `timing_stop_long` primitives. Round 2 surfaced the single biggest defect of the session: `timing_elapsed_ticks` only handled one PIT wrap (~55ms), so Dhrystone/Whetstone at 5-second targets were measuring modulo-garbage. **Critical catch.**
-- `b8ef065` — round 2 refinements (I/O delay, Rule 10 tightening, type checks, doc resync, stash patch archive).
-- `5279095` — round 3 rate-compute overflow + atomic BIOS-tick read. Caught another numeric-overflow-on-fast-hardware defect (same class as the original v7/v8 bug, migrated to the rate computation).
-- `a00f5a0` — round 4 Rule 10 docs resync + sub-ms status standardization + whetstone edge cleanup.
-- `bcf42ad` — round 5 Rule 7 WARN-not-FAIL on observed="unknown" + README DB count.
-- `9c64991` — end-of-gate minor sweep (README + CHANGELOG number resync).
+#### Sunday morning — autonomous v0.3 implementation (`10237c3` → `d9d1f5a`)
 
-Round 6 closed with zero Fatal, zero Significant, two trivial Minors that the sweep handled. Gate verdict: **clean, v0.2 ship-ready.**
+User at the park. Session continued autonomously:
 
-#### Saturday evening — Arc 2 real-hardware bench tuning (`99ed900` → `311c19e`)
+- `10237c3` — v0.3 plan doc (diag_cache stride-ratio + diag_dma 8237 probe).
+- `7a28850` — both diagnostics + wiring + host tests. diag_cache: 2 KB vs 32 KB `__far` buffers. diag_dma: 8237 count-register probe, hard-skip ch0/ch4. 27 new host-test assertions.
+- `d9d1f5a` — README + CHANGELOG: "4 of 6 complete" → "6 of 6 complete".
 
-With v0.2-rc1 gate-clean, the remaining blocker was real-iron benchmark magnitudes. v9 showed Dhrystone and Whetstone 20-30× over CheckIt reference (DCE still winning). Iterative flag tuning:
+v0.3 code-complete, host-tested. Real-hardware gate deferred to user's next session.
 
-- `99ed900` — `-oi` (intrinsic math). **Zero measurable effect** on Whetstone on v10.
-- `5aaeb22` — `-ot -oi` experiment. v11 Dhrystone nailed it (32,810 = ±2.4%), but Whetstone still catastrophically slow (107 K).
-- `76c3ae4` — Whetstone FPU accumulators moved from `volatile double` locals to non-volatile locals + publishing `_Acc` statics. Unlocked x87 register allocation. **v12 showed no change in per-unit speed** — confirmed bottleneck is inside PA's inner loop (volatile E1[] memory traffic), not at function boundaries.
-- `27dd8dd` — `-om` (inline 80x87 math). Zero effect.
-- `814db25` — `-oe` (function inline expansion). v14 halved elapsed time (calibration hit fewer units) but same per-unit speed — final confirmation the floor is structural.
-- `311c19e` — **revert to `-ot -oi` + ship Whetstone at CONF_LOW + full divergence documentation**. The honest trade.
+#### Sunday afternoon — issue #5 + three-pane UI + v0.4 re-plan (`25306b4` → `2956c86`)
 
-#### Sunday morning — autonomous v0.3 phase (`10237c3` → `d9d1f5a`)
+User's "one hour autonomous, full runway" session:
 
-User away at the park, session continued autonomously:
+- First v0.3 validation on BEK-V409 (`bacd642` archived) showed `diag.cache.status=WARN (ratio=27.39 × — partial)` — **threshold miscalibration, not diagnostic failure.** 27.4× ratio on known-healthy cache, below 40× PASS threshold. Filed as issue #5.
+- `25306b4` — **issue #5 fix: per-line ratio reformulation.** Strip the 16× buffer-size bias; PASS at ≥ 1.3× per-line speedup. Host-test Scenarios A-M rewritten (19 total). Scenario J seeded at 171 for BEK-V409 regression protection.
+- `4e84481` — three-pane summary UI: direct-VRAM color writes via MK_FP, title / detection / benchmarks / system-verdicts panes. Screenshot-ready polish.
+- `dee7360` — v0.4 benchmarks-and-polish plan doc. Five deliverables scoped: bench_cache, bench_video, Rule 4b narration extension, Rule 11 dma_class_coherence, Whetstone FPU-asm.
+- **`v0.3-rc1` tag at `dee7360`** — annotated release message covering all six diagnostics, ten consistency rules, known issues, v0.4 scope.
+- Second BEK-V409 validation: `cache.status=pass (ratio=1.70 × — cache_working)`. Issue #5 closed.
+- `2956c86` — archived v0.3-rc1 validation INI.
 
-- `10237c3` — `docs/plans/v0.3-diagnose-completion.md`: full design for diag_cache (stride-ratio) + diag_dma (8237 count-register probe) + consistency rule candidates + verification gates + stop conditions.
-- `7a28850` — implementation of both diagnostics + wiring into diag_all.c + host tests. **diag_cache**: 2 KB vs 32 KB `__far` buffers, stride-16 read loops, ratio classifier kernel, verdict PASS/WARN/FAIL. Safety-skips 8088-class floor. **diag_dma**: 8237 count-register write+readback on channels 1/2/3/5/6/7 with hard-skip of channel 0 (refresh) and channel 4 (cascade). XT-class detection via cpu.class / bus.class. Both modules host-tested: 17 + 10 assertions respectively. Host-suite total: 134 → 161 OK (+27).
-- `d9d1f5a` — README + CHANGELOG: "4 of 6 complete" → "6 of 6 complete". v0.3 feature-complete pending real-hardware gate.
+#### Sunday evening — v0.4 implementation (`2c5eed1` → `53c9fb4`)
+
+- `2c5eed1` — version macro consolidation. `CERBERUS_VERSION` "0.1.0" → "0.4.0-dev". Every downstream emit sources from the single `#define`.
+- `ce30b68` — DGROUP ceiling lift 52,000 → 56,000. Documented in README + v0.4 plan.
+- `d1e93b3` — Rule 4b narration extension. Three-way split consulting `diag.cache.status`: cache_working → TSR/thermal; no_cache_effect → cache-BIOS-disabled; missing → original ambiguous form. Five new test_consist scenarios (JJ-NN).
+- `169d1d2` — Rule 11 `dma_class_coherence`. XT-class + DMA slave responsive = contradiction WARN. Eight new test_consist scenarios (OO-WW). Uses `strstr("skipped_no_slave")` so future emit tweaks don't silently break it.
+- `efcb4ca` — **bench_cache base implementation.** Four KB/s rows + checksum. Shared FAR buffer refactor via new `src/core/cache_buffers.{c,h}`. Pure-math kernel `bench_cache_kb_per_sec` with host tests (9 scenarios).
+- `b5a1685` / `3798ed9` / `a0e7611` / `7932b3c` — bench_cache QG rounds 1-4 (score 11 → 4 → 3 → 10 fresh-eyes progression). Final round fixes: CFLAGS_NOOPT for bench_cache.obj (F2/SP4), checksum mask (S2), gate polarity inversion (SP2). Key rename l1_*/ram_* → small_*/large_* landed in round 1 after the reviewer flagged the write-through 486 labeling concern.
+- `356a548` — **bench_video base implementation.** Text-mode write + mode 13h round-trip. Save/restore preserves display. INT 10h AH=0Fh mode query at entry. Emulator gate.
+- `6ac7e02` / `c507990` — bench_video QG round 1 + round 2 fix commits (score 4 → 6 per cap; characterization only at R3). Per-iter volatile observer parity with bench_cache, fail-safe `/ONLY:BENCH` gate, current-mode gate (not adapter-class), user-facing flicker warning.
+- `ab67703` — bench_video F1 + F2 Fatals closed. Page stride computed from mode (0x0800 for 40x25, 0x1000 for 80x25). `saved_mode` masked against bit 7 in mode13h path.
+- **`v0.4-rc1` tag at `ab67703`** — release notes at `docs/releases/v0.4-rc1.md`.
+- `53c9fb4` — release notes + v0.4-rc1 BEK-V409 validation INI at `tests/captures/486-real-2026-04-19-v0.4-rc1-candidate/`.
 
 ---
 
-## Issues filed (five)
+## Issues filed (six; one closed)
 
-- **[#1](https://github.com/tonyuatkins-afk/CERBERUS/issues/1)** — `test_timing` 4 pre-existing failures after PIT wrap-range rework (`b6c179b` / `6c3a023`). Expectation drift, gated behind the Rule 4a UMC491 8254 phantom-wrap deep-dive that is explicitly out-of-scope for v0.2-rc1.
-- **[#2](https://github.com/tonyuatkins-afk/CERBERUS/issues/2)** — Intermittent OPL detection on Vibra 16 PnP. Same binary + same box + different cold boot produces `opl=opl3` vs `opl=none`. Partial fix in `eeba319`; residual state-dependence remains.
-- **[#3](https://github.com/tonyuatkins-afk/CERBERUS/issues/3)** — UI hang observed once on Saturday afternoon, did not reproduce across baseline + two instrumented builds on Saturday evening. State-dependent per-boot; reopen criterion is reproduction on real iron. Instrumentation patch preserved as `stash@{0}` AND archived at `docs/plans/attic/ui-hang-instrumentation-2026-04-18.patch`.
-- **[#4](https://github.com/tonyuatkins-afk/CERBERUS/issues/4)** — Whetstone FPU-assembly rework. The ~100× divergence from CheckIt cannot be closed without hand-rolled NASM inner loops for Modules 2/3/9. v0.4 scope.
-- **[#5](https://github.com/tonyuatkins-afk/CERBERUS/issues/5)** — diag_cache PASS threshold miscalibrated. First real-iron data on BEK-V409 shows ratio 27.4× on known-healthy cache; PASS threshold was set at 40×. Threshold based on theoretical per-line speedup not matched in practice on TSR-contended BIOS configs. Recalibrate to ≥ 24× (per-traversal) OR restructure classifier to compute per-line ratio and threshold at ≥ 1.3×. Blocks v0.3-rc1 tag.
+- **[#1](https://github.com/tonyuatkins-afk/CERBERUS/issues/1)** — `test_timing` 4 pre-existing failures. Gated behind Rule 4a UMC491 8254 phantom-wrap deep-dive. Unchanged across the weekend.
+- **[#2](https://github.com/tonyuatkins-afk/CERBERUS/issues/2)** — Intermittent OPL detection on Vibra 16 PnP. State-dependent per cold-boot. v0.4-rc1 BEK-V409 capture showed clean side (`opl=opl3`).
+- **[#3](https://github.com/tonyuatkins-afk/CERBERUS/issues/3)** — UI hang observed once Saturday afternoon. **Did not reproduce across 7+ clean real-iron runs.** Instrumentation preserved as `stash@{0}` + `docs/plans/attic/ui-hang-instrumentation-2026-04-18.patch`. Reopen on repro.
+- **[#4](https://github.com/tonyuatkins-afk/CERBERUS/issues/4)** — Whetstone FPU-assembly rework. ~100× divergence unfixable at flag level. Still open after v0.4-rc1.
+- **[#5](https://github.com/tonyuatkins-afk/CERBERUS/issues/5)** — diag_cache threshold miscalibration. **CLOSED Sunday afternoon at `25306b4`** — per-line reformulation + BEK-V409 revalidation at 1.70×.
+- **[#6](https://github.com/tonyuatkins-afk/CERBERUS/issues/6)** — bench_video measures ISA-range bandwidth on VLB hardware. Known measurement-scope limitation; investigation plan covers physical VLB slot check, BIOS/jumper verification, CFLAGS_NOOPT vs -ox bench_video variant profile. Scoped for v0.4.0 investigation.
 
 ---
 
@@ -94,98 +92,68 @@ User away at the park, session continued autonomously:
 
 ### Methodological
 
-**Dhrystone's anti-DCE problem is an order harder than Weicker's paper suggests.** The 1984 paper assumes an optimizer-family that does DCE but does not defeat `volatile`. Watcom's `-ox` DCEs past volatile because the qualifier only propagates through variables whose full access path is volatile-qualified — non-volatile-qualified pointer parameters accepting addresses of volatile data defeat the barrier inside the callee. The session spent five flag-tuning commits (97d24e6 → 814db25) discovering that no pure-flag approach produces Dhrystone + Whetstone simultaneously at CheckIt reference speed without hand-rolled assembly. Lesson: **published scene benchmarks assume 1988-era compiler aggression; modern optimizers require either aggressive `volatile` propagation through every signature or structural anti-DCE like asm kernels**. Tag for v0.4.
+**Dhrystone's anti-DCE problem is an order harder than Weicker's paper suggests.** Watcom's `-ox` DCEs past `volatile` because the qualifier only propagates through signatures whose entire access path is volatile-qualified — non-volatile-qualified pointer parameters accepting addresses of volatile data defeat the barrier. Five flag-tuning commits (`97d24e6` → `814db25`) discovered no pure-flag approach produces Dhrystone + Whetstone both at CheckIt reference speed. Tag `CFLAGS_NOOPT -od -oi` in the Makefile is the structural answer for synthetic benchmarks. This lesson extended in v0.4: bench_cache and bench_video **also** land in the CFLAGS_NOOPT pool. The absolute-rate cost (~3× slower inner loops vs -ox) trades against DCE safety and is accepted as the measurement-scope posture.
 
 ### Process
 
-**Quality gate caught a class of defect the initial implementation missed.** Round 2's discovery of the PIT-wrap issue in `timing_elapsed_ticks` was the single biggest bug of the session — the DCE-suppression work in the Whetstone tuning ladder would have produced modulo-garbage numbers regardless of flag choice, because the timing primitive couldn't measure the 5-second intervals the benchmarks targeted. Root-cause catch happened because the round-2 reviewer actually opened `timing.c` and noticed the single-wrap comment, whereas round 1 had focused on the surface-level findings (forward decls, doc drift). **Lesson:** the value of iterative adversarial review is not the first round's findings but the layered discovery that happens only when the first round's fixes expose what's underneath.
+**Quality gate past round 3 hits diminishing returns.** Saturday's six-round gate on v0.2-rc1 found its biggest defect (the PIT-wrap) at round 2 and then spent rounds 3-6 finding increasingly fine-grained issues. Sunday evening's bench_cache gate ran four rounds (11 → 4 → 3 → 10 score progression) — round 4's fresh-eyes-reviewer found 10 Significant issues round 3 hadn't surfaced; not regressions, just different concerns a different reviewer prioritized. Sunday evening's bench_video gate was explicitly capped at **3 total rounds** with acceptance that round 3 would characterize rather than drive another fix loop. Cap worked: bench_video landed with its highest-impact findings addressed, two Fatals tracked for pre-tag closure, remaining minors documented. **Lesson:** quality gate iteration is valuable; quality gate without a cap is a spiral.
 
 ### Real-hardware
 
-**State-dependent bugs are real.** The UI hang reproduced once and then went into hiding across three cold-boot attempts with varying build configurations. Issue #3 captured this honestly as "observed once, not reproducing, reopen on return." Alternative — declaring the bug fixed and moving on — would have been wrong because the instrumentation never exercised on real iron. **Lesson:** intermittent real-hardware bugs deserve their own disposition category separate from "fixed" and "deferred." File the issue, stash the investigation, move on.
+**Diagnostic thresholds need first-real-iron recalibration.** diag_cache's 40× PASS threshold was theoretical. Real iron on BEK-V409 produced 27.4× because TSR-contended BIOS configs don't produce the 5-10× per-line speedup the theory assumed — they produce 1.7×. The per-line reformulation (issue #5 fix) didn't change the measurement; it changed what the measurement means. **Lesson:** first-hardware-data is the authority on classifier thresholds, not theory.
+
+**Write-through vs write-back caches make labels lie.** bench_cache's original `l1_*` / `ram_*` keys implied "L1 is faster than RAM" — true on write-back hardware, false on write-through 486s where every store pushes through to DRAM. Keys renamed to `small_*` / `large_*` to match the size-based framing the module actually measures. BEK-V409 capture confirmed the call: `small_write = 5,005`, `large_write = 5,067` (near-identical on write-through hardware). The rename wasn't cosmetic; it was correctness.
+
+### Deployment
+
+**Stale binary gotcha, twice.** Sunday afternoon's first v0.3 validation ran on a stale binary because the push didn't land where the user's working directory expected. Sunday evening the same class of bug bit the version-string check — pushed CERBERUS.EXE to `/drive_c/`, but user's working directory is `C:\CERBERUS\`, where the stale v0.3 EXE sat in DOS search order ahead of the new one. **Lesson:** always push to the user's working directory, verify via byte-size + timestamp on the target, don't trust the push banner alone. Memory updated at `reference_486_ftp_workflow.md`.
 
 ### Scope
 
-**Autonomous scope-fit.** The Sunday-morning 60-minute autonomous run delivered v0.3 code-complete + documented + host-tested. The budget was tight (cache-bench module + DMA probe + host tests + docs in one hour), but scope fit because:
-1. Plan doc was written first (15 min), making the implementation an execution task rather than a design task.
-2. Both modules had pure-math kernels that were host-testable, absorbing the uncertainty budget.
-3. Real-hardware validation was honestly deferred to the user's next session rather than faked via guesswork.
-
-**Lesson:** autonomous sessions are productive when the scope is planning + code-complete + host-tested, with hardware validation explicitly deferred to a human-present session. Don't try to validate on hardware you can't operate; document what needs validation and move on.
+**Autonomous scope-fit holds up when scoped tight.** Sunday morning's 60-min autonomous run delivered v0.3 code-complete + host-tested. Sunday afternoon's 60-min autonomous run delivered issue #5 fix + three-pane UI + v0.4 plan doc + v0.3-rc1 tag. Sunday evening's ~4-hour block delivered five v0.4 deliverables + v0.4-rc1 tag. All scoped tightly enough to complete; none tried to validate on hardware the operator couldn't operate. **Lesson:** the pattern "plan + code + host-test + explicit-hardware-deferral" scales from 60-min to 4-hour blocks.
 
 ---
 
-## Open items for next session
+## Attribution
 
-### Prereq for v0.3-rc1 tag
-
-First real-hardware validation ran 2026-04-19 Sunday morning on BEK-V409:
-- ✅ `diagnose.dma.summary=ok (6/6 channels responsive, 2 safety-skipped)`
-- ✅ `CERBERUS.LAST` absent — UI-hang non-regression (4th clean run)
-- ✅ Zero FAIL consistency rules
-- ⚠️ `diagnose.cache.status=WARN (ratio=27.39 × — partial)` — threshold miscalibrated, see issue #5
-
-v0.3-rc1 tag waits on:
-1. Resolve issue #5: recalibrate `diag_cache_classify_ratio_x100` threshold (lean: per-line ratio reformulation with threshold ≥ 1.3×; alternative: per-traversal threshold drop to 24× based on BEK-V409 observation).
-2. Update host-test Scenarios I/J in `tests/host/test_diag_cache.c` to reflect new thresholds.
-3. Re-validate on BEK-V409: expect `cache.status=pass` with per-line ratio 1.71× (same measurement, new classification).
-4. Then tag `v0.3-rc1` at the recalibration commit.
-
-### Prereq for v0.2 final + v0.3 final
-
-Real-hardware validation on 386 DX-40 and 8088/V20 classes. See `docs/sessions/NEXT-PLATFORMS.md` for the bench-box inventory + expected-surfacing bug budgets.
-
-### Consistency-rule follow-ups
-
-Not blockers for the RCs, but tracked as future commits:
-- **Rule 4b narration extension** — consult `diag.cache.status` when emitting `cpu_ipc_bench` WARN. Distinguishes "TSR stealing cycles" from "cache BIOS-disabled".
-- **Rule 11 `dma_class_coherence`** — XT-class CPU + DMA slave responsive = contradiction worth WARN.
-- **Rule 8 `cache_stride_vs_cpuid_leaf2`** — reserved for Phase 3 cache-bench work.
-
-### v0.4 scope
-
-Per `docs/plans/checkit-comparison.md`:
-- Whetstone FPU-assembly rework (issue #4).
-- Cache-bandwidth benchmark.
-- Video-throughput benchmark.
-- Bar-graph comparison UI (v0.5, contingent on UI-hang resolution).
-
-### Investigation reopen criteria
-
-- **Issue #3 UI hang** — reopen on any real-hardware reproduction. Stashed instrumentation (`stash@{0}` + `docs/plans/attic/ui-hang-instrumentation-2026-04-18.patch`) ready for re-apply.
-- **Issue #2 OPL intermittency** — reopen on a dedicated session with systematic cold-boot cycling to characterize the state variable.
+The Homage Phase 1 research (decompilation-led lessons from CACHECHK / SPEEDSYS / CheckIt) ran as an independent work stream during this weekend. Phase 1 discovery report is parked at `C:\Development\Homage\_research\phase1-report.md` pending authorization to proceed to Phase 2. No Phase 1 findings informed any of the three RCs tagged this weekend; attribution slot for Phase 2 research contributions is held open in the v0.4-rc1 release notes for v0.4.0 final.
 
 ---
 
 ## Metrics
 
-| | Session start (`7da102e`) | Session end (`d9d1f5a`) | Δ |
+| | Weekend start (`7da102e`) | Weekend end (`53c9fb4`) | Δ |
 |---|---|---|---|
-| Commits since `v0.1.1-scaffold` | 32 | 60 | +28 |
-| EXE size | 74,948 B | 136,096 B | +61,148 |
-| DGROUP | 45,600 B | 51,712 B | +6,112 |
-| Host-test assertions | ~119 | 161 + 4 pre-existing FAIL | +42 (+38 new pass + 4 pre-existing) |
-| Consistency rules live | 7 | 10 | +3 |
-| Diagnostics complete | 4/6 | **6/6** | +2 |
-| Hardware DBs (total entries) | 121 | 128 | +7 (audio mixer_chip column) |
-| Real-iron bugs found + fixed | 0 | 5 | +5 (all `eeba319`) |
-| RC tags | 0 | 1 (v0.2-rc1) | +1 |
-| GH issues filed | 0 | 5 | +5 |
-| UI-hang intermittent data points | 1 (afternoon repro) | 4 clean (evening + autonomous + v0.3 validation) | state drift documented |
-| Cache diagnostic threshold calibration | speculative | first real-iron data point (27.4× on BEK-V409) | issue #5 |
+| Commits since `v0.1.1-scaffold` | 32 | 98 | +66 |
+| EXE size | 74,948 B | 144,066 B | +69,118 |
+| DGROUP | 45,600 B | 53,152 B | +7,552 |
+| Host-test assertions | ~119 | 163 + 4 pre-existing FAIL | +44 (+40 new pass + 4 pre-existing unchanged) |
+| Consistency rules live | 7 | 11 | +4 (4b narration, 7, 10, 11) |
+| Diagnostics complete | 4/6 | **6/6** | +2 (diag_cache, diag_dma) |
+| Benchmark modules | 3 (cpu, mem, fpu) + Dhry/Whet mid-session | 5 + 2 historical (added bench_cache, bench_video) | +4 |
+| Hardware DB entries | 121 | 128 | +7 (audio mixer_chip column) |
+| Real-iron bugs found + fixed | 0 | 5 + 2 Fatals tracked | +5 fixed + 2 closed pre-tag (bench_video F1/F2) |
+| RC tags | 0 | **3** (v0.2-rc1, v0.3-rc1, v0.4-rc1) | +3 |
+| GH issues filed | 0 | 6 | +6 (1 closed: #5) |
+| UI-hang clean runs | 1 (afternoon repro) | 7+ consecutive | state drift documented, not reproducing |
+| DGROUP ceiling | 52,000 (implicit) | 56,000 (documented) | +4,000 |
+| Version macro | 0.1.0 (stuck) | 0.4.0-dev | consolidated to single source |
 
 ---
 
 ## Closing
 
-Twenty-eight commits. Two arcs. One quality gate. One autonomous session. One RC tag (v0.2-rc1). Five issues filed and one preserved-for-later investigation. Real-iron-validated against the canonical 486 bench box for the first time, with DCE + display + timing + benchmark-methodology + cache-diagnostic-threshold-calibration classes of bug all surfaced and either fixed, honestly documented, or filed as first-data-point observations. CERBERUS is no longer "pre-alpha approaching v0.2" — it's **v0.2-rc1 tagged, v0.3 feature-complete and first-run-validated**, and waiting on a threshold recalibration pass to tag v0.3-rc1.
+Three RCs in one weekend is the milestone. Every RC landed after real-hardware validation on BEK-V409 with a full INI capture archived alongside the tag. Every RC was gated by quality-gate rounds; every fix commit trailed `Assisted-by: Claude:claude-opus-4-7`. Every deferred item became a tracked issue with explicit reopen criteria. No arc stretched past its scope.
 
-The v0.3 validation itself was the final lesson of the weekend: diagnostic thresholds chosen on theory alone need first-real-hardware recalibration. The diagnostic IS working — the ratio classifier correctly observed the cache signal on BEK-V409 and emitted a verdict. The verdict was wrong because the theoretical threshold assumed hardware behavior that the bench box's TSR-contended configuration doesn't produce. Issue #5 captures this: not a bug, a calibration artifact, fix in next session.
+The v0.4 arc specifically demonstrated that quality gate with a round cap is a workable posture: bench_cache converged across four rounds at user-chosen stopping points; bench_video converged across two fix rounds + one characterization round per an explicit 3-round cap. Diminishing returns past round 3 is real; capping acknowledges it without compromising the review's value.
 
-Next weekend:
-- Issue #5 first: recalibrate diag_cache threshold, re-validate, tag v0.3-rc1.
-- 386 DX-40 session: platform-specific bug budget per `NEXT-PLATFORMS.md` (3-7 expected).
-- Rule 11 (`dma_class_coherence`) + Rule 4b narration extension.
-- Whetstone FPU-assembly rework (issue #4) if time permits.
+Three known hardware characterization items remain for v0.4.0 final:
+- **Issue #4** — Whetstone FPU-asm rework (the structural fix for the ~100× Whetstone gap)
+- **Issue #6** — bench_video VLB bandwidth investigation (ISA-range numbers on VLB hardware)
+- **386 DX-40 + 8088/V20 validation** per `NEXT-PLATFORMS.md`
+
+Plus the Phase 2 Homage research lessons once Phase 2 authorization lands.
+
+Weekend closed with the 486 powered down cleanly, preparing for 386 transition. Next arc will anchor on a fresh 386 install; the 486 has given everything it can to the v0.4 cycle.
 
 Call the weekend.
