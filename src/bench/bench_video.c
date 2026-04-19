@@ -29,7 +29,17 @@
  * provably unread by the compiler — Watcom cannot DCE them. Nevertheless
  * bench_video.obj compiles at CFLAGS_NOOPT like bench_cache and the
  * historical benchmarks, so future toolchain drift cannot invalidate
- * the synthetic-loop assumption.
+ * the synthetic-loop assumption. Additionally a per-iter volatile
+ * observer (bench_video_iter_observer) runs inside vram_write_loop,
+ * mirroring bench_cache_iter_observer — belt-and-braces alongside the
+ * CFLAGS_NOOPT compile, so a future revert to -ox still can't fold the
+ * outer loop via cross-iteration DSE.
+ *
+ * Known issue (deferred to v0.5 cleanup): the CFLAGS_NOOPT makefile
+ * variable name is misleading — it means "no optimization" but the value
+ * is actually -od -oi, which still enables intrinsic inlining. Same
+ * issue flagged in bench_cache.c's header. Both benchmarks share the
+ * variable, so renaming is a multi-file refactor tracked separately.
  *
  * Timing: uses timing_start_long / timing_stop_long (BIOS-tick ~55 ms
  * resolution) because the text-write loop runs ~1 second on 486-class
@@ -65,6 +75,12 @@
  * deliverables land. */
 static unsigned char __far bench_video_saved_vram[BENCH_VIDEO_TEXT_BYTES];
 
+/* Per-iteration volatile observer. File-scope + volatile + external
+ * linkage — Watcom -ox cannot prove this is unobserved between iters,
+ * so it cannot fold the inner write loop across iterations (classic
+ * cross-iteration DSE). Matches bench_cache_iter_observer's pattern. */
+volatile unsigned char bench_video_iter_observer;
+
 static const result_t *find_local(const result_table_t *t, const char *key)
 {
     unsigned int i;
@@ -90,6 +106,18 @@ static void vram_write_loop(unsigned char __far *vram, unsigned int size,
         for (j = 0U; j < size; j++) {
             vram[j] = (unsigned char)(pattern ^ (unsigned char)j);
         }
+        /* Per-iter volatile observer — matches bench_cache_iter_observer.
+         * Defeats cross-iteration DSE by forcing each iteration's writes
+         * to be observable (reads back a byte just written at a wrapped
+         * offset). Belt-and-braces alongside the CFLAGS_NOOPT compile.
+         *
+         * Modulo, not bitmask: bench_cache uses (size - 1U) as a mask
+         * because its buffers are powers of two. bench_video's mode 13h
+         * buffer is 64000 (NOT a power of two), so a mask would produce
+         * a non-uniform wrap that could walk past size. The 32-bit
+         * divide costs ~5300 total (5000 text + 300 mode13h) ≈ 0.5 ms
+         * on a 486 — negligible against ~1-2 sec run times. */
+        bench_video_iter_observer = vram[(unsigned int)(i % (unsigned long)size)];
     }
 }
 
@@ -120,10 +148,16 @@ static int bench_video_text(result_table_t *t)
             seg = 0xB800;
             break;
         default:
+            /* Skip path returns 0: a skip is NOT a measurement failure.
+             * Returning 1 here would OR into bench_video's any_zero and
+             * publish bench.video.status=warn_zero_elapsed, which means
+             * "timing came back degenerate" — a different signal entirely.
+             * The legitimate degenerate-rate path at the end of this
+             * function still returns 1 (rate == 0 after measurement). */
             report_add_str(t, "bench.video.text_status",
                            "skipped_unknown_adapter",
                            CONF_HIGH, VERDICT_UNKNOWN);
-            return 1;
+            return 0;
     }
     vram = (unsigned char __far *)MK_FP(seg, 0x0000);
 
@@ -166,6 +200,7 @@ static int bench_video_mode13h(result_table_t *t)
     us_t elapsed;
     unsigned long rate;
     union REGS regs;
+    unsigned char saved_mode;
 
     if (a != ADAPTER_VGA_COLOR && a != ADAPTER_MCGA) {
         report_add_str(t, "bench.video.mode13h_status",
@@ -173,14 +208,35 @@ static int bench_video_mode13h(result_table_t *t)
                        CONF_HIGH, VERDICT_UNKNOWN);
         return 0;
     }
+    /* Fail-safe gate: /ONLY:BENCH skips detect, so environment.emulator
+     * is absent from the table. Proceeding with mode 13h under an
+     * emulator mangles the host terminal; the original code short-
+     * circuited FALSE on the NULL result and ran the mode switch anyway,
+     * defeating the gate. Mirror bench_cache.c:283-288's
+     * skipped_detect_not_run precedent. */
     emu = find_local(t, "environment.emulator");
-    if (emu && emu->type == V_STR && emu->v.s &&
+    if (!emu) {
+        report_add_str(t, "bench.video.mode13h_status",
+                       "skipped_detect_not_run",
+                       CONF_HIGH, VERDICT_UNKNOWN);
+        return 0;
+    }
+    if (emu->type == V_STR && emu->v.s &&
         strcmp(emu->v.s, "none") != 0) {
         report_add_str(t, "bench.video.mode13h_status",
                        "skipped_emulator",
                        CONF_HIGH, VERDICT_UNKNOWN);
         return 0;
     }
+
+    /* Save the current video mode BEFORE switching, so we can restore to
+     * whatever the user was running (mode 07 mono, a non-default text
+     * mode, etc.) — the previous unconditional AL=03h restore dropped
+     * mode 07 users into mode 03h. INT 10h AH=0Fh returns: AL=current
+     * video mode, AH=column count, BH=active display page. */
+    regs.h.ah = 0x0F;
+    int86(0x10, &regs, &regs);
+    saved_mode = regs.h.al;
 
     /* INT 10h AH=00h AL=13h — set mode 13h (320x200x256, VGA). */
     regs.h.ah = 0x00;
@@ -193,10 +249,17 @@ static int bench_video_mode13h(result_table_t *t)
     vram_write_loop(vram, BENCH_VIDEO_M13H_BYTES, BENCH_VIDEO_M13H_ITERS);
     elapsed = timing_stop_long();
 
-    /* Restore text mode 03h — 80x25 color. Happens after timing_stop so
-     * the mode-switch cost isn't charged to the measurement. */
+    /* Restore the entry mode. Happens after timing_stop so the mode-
+     * switch cost isn't charged to the measurement.
+     *
+     * Caveat: INT 10h AH=00h always clears the screen for the target
+     * mode, so any text transcript on screen when the bench started is
+     * gone — this is inherent to any mode 13h round-trip (mode 13h entry
+     * already wiped the text-mode buffer). What THIS fix addresses is
+     * geometry/attribute mismatch: a mode-07 user now gets mode 07 back
+     * instead of being dumped into mode 03. */
     regs.h.ah = 0x00;
-    regs.h.al = 0x03;
+    regs.h.al = saved_mode;
     int86(0x10, &regs, &regs);
 
     rate = bench_cache_kb_per_sec(
