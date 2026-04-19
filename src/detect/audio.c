@@ -274,10 +274,11 @@ static const char *probe_mixer_chip(unsigned int sb_base)
      * select (write to 0x04) and latched-data read (read from 0x05);
      * on fast hardware the consecutive outp/inp can complete inside
      * the mixer chip's settling window and return 0xFF or stale
-     * contents. Port 0x80 is the PC/AT keyboard-controller diagnostic
-     * port; reading it is side-effect-free and costs one ISA bus
-     * cycle (~1 μs), which is the canonical DOS "jmp $+2" equivalent
-     * for forcing a pause between back-to-back I/O operations. */
+     * contents. Port 0x80 is the POST diagnostic output port (AT) /
+     * DMA channel-0 page register (XT); reading it is side-effect-free
+     * on both and costs one ISA bus cycle (~1 μs), which is the
+     * canonical DOS "jmp $+2" equivalent for forcing a pause between
+     * back-to-back I/O operations. */
     (void)inp(0x80);
     v = (unsigned char)inp(data);
 

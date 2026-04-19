@@ -445,7 +445,7 @@ static unsigned long read_bios_tick(void);
  * (Dhrystone warmup + main, Whetstone warmup + main) makes a paired
  * start/stop call; nesting is not supported but is not a concern because
  * the bench orchestrator serializes them. */
-static unsigned long long_start_ticks = 0UL;
+static volatile unsigned long long_start_ticks = 0UL;
 
 void timing_start_long(void)
 {
@@ -503,20 +503,33 @@ static unsigned long read_bios_tick(void)
      * BIOS tick is a 32-bit count at 0040:006Ch, incremented by INT 8
      * (the timer IRQ) roughly every 54.925 ms. The interrupt CAN fire
      * between our LSB and MSB reads, so the standard idiom is: read
-     * MSB, LSB, MSB again — if MSBs match, the word is coherent; if
-     * they differ, retry. A single retry is always sufficient because
-     * INT 8 fires far slower than the time it takes to re-read.
+     * MSB, LSB, MSB again via word-aliased pointers — if the two MSB
+     * reads match, the word is coherent; if they differ, INT 8 fired
+     * mid-read and we retry.
+     *
+     * The previous implementation loaded the whole 32-bit value twice
+     * into v1/v2 and compared their high halves — which does NOT
+     * prevent a tear WITHIN the second 32-bit load, because the compiler
+     * is free to emit two 16-bit loads in either order. The correct
+     * form does three explicit 16-bit loads: hi1, lo, hi2, and retries
+     * if hi1 != hi2. A 3-retry cap is ample because INT 8 takes far
+     * longer to fire (~55 ms) than the few instructions between hi1
+     * and hi2 (microseconds), so one tear per poll is the worst case.
      */
-    volatile unsigned long __far *bt =
-        (volatile unsigned long __far *)MK_FP(0x0040, 0x006C);
-    unsigned long v1, v2;
+    volatile unsigned short __far *bt_words =
+        (volatile unsigned short __far *)MK_FP(0x0040, 0x006C);
+    unsigned short hi1, hi2, lo;
+    int retries;
 
-    v1 = *bt;
-    v2 = *bt;
-    if ((v1 >> 16) != (v2 >> 16)) {
-        v2 = *bt;  /* one retry — INT 8 can't fire twice this fast */
+    hi2 = 0;  /* silence "possibly uninitialized" on pathological path */
+    lo  = 0;
+    for (retries = 0; retries < 3; retries++) {
+        hi1 = bt_words[1];
+        lo  = bt_words[0];
+        hi2 = bt_words[1];
+        if (hi1 == hi2) break;
     }
-    return v2;
+    return ((unsigned long)hi2 << 16) | (unsigned long)lo;
 }
 
 int timing_dual_measure(unsigned int target_bios_ticks,

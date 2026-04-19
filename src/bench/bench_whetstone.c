@@ -355,25 +355,44 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
                    CONF_HIGH, VERDICT_UNKNOWN);
 
     if (main_us > 0) {
-        /* units * 1,000,000 / main_us — watch for 32-bit overflow.
-         * If units * 1e6 might overflow (units > ~4294), use the
-         * rearranged form. Typical units on a 486 run ~500-2000. */
-        if (units < 4294UL) {
-            k_whet_per_sec = (units * 1000000UL) / (unsigned long)main_us;
+        /* k_whet_per_sec = units * 1,000,000 / main_us.
+         *
+         * Two-regime computation that avoids 32-bit overflow on both
+         * sides of the product (same pattern as bench_dhrystone S1
+         * fix — round-3).
+         *
+         *  - Primary (main_us >= 1000): rescale to ms so the
+         *    numerator stays in 32 bits:
+         *       k_whet_per_sec = (units * 1000) / (main_us / 1000)
+         *    Overflow bounds: units clamped to W_MAX_UNITS = 200,000,
+         *    so units * 1000 = 2e8, well below ULONG_MAX (4.29e9).
+         *    The previous fallback form main_us * 1000 overflows
+         *    whenever main_us > 4,294,967 — i.e. any main run over
+         *    ~4.3 seconds on slow hardware that also hits the
+         *    units >= 4294 branch — silently corrupting the reported
+         *    Whetstone rate.
+         *
+         *  - Fallback (main_us < 1000): sub-millisecond emulator
+         *    run, can't be rescaled meaningfully. Emit 0 with
+         *    CONF_LOW. */
+        if (main_us >= 1000UL) {
+            unsigned long ms = (unsigned long)main_us / 1000UL;
+            k_whet_per_sec = (units * 1000UL) / ms;
+            report_add_u32(t, "bench.fpu.k_whetstones",
+                           k_whet_per_sec, (const char *)0,
+                           CONF_HIGH, VERDICT_UNKNOWN);
+            report_add_str(t, "bench.fpu.whetstone_status", "ok",
+                           CONF_HIGH, VERDICT_UNKNOWN);
         } else {
-            unsigned long us_per_unit_x1000 =
-                ((unsigned long)main_us * 1000UL) / units;
-            if (us_per_unit_x1000 > 0) {
-                k_whet_per_sec = 1000000000UL / us_per_unit_x1000;
-            } else {
-                k_whet_per_sec = 0;
-            }
+            /* Sub-millisecond run — emulator too fast to measure
+             * meaningfully at BIOS-tick resolution. */
+            report_add_u32(t, "bench.fpu.k_whetstones",
+                           0UL, (const char *)0,
+                           CONF_LOW, VERDICT_WARN);
+            report_add_str(t, "bench.fpu.whetstone_status",
+                           "inconclusive_sub_ms",
+                           CONF_LOW, VERDICT_WARN);
         }
-        report_add_u32(t, "bench.fpu.k_whetstones",
-                       k_whet_per_sec, (const char *)0,
-                       CONF_HIGH, VERDICT_UNKNOWN);
-        report_add_str(t, "bench.fpu.whetstone_status", "ok",
-                       CONF_HIGH, VERDICT_UNKNOWN);
     } else {
         report_add_str(t, "bench.fpu.whetstone_status",
                        "inconclusive_elapsed_zero",

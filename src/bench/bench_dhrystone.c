@@ -324,7 +324,13 @@ static void run_dhrystone_iterations(unsigned long iters)
 /* ------------------------------------------------------------------- */
 
 /* Target runtime for the main run: ~5 seconds on a 486 DX-2.
- * Warmup estimates Dhrystones/second via a short run, then scales. */
+ * Warmup estimates Dhrystones/second via a short run, then scales.
+ *
+ * INVARIANT: WARMUP_ITERS must equal MIN_MAIN_ITERS for the
+ * warmup-is-main short-circuit (`main_iters = WARMUP_ITERS`) to
+ * correctly skip the MIN_MAIN_ITERS clamp. If these drift
+ * independently, the short-circuit silently bypasses the floor.
+ * C89 has no static_assert — keep this invariant in sync by hand. */
 #define WARMUP_ITERS       2000UL
 #define MIN_MAIN_ITERS     2000UL
 #define MAX_MAIN_ITERS     2000000UL
@@ -432,25 +438,47 @@ void bench_dhrystone(result_table_t *t, const opts_t *o)
 
     if (main_us > 0) {
         /* dhry_per_sec = main_iters * 1,000,000 / main_us.
-         * Guard against 32-bit overflow: main_iters * 1000000 fits in
-         * unsigned long only when main_iters < 4294. For larger counts
-         * compute via (main_iters / main_us) * 1000000 + residue. */
-        if (main_iters < 4294UL) {
-            dhry_per_sec = (main_iters * 1000000UL) / (unsigned long)main_us;
+         *
+         * Two-regime computation that avoids 32-bit overflow on both
+         * sides of the product.
+         *
+         *  - Primary (main_us >= 1000, i.e. >= 1 ms of measured time):
+         *    rescale to milliseconds first so the numerator stays
+         *    inside 32 bits:
+         *       dhry_per_sec = (main_iters * 1000) / (main_us / 1000)
+         *    Overflow bounds: main_iters is clamped to MAX_MAIN_ITERS
+         *    = 2,000,000, so main_iters * 1000 = 2e9, comfortably
+         *    below ULONG_MAX (4.29e9). The previous form
+         *    main_us * 1000 overflows for any main_us > 4,294,967 —
+         *    which includes the target 5-second 486 DX-2 run
+         *    (main_us ≈ 5,000,000) — silently producing a wrong
+         *    Dhrystone number. This is the same overflow class as
+         *    the v7 23× overreport bug, just migrated one step.
+         *    Worked example (486 DX-2 bench box): main_iters=168,000,
+         *    main_us=5,000,000 -> ms=5000,
+         *    dhry_per_sec = 168,000 * 1000 / 5000 = 33,600 — matches
+         *    the CheckIt reference (33,609) within rounding.
+         *
+         *  - Fallback (main_us < 1000, sub-millisecond run): emulator
+         *    territory. main_iters is bounded by the warmup_us==0
+         *    fallback at 50,000, so main_iters * 1e6 = 5e10 still
+         *    overflows 32 bits, and the ms-scaled form divides by
+         *    zero. Emit 0 with CONF_LOW / VERDICT_WARN rather than
+         *    synthesize a meaningless rate. */
+        if (main_us >= 1000UL) {
+            unsigned long ms = (unsigned long)main_us / 1000UL;
+            dhry_per_sec = (main_iters * 1000UL) / ms;
+            sprintf(bench_dhry_per_sec_val, "%lu", dhry_per_sec);
+            report_add_u32(t, "bench.cpu.dhrystones",
+                           dhry_per_sec, bench_dhry_per_sec_val,
+                           CONF_HIGH, VERDICT_UNKNOWN);
         } else {
-            /* Rearranged for 32-bit safety: 1e6 / (us / iters) */
-            unsigned long us_per_iter_x1000 =
-                ((unsigned long)main_us * 1000UL) / main_iters;
-            if (us_per_iter_x1000 > 0) {
-                dhry_per_sec = 1000000000UL / us_per_iter_x1000;
-            } else {
-                dhry_per_sec = 0;
-            }
+            /* Sub-millisecond run — emulator too fast to measure
+             * meaningfully with BIOS-tick resolution. */
+            report_add_str(t, "bench.cpu.dhrystones",
+                           "inconclusive (sub-millisecond run)",
+                           CONF_LOW, VERDICT_WARN);
         }
-        sprintf(bench_dhry_per_sec_val, "%lu", dhry_per_sec);
-        report_add_u32(t, "bench.cpu.dhrystones",
-                       dhry_per_sec, bench_dhry_per_sec_val,
-                       CONF_HIGH, VERDICT_UNKNOWN);
     } else {
         report_add_str(t, "bench.cpu.dhrystones",
                        "inconclusive (elapsed=0)",
