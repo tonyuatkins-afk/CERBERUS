@@ -19,6 +19,19 @@ ASM = "C:\Program Files\NASM\nasm.exe"
 #   -zq         quiet
 #   -bt=dos     target DOS
 CFLAGS  = -0 -fpi -mm -ox -w3 -zq -bt=dos -i=src
+# Historical-benchmark modules compile at -od (no optimization) so Watcom's
+# -ox DCE cannot eliminate the Dhrystone/Whetstone workloads. The v8 real-
+# iron capture on 2026-04-18 showed that volatile + checksum observers alone
+# were insufficient — DCE happened inside the non-volatile-qualified
+# procedure bodies (Proc_1/2/3/7) that receive non-volatile pointers to
+# Rec_Type members, and propagating volatile through those signatures would
+# require reference-breaking qualification changes. -od is methodologically
+# correct anyway: Weicker's 1984 Dhrystone paper and Curnow's Whetstone both
+# presume unoptimized reference compilation to keep the measurement
+# meaningful. Only applied to bench_dhrystone.obj and bench_whetstone.obj;
+# the other bench modules (cpu / memory / fpu) have internal volatile /
+# pragma-aux guards and stay at -ox.
+CFLAGS_NOOPT = -0 -fpi -mm -od -w3 -zq -bt=dos -i=src
 ASFLAGS = -f obj
 
 TARGET  = CERBERUS.EXE
@@ -183,10 +196,10 @@ src\bench\bench_fpu.obj: src\bench\bench_fpu.c src\bench\bench.h src\core\timing
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_fpu.c
 
 src\bench\bench_dhrystone.obj: src\bench\bench_dhrystone.c src\bench\bench.h src\core\timing.h src\core\report.h src\cerberus.h
-	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_dhrystone.c
+	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_dhrystone.c
 
 src\bench\bench_whetstone.obj: src\bench\bench_whetstone.c src\bench\bench.h src\core\timing.h src\core\report.h src\cerberus.h
-	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_whetstone.c
+	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_whetstone.c
 
 src\upload\upload.obj: src\upload\upload.c src\upload\upload.h
 	$(CC) $(CFLAGS) -fo=$^@ src\upload\upload.c
