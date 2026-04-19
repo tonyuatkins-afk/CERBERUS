@@ -41,7 +41,7 @@ CFLAGS  = -0 -fpi -mm -ox -w3 -zq -bt=dos -i=src
 # Only applied to bench_dhrystone.obj and bench_whetstone.obj; the other
 # bench modules (cpu / memory / fpu) have internal volatile / pragma-aux
 # guards and stay at -ox.
-CFLAGS_NOOPT = -0 -fpi -mm -ot -oi -om -w3 -zq -bt=dos -i=src
+CFLAGS_NOOPT = -0 -fpi -mm -ot -oi -om -oe -w3 -zq -bt=dos -i=src
 ASFLAGS = -f obj
 
 TARGET  = CERBERUS.EXE
