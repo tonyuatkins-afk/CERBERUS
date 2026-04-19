@@ -44,7 +44,8 @@ static const display_row_t rows[] = {
     { "video.chipset",                "  chipset" },
     { "audio.detected",               "audio" },
     { "bios.family",                  "bios" },
-    { "bios.date",                    "  date" }
+    { "bios.date",                    "  date" },
+    { "bench.cpu.dhrystones",         "dhrystones" }
 };
 #define ROW_COUNT (sizeof(rows) / sizeof(rows[0]))
 
