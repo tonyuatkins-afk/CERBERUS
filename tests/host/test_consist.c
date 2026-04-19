@@ -364,6 +364,21 @@ int main(void)
     CHECK(k(&t, "consistency.whetstone_fpu") == NULL,
           "Scenario HH: FPU=integrated-486 + Whetstone=inconclusive_elapsed_zero → rule 10 no-op");
 
+    /* Scenario II: DB expects CT1745 but probe returned "unknown" (Interrupt
+     * Setup byte read neither CT1745-shaped nor clearly-absent — the weird-
+     * mixer bucket that audio.c's probe_mixer_chip documents as "needs
+     * human triage via Rule 7 WARN"). Pre-fix, rule 7's trailing else
+     * branch emitted FAIL here because ev != ov, contradicting audio.c's
+     * classifier contract and crying wolf on legitimate CT1745 cards whose
+     * register snapshot fell in the inconclusive range. Post-fix rule 7
+     * must WARN, not FAIL, on observed=="unknown". */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "audio.mixer_chip_expected", "CT1745",  CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "audio.mixer_chip_observed", "unknown", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.audio_mixer_chip")) == VERDICT_WARN,
+          "Scenario II: mixer expected=CT1745 + observed=unknown → rule 7 WARN (not FAIL)");
+
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }

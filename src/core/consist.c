@@ -46,6 +46,7 @@ static char msg_rule4a_warn[120];
 static char msg_rule4b_warn[160];
 static char msg_rule4b_pass[120];
 static char msg_rule7_warn[120];
+static char msg_rule7_warn_unknown[140];
 static char msg_rule7_fail[120];
 static char msg_rule10_fail[120];
 
@@ -475,6 +476,21 @@ static void rule_audio_mixer_chip(result_table_t *t)
         report_add_str(t, "consistency.audio_mixer_chip",
                        "pass (mixer chip matches DB expectation)",
                        CONF_HIGH, VERDICT_PASS);
+    } else if (strcmp(ov, "unknown") == 0) {
+        /* Probe-observed "unknown" means the Interrupt Setup byte read
+         * neither a CT1745-shaped value nor a clearly-absent sentinel —
+         * probe_mixer_chip explicitly reserves this bucket for "weird
+         * mixer, needs human triage via Rule 7 WARN" (see audio.c). A
+         * plain FAIL here would cry wolf on a legitimate CT1745 whose
+         * register snapshot happened to fall in the inconclusive range,
+         * contradicting the classifier's documented contract. Emit WARN
+         * at MEDIUM confidence to mirror the unknown-DB WARN branch. */
+        sprintf(msg_rule7_warn_unknown,
+                "WARN: audio DB expects mixer '%s' but probe observed 'unknown' (mixer-probe inconclusive, human triage needed)",
+                ev);
+        report_add_str(t, "consistency.audio_mixer_chip",
+                       msg_rule7_warn_unknown,
+                       CONF_MEDIUM, VERDICT_WARN);
     } else {
         sprintf(msg_rule7_fail,
                 "FAIL: audio DB expects mixer '%s' but probe observed '%s'",

@@ -6,7 +6,7 @@ Part of the Barely Booting / NetISA ecosystem — CERBERUS is the tool, NetISA i
 
 ## Status
 
-**Pre-alpha, approaching v0.2-rc1.** All five subsystems (detect, diagnose, benchmark, consistency engine, thermal tracker) are code-complete and adversarially quality-gated. The 486 DX-2 real-hardware gate passed on 2026-04-18 (five bugs found and fixed — see [CERBERUS.md § Why real hardware](CERBERUS.md) and [`tests/captures/486-real-2026-04-18/`](tests/captures/486-real-2026-04-18/)); 386 and 8088 validation still outstanding. Hardware identification has 121 seed entries across 5 databases; your specific chip is likely not yet present — `CERBERUS.UNK` captures get submitted as GitHub issues and added to the CSVs.
+**Pre-alpha, approaching v0.2-rc1.** All five subsystems (detect, diagnose, benchmark, consistency engine, thermal tracker) are code-complete and adversarially quality-gated. The 486 DX-2 real-hardware gate passed on 2026-04-18 (five bugs found and fixed — see [CERBERUS.md § Why real hardware](CERBERUS.md) and [`tests/captures/486-real-2026-04-18/`](tests/captures/486-real-2026-04-18/)); 386 and 8088 validation still outstanding. Hardware identification has 128 seed entries across 5 databases; your specific chip is likely not yet present — `CERBERUS.UNK` captures get submitted as GitHub issues and added to the CSVs.
 
 | Subsystem | Target version | Current state |
 |---|---|---|

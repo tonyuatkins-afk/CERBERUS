@@ -110,6 +110,7 @@ Each rule below names the key it emits (`consistency.<name>`), the prerequisite 
 **Verdicts:**
 - **PASS** — `expected` equals `observed` (e.g. both `CT1745`).
 - **WARN** — `expected` is `unknown` (DB row has not yet been populated with verified mixer data) but `observed` is a named chip. Logged so real-hardware contributions feeding back into `hw_db/audio.csv` are visible.
+- **WARN** — `expected` is a named chip but `observed` is `unknown` (probe_mixer_chip's inconclusive bucket: the Interrupt Setup byte was neither CT1745-shaped nor clearly-absent — see `src/detect/audio.c` comment on the "weird mixer, needs human triage via Rule 7 WARN" contract). FAILing here would cry wolf on legitimate CT1745 cards whose register snapshot fell in the weird-mixer range, so the verdict is WARN at MEDIUM confidence, mirroring the unknown-DB WARN branch above.
 - **FAIL** — `expected` is a named chip and `observed` is `none` or a different named chip.
 - **no-op** — one or both keys absent (e.g. the audio card has no mixer to probe, or `/ONLY:DIAG` skipped the audio probe).
 
