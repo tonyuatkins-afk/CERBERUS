@@ -27,11 +27,21 @@ CFLAGS  = -0 -fpi -mm -ox -w3 -zq -bt=dos -i=src
 # Rec_Type members, and propagating volatile through those signatures would
 # require reference-breaking qualification changes. -od is methodologically
 # correct anyway: Weicker's 1984 Dhrystone paper and Curnow's Whetstone both
-# presume unoptimized reference compilation to keep the measurement
-# meaningful. Only applied to bench_dhrystone.obj and bench_whetstone.obj;
-# the other bench modules (cpu / memory / fpu) have internal volatile /
-# pragma-aux guards and stay at -ox.
-CFLAGS_NOOPT = -0 -fpi -mm -od -w3 -zq -bt=dos -i=src
+# presume unoptimized reference compilation.
+#
+# -oi (intrinsic math) is added because -od's "no optimization" stance does
+# NOT mean "route transcendentals through the software math library." Weicker
+# warned against DCE, not against inline FPU instructions. The v9 real-iron
+# capture showed Whetstone running 130× too slow at pure -od — every
+# sin/cos/atan/sqrt/exp/log call dispatched through Watcom's unoptimized
+# libm wrappers rather than compiling to inline x87 instructions. Adding -oi
+# restores FPU-native math without touching DCE behavior; volatile + checksum
+# observer still carry the anti-DCE load.
+#
+# Only applied to bench_dhrystone.obj and bench_whetstone.obj; the other
+# bench modules (cpu / memory / fpu) have internal volatile / pragma-aux
+# guards and stay at -ox.
+CFLAGS_NOOPT = -0 -fpi -mm -od -oi -w3 -zq -bt=dos -i=src
 ASFLAGS = -f obj
 
 TARGET  = CERBERUS.EXE
