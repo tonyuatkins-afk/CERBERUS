@@ -89,6 +89,19 @@ static volatile double T, T1, T2;
 static volatile double E1[4];
 static volatile int    J, K, L;
 
+/* Module accumulators: file-scope `volatile` statics written ONCE per
+ * outer-loop iteration. Locals X1-X4 / X / Y / Z inside run_whetstone_units
+ * are NON-volatile so Watcom's -ot can register-allocate them across
+ * the module inner loops (which do hundreds of FPU operations per module);
+ * at end of each unit_idx iteration we copy to these volatile statics,
+ * making every iteration's final state observable. Checksum observer in
+ * bench_whetstone() reads these — forces every iteration's work to be
+ * preserved (no DCE). Overhead: 7 volatile writes per unit, ~35k total
+ * for a 5s run — trivial compared to the 228k volatile-double-accesses
+ * per run that the all-volatile-locals approach produced. */
+static volatile double X1_Acc, X2_Acc, X3_Acc, X4_Acc;
+static volatile double X_Acc, Y_Acc, Z_Acc;
+
 /* Reference module iteration counts. Per Curnow 1976, these distribute
  * 1,000,000 Whetstone "operations" across the 11 modules according to
  * the weighting scheme that makes a 1-MIPS PDP-11 class machine produce
@@ -150,11 +163,12 @@ static void P0(void)
 
 static void run_whetstone_units(unsigned long units)
 {
-    /* volatile forces every accumulator read/write to memory regardless
-     * of register allocation pressure. Without it Watcom -ox hoists X1-X4
-     * / X / Y / Z into registers and DCEs intermediate values that aren't
-     * observed by the return-to-memory path. */
-    volatile double X1, X2, X3, X4, X, Y, Z;
+    /* Non-volatile locals — Watcom's -ot register-allocates these on
+     * the x87 stack, so module inner loops run at real FPU speed.
+     * DCE prevention: the end-of-iteration copy to the volatile *_Acc
+     * statics (below) is observed via the bench_whetstone checksum,
+     * forcing every iteration's final state to materialize. */
+    double X1, X2, X3, X4, X, Y, Z;
     int    I_mod, N_mod;
     unsigned long unit_idx;
 
@@ -257,18 +271,21 @@ static void run_whetstone_units(unsigned long units)
             X = sqrt(exp(log(X) / T1));
         }
 
-        /* The DCE barrier stack now covers this: volatile accumulators
-         * (T/T1/T2/E1/J/K/L and the volatile locals X1-X4/X/Y/Z), the
-         * post-loop checksum emit via report_add_u32 (external-linkage
-         * observer), and -od compilation of this translation unit all
-         * combine to guarantee no loop iteration is eliminated. The
-         * (void)Z / (void)X4 / etc. sink-assignments that used to live
-         * here were redundant belt under the triple-suspender setup —
-         * removed M-sweep round 2.
+        /* End-of-iteration: publish local accumulator state to the
+         * file-scope volatile statics. This is the DCE barrier — the
+         * bench_whetstone checksum reads these after the whole run, so
+         * their writes must be preserved. And because they're written
+         * once per outer iteration (not per module or per inner-loop
+         * step), Watcom can't elide any iteration's work either — the
+         * compiler sees each unit_idx iteration contributing to an
+         * observed output.
          *
-         * N_mod is preserved as a local read so Watcom doesn't warn
-         * about J being written but not read inside the enclosing
-         * scope. */
+         * This replaces the previous volatile-locals approach which
+         * forced every FPU arithmetic through memory instead of x87
+         * registers. On the 486 DX-2, that was a ~100× penalty on
+         * Whetstone runtime. */
+        X1_Acc = X1; X2_Acc = X2; X3_Acc = X3; X4_Acc = X4;
+        X_Acc  = X;  Y_Acc  = Y;  Z_Acc  = Z;
         N_mod = J;
         (void)N_mod;
     }
@@ -345,6 +362,16 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
         checksum ^= (unsigned long)(unsigned int)J;
         checksum ^= (unsigned long)(unsigned int)K;
         checksum ^= (unsigned long)(unsigned int)L;
+        /* Module accumulator statics — published from run_whetstone_units
+         * at end of each unit_idx iteration. Reading them here preserves
+         * every iteration's work (no DCE of intermediate iterations). */
+        checksum ^= (unsigned long)(long)X1_Acc;
+        checksum ^= (unsigned long)(long)X2_Acc;
+        checksum ^= (unsigned long)(long)X3_Acc;
+        checksum ^= (unsigned long)(long)X4_Acc;
+        checksum ^= (unsigned long)(long)X_Acc;
+        checksum ^= (unsigned long)(long)Y_Acc;
+        checksum ^= (unsigned long)(long)Z_Acc;
         report_add_u32(t, "bench.fpu.whetstones_checksum",
                        checksum, (const char *)0,
                        CONF_HIGH, VERDICT_UNKNOWN);
