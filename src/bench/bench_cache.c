@@ -54,19 +54,21 @@
  * for 1-3 seconds on a 486 DX-2, well past the 55 ms PIT single-wrap
  * limit that timing_start / timing_stop handles.
  *
- * Anti-DCE strategy: read loops rely on a non-static external-linkage
- * sink (bench_cache_read_sink) into which the accumulator is stored
- * once post-loop; write loops add a per-iteration volatile observer so
- * Watcom's -ox cannot fold the final iteration's stores back through
- * the outer loop (cross-iteration dead-store elimination, DSE). See
- * stride_read_loop and stride_write_loop below for the leg-by-leg
- * defense descriptions and the toolchain coverage caveats.
+ * Anti-DCE strategy: this module compiles at CFLAGS_NOOPT (-od -oi, the
+ * same mitigation bench_dhrystone and bench_whetstone use), so Watcom's
+ * dead-store / dead-code elimination cannot fire in the first place. The
+ * non-static external-linkage sink (bench_cache_read_sink) and the per-
+ * iteration volatile observer (bench_cache_iter_observer) remain as
+ * belt-and-braces — still worth having so any future revert to -ox keeps
+ * a working fallback — but the load-bearing defense is the build flag,
+ * not the source-level scaffolding. See stride_read_loop and
+ * stride_write_loop below for the per-leg detail.
  *
  * The final `bench.cache.checksum` value is a 16-bit composite
- * reproducibility signal (read-sink low byte << 8 | write-sink byte) —
- * useful for detecting run-over-run drift, but NOT a byte-level
- * fingerprint of the buffer contents. See the comment at the publish
- * site below.
+ * reproducibility signal (read-sink low byte << 8 | write-sink low
+ * byte) — useful for detecting run-over-run drift, but NOT a byte-
+ * level fingerprint of the buffer contents. See the comment at the
+ * publish site below.
  */
 
 #include <stdio.h>
@@ -169,29 +171,13 @@ unsigned long bench_cache_kb_per_sec(unsigned long bytes, unsigned long elapsed_
     return (kb * 1000UL) / elapsed_ms;
 }
 
-/* Byte-stride read loop over a FAR buffer. The accumulator is NON-volatile
- * — the DCE defense is TWO-LEGGED and requires BOTH legs to stand:
- *
- *   1. The buffer is reached only via a cross-TU function call
- *      (cache_buffers_small() / cache_buffers_large() in core/cache_buffers.c)
- *      so Watcom cannot prove the contents compile-time constant and
- *      cannot fold the reads.
- *
- *   2. The final bench_cache_read_sink store has external linkage, so
- *      Watcom cannot prove `sum` is unused cross-TU and must keep the
- *      accumulator live — which keeps the whole loop live.
- *
- * WARNING: if either leg collapses — e.g., cache_buffers_small() becomes
- * `static inline` in a future refactor, OR bench_cache_read_sink picks up
- * the `static` qualifier — the defense collapses and Watcom -ox may
- * eliminate the entire loop. The volatile-in-loop fallback matches
- * diag_cache's working pattern at a measurable but not-dramatic L1-read
- * throughput cost; if ever needed, add `volatile` and re-measure rather
- * than trying to justify the decision from this comment. Note that
- * bench_cache's non-static sinks are STRONGER than bench_memory.c:112's
- * static bench_read_sink and diag_cache.c:73's static stride_sink: the
- * external-linkage fence removes the need for a volatile accumulator
- * that those two modules' static-sink pattern requires. */
+/* Byte-stride read loop over a FAR buffer. This module compiles at
+ * CFLAGS_NOOPT (-od -oi) so DCE cannot fire on the loop body. The final
+ * store to the non-static external-linkage sink bench_cache_read_sink is
+ * belt-and-braces — it keeps the defense intact if someone ever reverts
+ * this TU to -ox. The buffer is reached via cross-TU calls to
+ * cache_buffers_small() / cache_buffers_large(), which further denies
+ * the optimizer a compile-time-constant view of the contents. */
 static unsigned int stride_read_loop(unsigned char __far *buf,
                                       unsigned int size,
                                       unsigned long iters)
@@ -212,35 +198,13 @@ static unsigned int stride_read_loop(unsigned char __far *buf,
 }
 
 /* Byte-stride write loop. Pattern is (iter_low_byte XOR offset_low_byte)
- * so every byte stored is a function of both loop indices; Watcom cannot
- * hoist the inner store outside the iter loop body.
+ * so every byte stored is a function of both loop indices.
  *
- * Cross-iteration DSE defense — coverage envelope:
- *
- *   COVERS: Watcom 2.0 -ox empirically does NOT perform cross-iteration
- *   dead-store elimination on __far indexed stores. The per-iter
- *   volatile observer read of buf[i & (size-1)] anchors ONE byte per
- *   outer iteration, which is sufficient for today's toolchain — the
- *   remaining (size - 1) inner-loop stores stay live because Watcom's
- *   DSE analysis does not see them as provably overwritten before
- *   observation across iterations.
- *
- *   DOES NOT COVER: a future toolchain with more aggressive DSE could
- *   reason that the non-anchored inner-loop stores are overwritten by
- *   the next outer iteration before any observer read, and fold all
- *   but the final iteration's non-anchored writes. The observer
- *   anchors only one byte per outer iteration; nothing in C's memory
- *   model prevents a sufficiently clever compiler from eliminating
- *   the other (size - 1) stores per outer iteration.
- *
- * TODO(v0.5): if toolchain drift (newer Watcom, LLVM-WASM cross, etc.)
- * makes the current defense insufficient, the fix is to either
- * (a) move bench_cache.obj to CFLAGS_NOOPT in Makefile — same mitigation
- * applied to bench_dhrystone.obj and bench_whetstone.obj, or
- * (b) introduce a `#pragma aux` REP STOSB helper that performs the
- * far-buffer writes in assembly, bypassing the C-level optimizer
- * entirely. The `size - 1U` mask works because both buffer sizes are
- * powers of two. */
+ * This module compiles at CFLAGS_NOOPT (-od -oi) so DCE cannot fire, and
+ * the per-iter volatile observer below is belt-and-braces: it anchors
+ * one byte per outer iteration so any future revert to -ox keeps a
+ * working fallback. The `size - 1U` mask works because both buffer
+ * sizes are powers of two. */
 static void stride_write_loop(unsigned char __far *buf, unsigned int size,
                                unsigned long iters)
 {
@@ -339,26 +303,41 @@ void bench_cache(result_table_t *t, const opts_t *o)
         }
     }
 
-    /* Second gate: skip on XT-class + pre-486 AT-class CPUs where the
-     * large-buffer loop would run multiple minutes at 4.77-33 MHz.
+    /* Second gate (fail-safe): run bench_cache only when cpu.class is a
+     * known-486-or-later token. Anything else — including unrecognized
+     * legacy tokens, corrupted strings, empty values, or a missing
+     * cpu.class result entirely — skips rather than risks a multi-minute
+     * large-buffer loop on a CPU we could not positively identify as
+     * fast enough.
      *
-     * Coverage envelope — NOT "defense-in-depth against miscalibrated
-     * detect." Both gates read from detect outputs, so a detect bug that
-     * mislabels the CPU corrupts both in lockstep; one gate cannot
-     * rescue the other from a wrong detect. The real value of this
-     * second gate is catching the case where cache.present is MISSING
-     * from the report table while cpu.class is PRESENT — e.g., a future
-     * detect_cache refactor that drops cache.present emission for some
-     * CPU families but leaves cpu.class intact. Without this gate that
-     * scenario would fall through the first gate and run the 32 KB loop
-     * on whatever CPU is under the hood. */
-    if (cpu_class && cpu_class->type == V_STR && cpu_class->v.s) {
-        const char *cv = cpu_class->v.s;
-        if (strcmp(cv, "8088") == 0 || strcmp(cv, "8086") == 0 ||
-            strcmp(cv, "v20")  == 0 || strcmp(cv, "v30")  == 0 ||
-            strcmp(cv, "286")  == 0 || strcmp(cv, "386")  == 0) {
+     * The accept list covers the two paths that cpu.c:249 can emit for
+     * 486-or-later silicon: the legacy token "486-no-cpuid" (emitted
+     * when cpu_db's CPU_DB_MATCH_LEGACY path matched an early i486DX
+     * without CPUID support) and the CPUID vendor strings that land in
+     * cpu.class when cpu_db's CPU_DB_MATCH_CPUID path matched — every
+     * x86 vendor that ever shipped 486-class-or-later silicon.
+     *
+     * This inverts the prior allowlist-to-skip polarity where an empty
+     * or unrecognized cpu.class would fall through to the bench. The
+     * XT / pre-486 deny-list ("8088"/"8086"/"v20"/"v30"/"286"/"386")
+     * that used to live here is now unreachable — those tokens do not
+     * appear in the accept list, so they skip. */
+    {
+        const char *cv =
+            (cpu_class && cpu_class->type == V_STR && cpu_class->v.s)
+                ? cpu_class->v.s : "";
+        int is_known_cache_class =
+            (strcmp(cv, "486-no-cpuid") == 0 ||
+             strcmp(cv, "GenuineIntel") == 0 ||
+             strcmp(cv, "AuthenticAMD") == 0 ||
+             strcmp(cv, "CyrixInstead") == 0 ||
+             strcmp(cv, "CentaurHauls") == 0 ||  /* IDT WinChip */
+             strcmp(cv, "NexGenDriven") == 0 ||
+             strcmp(cv, "GenuineTMx86") == 0 ||  /* Transmeta */
+             strcmp(cv, "RiseRiseRise") == 0);
+        if (!is_known_cache_class) {
             report_add_str(t, "bench.cache.status",
-                           "skipped_pre_486_class_cpu",
+                           "skipped_unknown_cpu_class",
                            CONF_HIGH, VERDICT_UNKNOWN);
             return;
         }
@@ -392,19 +371,23 @@ void bench_cache(result_table_t *t, const opts_t *o)
 
     /* Publish a composite 16-bit reproducibility signal so a downstream
      * consumer can detect run-over-run drift beyond the kbps rate (which
-     * carries PIT-tick quantization noise). The read sink is `unsigned
-     * int` (16-bit in Watcom medium model), so the top 8 bits of the
-     * packed checksum come from the read accumulator's low byte and the
-     * bottom 8 bits are the final write-sink XOR — a 16-bit signal, not
-     * a per-byte fingerprint. Widening to unsigned long was considered
-     * and rejected: it would cost 4 bytes DGROUP per sink and require
-     * matching conversions in report_add_u32, which is not worth it for
-     * a signal this loose. Also closes the anti-DCE loop: report_add_u32
-     * into a separate TU means Watcom cannot prove the sinks are unused
-     * even with inter-procedural flow. */
+     * carries PIT-tick quantization noise). Exactly 16 bits: the high
+     * byte is (read-sink & 0xFF) and the low byte is (write-sink & 0xFF).
+     * Masking the read sink to its low byte before shifting is required
+     * because bench_cache_read_sink is `unsigned int` (16-bit in Watcom
+     * medium model); shifting the full value left 8 without masking
+     * would leak bits 8..15 of the accumulator into bits 16..23 of the
+     * result, producing a 24-bit value that contradicts this comment.
+     * Widening to unsigned long was considered and rejected: it would
+     * cost 4 bytes DGROUP per sink and require matching conversions in
+     * report_add_u32, which is not worth it for a signal this loose.
+     * Also closes the anti-DCE loop: report_add_u32 into a separate TU
+     * means Watcom cannot prove the sinks are unused even with inter-
+     * procedural flow. */
     {
-        unsigned long checksum = ((unsigned long)bench_cache_read_sink << 8) |
-                                  (unsigned long)bench_cache_write_sink;
+        unsigned long checksum =
+            (((unsigned long)bench_cache_read_sink  & 0xFFUL) << 8) |
+             ((unsigned long)bench_cache_write_sink & 0xFFUL);
         report_add_u32(t, "bench.cache.checksum", checksum, (const char *)0,
                        CONF_LOW, VERDICT_UNKNOWN);
     }

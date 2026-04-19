@@ -38,9 +38,12 @@ CFLAGS  = -0 -fpi -mm -ox -w3 -zq -bt=dos -i=src
 # restores FPU-native math without touching DCE behavior; volatile + checksum
 # observer still carry the anti-DCE load.
 #
-# Only applied to bench_dhrystone.obj and bench_whetstone.obj; the other
-# bench modules (cpu / memory / fpu) have internal volatile / pragma-aux
-# guards and stay at -ox.
+# Applied to bench_dhrystone.obj, bench_whetstone.obj, and bench_cache.obj;
+# the other bench modules (cpu / memory / fpu) have internal volatile /
+# pragma-aux guards and stay at -ox. bench_cache joined this list after
+# F2/SP4 review: its cross-iteration DSE defense depended on empirical
+# Watcom 2.0 -ox behavior that a future toolchain bump could invalidate;
+# moving to -od -oi eliminates the concern permanently.
 CFLAGS_NOOPT = -0 -fpi -mm -ot -oi -w3 -zq -bt=dos -i=src
 ASFLAGS = -f obj
 
@@ -218,7 +221,7 @@ src\bench\bench_fpu.obj: src\bench\bench_fpu.c src\bench\bench.h src\core\timing
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_fpu.c
 
 src\bench\bench_cache.obj: src\bench\bench_cache.c src\bench\bench.h src\core\timing.h src\core\report.h src\core\cache_buffers.h src\cerberus.h
-	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_cache.c
+	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_cache.c
 
 src\bench\bench_dhrystone.obj: src\bench\bench_dhrystone.c src\bench\bench.h src\core\timing.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_dhrystone.c
