@@ -58,6 +58,10 @@ typedef struct {
     unsigned char do_upload;
     unsigned char no_cyrix;
     unsigned char no_intro;
+    unsigned char no_ui;       /* /NOUI: skip ui_render_summary and
+                                * ui_render_consistency_alerts. Escape
+                                * hatch for real-iron UI-render hangs.
+                                * INI + UNK are still written. */
     char          out_path[64];
 } opts_t;
 

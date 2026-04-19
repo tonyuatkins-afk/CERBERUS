@@ -30,6 +30,7 @@ static void print_help(void)
     puts("  /U              Upload via NetISA (non-zero exit if disabled)");
     puts("  /NOCYRIX        Skip Cyrix DIR probe (port 22h safety)");
     puts("  /NOINTRO        Skip VGA splash");
+    puts("  /NOUI           Skip summary + consistency UI render (INI still written)");
     puts("  /?              This help");
 }
 
@@ -51,6 +52,7 @@ static int parse_args(int argc, char *argv[], opts_t *o)
     o->do_upload = 0;
     o->no_cyrix = 0;
     o->no_intro = 0;
+    o->no_ui    = 0;
     strcpy(o->out_path, "CERBERUS.INI");
 
     for (i = 1; i < argc; i++) {
@@ -87,6 +89,7 @@ static int parse_args(int argc, char *argv[], opts_t *o)
         else if (!strcmp(a, "/U"))       { o->do_upload = 1; }
         else if (!strcmp(a, "/NOCYRIX")) { o->no_cyrix = 1; }
         else if (!strcmp(a, "/NOINTRO")) { o->no_intro = 1; }
+        else if (!strcmp(a, "/NOUI"))    { o->no_ui = 1; }
         else {
             fprintf(stderr, "unknown option: %s\n", a);
             return -1;
@@ -155,15 +158,31 @@ int main(int argc, char *argv[])
     thermal_check(&table);
 
     report_write_ini(&table, &opts, opts.out_path);
-    ui_render_summary(&table, &opts);
-    ui_render_consistency_alerts(&table);
+
+    /* Finalize the unknown-hardware dump BEFORE any UI rendering so the
+     * CERBERUS.UNK file lands on disk even if the UI path hangs (observed
+     * on the 486 DX-2 bench box: after the consistency alert boxes
+     * rendered the program hung before returning to DOS, requiring
+     * CTRL-ALT-DEL). INI was already written by report_write_ini above;
+     * we just want the UNK preserved for the same resilience. */
+    unknown_finalize();
+
+    if (!opts.no_ui) {
+        ui_render_summary(&table, &opts);
+        ui_render_consistency_alerts(&table);
+    }
 
     if (opts.do_upload) {
         upload_rc = upload_ini(opts.out_path);
         if (upload_rc != UPLOAD_OK) exit_code = EXIT_UPLOAD_FAIL;
     }
 
-    unknown_finalize();
+    /* Flush stdio so any buffered UI output makes it to the console
+     * before the exit-cleanup stage starts. Cheap insurance for the
+     * real-iron UI hang. */
+    fflush(stdout);
+    fflush(stderr);
+
     display_shutdown();
     return exit_code;
 }
