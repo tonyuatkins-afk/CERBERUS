@@ -79,7 +79,7 @@ Engine + first four rules (`fac1500`). Alert-box UI for WARN/FAIL renders (`7b1a
 - "Why real hardware" section in CERBERUS.md (`0161e99`) — H2 under Status, names the five 2026-04-18 bugs with symptom / cause / commit, closes with non-negotiable real-hardware-gate statement.
 - Adversarial quality gates applied at Phase 4 completion (`6686574`, 5 rounds) and post-real-iron (`4d28e8e`, round-2) catching the phantom-verify biased-baseline and sub-crumb lifecycle bugs before the bench-box validation.
 - `tests/target/` scaffold (`0e6c7e3`) for Phase 1 real-hardware validation drops.
-- Host-side test suite: 137 assertions across timing (65), consistency (36), thermal (15), diag_fpu (21). Test-expectation drift in timing tracked as [#1](https://github.com/tonyuatkins-afk/CERBERUS/issues/1).
+- Host-side test suite: 138 assertions across timing (65), consistency (37), thermal (15), diag_fpu (21). Test-expectation drift in timing tracked as [#1](https://github.com/tonyuatkins-afk/CERBERUS/issues/1).
 
 ### Documentation
 
@@ -90,7 +90,7 @@ Engine + first four rules (`fac1500`). Alert-box UI for WARN/FAIL renders (`7b1a
 
 ### Known issues
 
-- **[#1](https://github.com/tonyuatkins-afk/CERBERUS/issues/1)** — `test_timing` has 4 pre-existing failures after the PIT wrap-range rework in `b6c179b` / `6c3a023`. Test expectations drifted from behavior. Gated behind the Rule 4a UMC491 8254 phantom-wrap deep-dive, which is out-of-scope for v0.2-rc1. Other host suites (consist 30/0, thermal 15/0, diag_fpu 21/0) are clean.
+- **[#1](https://github.com/tonyuatkins-afk/CERBERUS/issues/1)** — `test_timing` has 4 pre-existing failures after the PIT wrap-range rework in `b6c179b` / `6c3a023`. Test expectations drifted from behavior. Gated behind the Rule 4a UMC491 8254 phantom-wrap deep-dive, which is out-of-scope for v0.2-rc1. Other host suites (consist 37/0, thermal 15/0, diag_fpu 21/0) are clean.
 - **[#2](https://github.com/tonyuatkins-afk/CERBERUS/issues/2)** — intermittent OPL detection on Vibra 16 PnP. Same binary, same box, different boot produces `opl=opl3` vs `opl=none`. Partial fix in `eeba319`; residual state-dependence remains. INI still complete on the `opl=none` path (`audio.sb_present=yes`, `sb_dsp_version=4.13`); downstream T-key lookup falls back to the raw composite key.
 - **UI hang on real iron.** Observed once on v5 (`7e4bdcb`) without `/NOUI` (2026-04-18 afternoon): after `ui_render_consistency_alerts` paints, the program did not return to DOS. The 2026-04-18 evening session ran the baseline (`7da102e`, no instrumentation) and two builds with exit-path instrumentation; all three exited cleanly on the same 486 box. The reproduction regime is not active on the current state. State variable causing the drift is unidentified — candidates include CMOS drift, cold-vs-warm-boot residue, Vibra PnP init ordering. Instrumentation patch preserved as local `git stash` for re-application if reproduction returns. Tracking issue filed with reopen criterion "reproduction on real iron." `/NOUI` retained as a user-visible escape hatch. Full investigation arc: [`docs/sessions/SESSION_REPORT_2026-04-18-evening.md`](docs/sessions/SESSION_REPORT_2026-04-18-evening.md).
 
