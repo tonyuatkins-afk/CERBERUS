@@ -1,6 +1,6 @@
 # CERBERUS
 
-DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; current tip-of-tree is 80,044 bytes. Targets an 8088 with 256KB and an MDA card as the floor and scales up through a 486 with VGA.
+DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; current tip-of-tree is 99,828 bytes. Targets an 8088 with 256KB and an MDA card as the floor and scales up through a 486 with VGA.
 
 Part of the Barely Booting / NetISA ecosystem — CERBERUS is the tool, NetISA is the hardware card for uploading results from DOS over TLS 1.3.
 
@@ -19,7 +19,7 @@ Part of the Barely Booting / NetISA ecosystem — CERBERUS is the tool, NetISA i
 | Summary UI with confidence meters + consistency alert box | v0.2 | complete (three-pane polish + bar-graph comparison — see [checkit-comparison.md](docs/plans/checkit-comparison.md) — deferred behind UI-hang resolution) |
 | Diagnostic tests (ALU, memory walking-1s/0s/AinA, FPU bit-exact, video RAM) | v0.3 | 4 of 6 complete (cache + DMA deferred per plan) |
 | Benchmark suite (integer / FPU / memory, calibrated multi-pass for thermal) | v0.4 | 3 of 5 complete (cache + video bandwidth deferred; Dhrystone 2.1 + Whetstone adoption planned — see [checkit-comparison.md](docs/plans/checkit-comparison.md)) |
-| Consistency engine (9 rules) + thermal stability (Mann-Kendall, α=0.05, N≥5) | v0.5 | quality-gated clean, 7 rounds adversarial review |
+| Consistency engine (10 rules) + thermal stability (Mann-Kendall, α=0.05, N≥5) | v0.5 | quality-gated clean, 7 rounds adversarial review |
 | Timing self-check (PIT C2 vs BIOS tick cross-check, rule 4a) | v0.5 | complete |
 | NetISA upload | v0.6 | build-flag disabled by default |
 
@@ -80,9 +80,9 @@ Requires [Open Watcom C/C++ 2.0](http://open-watcom.github.io/) and [NASM 2.x](h
 wmake
 ```
 
-Produces `CERBERUS.EXE` — DOS real-mode, medium memory model. Current build is 80,044 bytes; DGROUP (near data) 48,688 / 65,536 bytes (26% headroom on the hard ceiling, under the 50,000-byte internal working-ceiling).
+Produces `CERBERUS.EXE` — DOS real-mode, medium memory model. Current build is 99,828 bytes; DGROUP (near data) 50,192 / 65,536 bytes (23% headroom on the hard ceiling, under the 52,000-byte internal working-ceiling).
 
-Host-side unit tests (run on Windows / Linux / macOS dev box, exercise the pure-math and database-lookup paths with 124 assertions across timing / consistency / thermal / diag_fpu):
+Host-side unit tests (run on Windows / Linux / macOS dev box, exercise the pure-math and database-lookup paths with 137 assertions across timing / consistency / thermal / diag_fpu):
 
 ```
 cd tests/host

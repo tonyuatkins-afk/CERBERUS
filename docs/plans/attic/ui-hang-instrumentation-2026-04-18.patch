@@ -1,0 +1,142 @@
+diff --git a/Makefile b/Makefile
+index 1588959..13e50db 100644
+--- a/Makefile
++++ b/Makefile
+@@ -54,7 +54,7 @@ $(TARGET): $(OBJS)
+ 	$(LD) system dos name $(TARGET) option map=$(MAPFILE) option stack=$(STACK) file { $(OBJS) }
+ 
+ # Explicit per-file rules (wmake inference rules across subdirs are fragile)
+-src\main.obj: src\main.c src\cerberus.h src\detect\unknown.h src\core\ui.h src\core\consist.h src\core\thermal.h src\core\timing.h
++src\main.obj: src\main.c src\cerberus.h src\detect\unknown.h src\core\ui.h src\core\consist.h src\core\thermal.h src\core\timing.h src\core\crumb.h
+ 	$(CC) $(CFLAGS) -fo=$^@ src\main.c
+ 
+ src\core\timing.obj: src\core\timing.c src\core\timing.h src\core\report.h src\cerberus.h
+@@ -78,7 +78,7 @@ src\core\thermal.obj: src\core\thermal.c src\core\thermal.h src\core\report.h sr
+ src\core\crumb.obj: src\core\crumb.c src\core\crumb.h
+ 	$(CC) $(CFLAGS) -fo=$^@ src\core\crumb.c
+ 
+-src\core\ui.obj: src\core\ui.c src\core\ui.h src\core\display.h src\cerberus.h
++src\core\ui.obj: src\core\ui.c src\core\ui.h src\core\display.h src\core\crumb.h src\cerberus.h
+ 	$(CC) $(CFLAGS) -fo=$^@ src\core\ui.c
+ 
+ src\detect\detect_all.obj: src\detect\detect_all.c src\detect\detect.h src\core\crumb.h src\cerberus.h
+diff --git a/src/core/ui.c b/src/core/ui.c
+index 4abab83..c9f0c02 100644
+--- a/src/core/ui.c
++++ b/src/core/ui.c
+@@ -20,6 +20,7 @@
+ #include <string.h>
+ #include "ui.h"
+ #include "display.h"
++#include "crumb.h"
+ 
+ /* Canonical section display order — mirrors the INI writer's
+  * section_order. Keys beyond these are ignored by the summary but still
+@@ -91,11 +92,19 @@ void ui_render_summary(const result_table_t *t, const opts_t *o)
+ {
+     unsigned int i;
+     const result_t *sig_r = find_key(t, "environment.confidence_penalty");
++    char crumb_tag[32];
+     (void)o;
+ 
+     printf("\n+-- DETECTION SUMMARY -----------------------------------+\n");
+     for (i = 0; i < ROW_COUNT; i++) {
+-        const result_t *r = find_key(t, rows[i].key);
++        const result_t *r;
++        /* Per-row crumb fires BEFORE find_key so a hang inside find_key
++         * or the row-specific print path is pinpointable. Debug-build
++         * instrumentation — the full-debug set is removed once the UI
++         * hang is isolated, only the enter/done tags stay permanent. */
++        sprintf(crumb_tag, "exit.ui.summary.row.%u", i);
++        crumb_enter(crumb_tag);
++        r = find_key(t, rows[i].key);
+         if (!r) continue;
+         printf("| %-12s ", rows[i].label);
+         print_value(r, 32);
+@@ -212,14 +221,23 @@ void ui_render_consistency_alerts(const result_table_t *t)
+ {
+     unsigned int i;
+     int flagged = 0;
++    char crumb_tag[32];
+ 
+     for (i = 0; i < t->count; i++) {
+         const result_t *r = &t->results[i];
+         if (strncmp(r->key, "consistency.", 12) != 0) continue;
+         if (r->verdict != VERDICT_FAIL && r->verdict != VERDICT_WARN) continue;
++        /* Bracket each alert box render so a hang inside render_alert_box
++         * names the specific box index. .start fires before the render,
++         * .rendered fires after — difference pinpoints whether the hang
++         * is in the word-wrap loop or elsewhere. */
++        sprintf(crumb_tag, "exit.ui.alerts.box.%d.start", flagged);
++        crumb_enter(crumb_tag);
+         render_alert_box(r->key, r->verdict,
+                          r->display ? r->display :
+                          (r->type == V_STR ? r->v.s : (const char *)0));
++        sprintf(crumb_tag, "exit.ui.alerts.box.%d.rendered", flagged);
++        crumb_enter(crumb_tag);
+         flagged++;
+     }
+ 
+diff --git a/src/main.c b/src/main.c
+index ca4f14d..f5b9b2e 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -155,9 +155,12 @@ int main(int argc, char *argv[])
+      * everything that got populated. Thermal follows, consuming the
+      * per-pass bench series that calibrated mode produced. */
+     consist_check(&table);
++    crumb_enter("exit.consist_check.done");
+     thermal_check(&table);
++    crumb_enter("exit.thermal_check.done");
+ 
+     report_write_ini(&table, &opts, opts.out_path);
++    crumb_enter("exit.report_write_ini.done");
+ 
+     /* Finalize the unknown-hardware dump BEFORE any UI rendering so the
+      * CERBERUS.UNK file lands on disk even if the UI path hangs (observed
+@@ -165,24 +168,45 @@ int main(int argc, char *argv[])
+      * rendered the program hung before returning to DOS, requiring
+      * CTRL-ALT-DEL). INI was already written by report_write_ini above;
+      * we just want the UNK preserved for the same resilience. */
++    crumb_enter("exit.unknown_finalize.enter");
+     unknown_finalize();
++    crumb_enter("exit.unknown_finalize.done");
+ 
+     if (!opts.no_ui) {
++        crumb_enter("exit.ui.summary.enter");
+         ui_render_summary(&table, &opts);
++        crumb_enter("exit.ui.summary.done");
++        crumb_enter("exit.ui.alerts.enter");
+         ui_render_consistency_alerts(&table);
++        crumb_enter("exit.ui.alerts.done");
+     }
+ 
+     if (opts.do_upload) {
++        crumb_enter("exit.upload.start");
+         upload_rc = upload_ini(opts.out_path);
+         if (upload_rc != UPLOAD_OK) exit_code = EXIT_UPLOAD_FAIL;
++        crumb_enter("exit.upload.done");
+     }
+ 
+     /* Flush stdio so any buffered UI output makes it to the console
+      * before the exit-cleanup stage starts. Cheap insurance for the
+      * real-iron UI hang. */
++    crumb_enter("exit.fflush.stdout.pre");
+     fflush(stdout);
++    crumb_enter("exit.fflush.stderr.pre");
+     fflush(stderr);
+ 
++    crumb_enter("exit.display_shutdown.pre");
+     display_shutdown();
++    crumb_enter("exit.display_shutdown.post");
++
++    /* Last crumb before the `return` statement: if CERBERUS.LAST survives
++     * the run with contents "exit.return.imminent", the hang is in the
++     * Watcom C runtime's post-main cleanup path (implicit fcloseall /
++     * stdio flush via the compiler-inserted exit sequence). The crumb_exit
++     * below wipes CERBERUS.LAST on clean exit, so file-present-after-run
++     * means we hung somewhere in this chain. */
++    crumb_enter("exit.return.imminent");
++    crumb_exit();
+     return exit_code;
+ }

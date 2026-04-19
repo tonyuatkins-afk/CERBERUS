@@ -557,9 +557,20 @@ static void rule_whetstone_fpu_consistency(result_table_t *t)
                            CONF_HIGH, VERDICT_PASS);
         }
     } else if (!fpu_present && !whet_ran) {
-        report_add_str(t, "consistency.whetstone_fpu",
-                       "pass (no FPU, Whetstone correctly skipped)",
-                       CONF_HIGH, VERDICT_PASS);
+        /* Tightened in round-2 fix S4: only emit PASS for the exact
+         * expected skip status token. If a future bench_whetstone adds a
+         * new skip reason we don't recognize, no-op on this branch (rule
+         * not applicable — unknown bench state) rather than claiming
+         * correctness. The "inconclusive*" prefix has already been
+         * filtered by the early-return above, so the only PASS-worthy
+         * token here is the exact "skipped_no_fpu" bench emits on the
+         * FPU-absent path. */
+        if (strcmp(st, "skipped_no_fpu") == 0) {
+            report_add_str(t, "consistency.whetstone_fpu",
+                           "pass (no FPU, Whetstone correctly skipped)",
+                           CONF_HIGH, VERDICT_PASS);
+        }
+        /* else: unknown skip token — fall through to no-op */
     } else {
         sprintf(msg_rule10_fail,
                 "FAIL: detect says fpu=%s but Whetstone status=%s",

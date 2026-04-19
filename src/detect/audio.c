@@ -269,6 +269,16 @@ static const char *probe_mixer_chip(unsigned int sb_base)
     unsigned char v;
 
     outp(addr, 0x80);
+    /* Classic DOS I/O delay between index write and data read (S3
+     * round-2 fix). The CT1745 needs a few hundred ns between address-
+     * select (write to 0x04) and latched-data read (read from 0x05);
+     * on fast hardware the consecutive outp/inp can complete inside
+     * the mixer chip's settling window and return 0xFF or stale
+     * contents. Port 0x80 is the PC/AT keyboard-controller diagnostic
+     * port; reading it is side-effect-free and costs one ISA bus
+     * cycle (~1 μs), which is the canonical DOS "jmp $+2" equivalent
+     * for forcing a pause between back-to-back I/O operations. */
+    (void)inp(0x80);
     v = (unsigned char)inp(data);
 
     if (v == 0xFF || v == 0x80 || v == 0x00) return "none";

@@ -63,7 +63,13 @@ static int fpu_looks_present(const result_table_t *t)
 {
     const result_t *r = find_key_local(t, "fpu.detected");
     if (!r) return 0;
-    if (!r->v.s) return 0;
+    /* Explicit V_STR type check (S5 round-2). Historically fpu.detected
+     * has always been emitted as V_STR, but if a future migration flips
+     * it to V_U32 or V_Q16 we'd read r->v.s as a bit-reinterpretation of
+     * the numeric union member — producing an effectively random pointer
+     * and a likely page fault or garbled strcmp. Guarding on ->type
+     * makes the dependency explicit and fails closed. */
+    if (r->type != V_STR || !r->v.s) return 0;
     if (strcmp(r->v.s, "none") == 0) return 0;
     return 1;
 }
@@ -251,17 +257,20 @@ static void run_whetstone_units(unsigned long units)
             X = sqrt(exp(log(X) / T1));
         }
 
-        /* volatile accumulators + the post-loop checksum in
-         * bench_whetstone() form the DCE barrier now. These sink-assignments
-         * are redundant but kept as in-loop resistance to any future
-         * optimizer that gets more aggressive about volatile locals.
-         * Cheap; keep. */
+        /* The DCE barrier stack now covers this: volatile accumulators
+         * (T/T1/T2/E1/J/K/L and the volatile locals X1-X4/X/Y/Z), the
+         * post-loop checksum emit via report_add_u32 (external-linkage
+         * observer), and -od compilation of this translation unit all
+         * combine to guarantee no loop iteration is eliminated. The
+         * (void)Z / (void)X4 / etc. sink-assignments that used to live
+         * here were redundant belt under the triple-suspender setup —
+         * removed M-sweep round 2.
+         *
+         * N_mod is preserved as a local read so Watcom doesn't warn
+         * about J being written but not read inside the enclosing
+         * scope. */
         N_mod = J;
         (void)N_mod;
-        (void)Z;
-        (void)X4;
-        (void)X3;
-        (void)X2;
     }
 }
 

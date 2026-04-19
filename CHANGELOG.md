@@ -79,7 +79,7 @@ Engine + first four rules (`fac1500`). Alert-box UI for WARN/FAIL renders (`7b1a
 - "Why real hardware" section in CERBERUS.md (`0161e99`) — H2 under Status, names the five 2026-04-18 bugs with symptom / cause / commit, closes with non-negotiable real-hardware-gate statement.
 - Adversarial quality gates applied at Phase 4 completion (`6686574`, 5 rounds) and post-real-iron (`4d28e8e`, round-2) catching the phantom-verify biased-baseline and sub-crumb lifecycle bugs before the bench-box validation.
 - `tests/target/` scaffold (`0e6c7e3`) for Phase 1 real-hardware validation drops.
-- Host-side test suite: 124 assertions across timing (54), consistency (30), thermal (15), diag_fpu (21). Test-expectation drift in timing tracked as [#1](https://github.com/tonyuatkins-afk/CERBERUS/issues/1).
+- Host-side test suite: 137 assertions across timing (65), consistency (36), thermal (15), diag_fpu (21). Test-expectation drift in timing tracked as [#1](https://github.com/tonyuatkins-afk/CERBERUS/issues/1).
 
 ### Documentation
 
