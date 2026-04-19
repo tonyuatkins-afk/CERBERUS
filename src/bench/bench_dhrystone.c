@@ -28,8 +28,15 @@
  *     under the ±5% match-target budget.
  *
  * CheckIt reference on the BEK-V409 bench box: 33,609 Dhrystones/sec at
- * DSP-measured 66.74 MHz. Our port targets ±5% of that number. Wider
- * divergence is a port defect, not a measurement quirk.
+ * DSP-measured 66.74 MHz. Our port targets agreement with CheckIt's
+ * reported number on matched 486-class hardware to within +-5%. This is
+ * an empirical anchor, not an algorithmic equivalence: Phase 2 Homage
+ * research (docs/research/homage/checkit-dhrystone-version.md) confirmed
+ * CheckIt's "Dhrystones" is a custom synthetic using the familiar label,
+ * NOT a Weicker 1.1 or 2.1 port. No canonical Dhrystone strings or
+ * symbols appear in the CheckIt binary. On hardware outside the 486
+ * family, drift from CheckIt's synthetic is expected and not a defect;
+ * what CERBERUS emits is a faithful Dhrystone 2.1 result.
  */
 
 #include <stdio.h>
