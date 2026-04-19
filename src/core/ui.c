@@ -133,11 +133,36 @@ static const result_t *find_key(const result_table_t *t, const char *key)
     return (const result_t *)0;
 }
 
+/* Mirror of report.c's format_result_value. Before this, value_str returned
+ * "" for any row where r->display was NULL and r->type != V_STR — so every
+ * V_U32 row using the NULL-display anti-DCE pattern (8552c6d) rendered as a
+ * blank value in the BENCHMARKS pane, even though the INI emit path formatted
+ * them correctly via format_result_value. Observed in v0.4-rc1 BEK-V409
+ * screenshot: fpu ops/s, mem write/read/copy, k-whet (LOW) all blank.
+ *
+ * Scratch buffer is static. Return pointer is valid until the next call to
+ * value_str. Current callers all consume the pointer before re-calling:
+ * render_kv_row / render_kv_row_dim_value use it once then exit; render_title
+ * passes it straight through bounded_append which copies immediately. Do not
+ * hold two value_str results simultaneously (e.g., strcmp(value_str(a),
+ * value_str(b))) without copying out first. */
 static const char *value_str(const result_t *r)
 {
+    static char scratch[32];
     if (!r) return "";
     if (r->display) return r->display;
-    if (r->type == V_STR && r->v.s) return r->v.s;
+    switch (r->type) {
+        case V_STR:
+            return r->v.s ? r->v.s : "";
+        case V_U32:
+            sprintf(scratch, "%lu", r->v.u);
+            return scratch;
+        case V_Q16:
+            sprintf(scratch, "%ld.%04ld",
+                    (long)(r->v.fixed >> 16),
+                    (long)((r->v.fixed & 0xFFFFUL) * 10000UL >> 16));
+            return scratch;
+    }
     return "";
 }
 
