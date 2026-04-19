@@ -296,8 +296,13 @@ void diag_cache(result_table_t *t)
 
     /* Classify and emit verdict */
     v = diag_cache_classify_ratio_x100(ratio_x100, &msg_tag);
+    /* Format string is pure ASCII: UTF-8 multi-byte chars (U+00D7 MULTIPLICATION
+     * SIGN, U+2014 EM DASH) render as two-cell CP437 garbage in the DOS UI
+     * pane — which is where this string ends up. Observed as corrupted bytes
+     * between the ratio value and status tag in the v0.4-rc1 BEK-V409
+     * screenshot. Use ASCII 'x' and '-' instead. */
     sprintf(diag_cache_status_detail,
-            "%s (ratio=%lu.%02lu × — %s)",
+            "%s (ratio=%lu.%02lu x - %s)",
             v == VERDICT_PASS ? "pass" :
             v == VERDICT_FAIL ? "FAIL" : "WARN",
             ratio_x100 / 100UL, ratio_x100 % 100UL,

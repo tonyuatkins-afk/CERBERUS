@@ -414,11 +414,11 @@ static void rule_cpu_ipc_bench(result_table_t *t)
         r_cache = find_key(t, "diagnose.cache.status");
         if (r_cache && r_cache->v.s && strstr(r_cache->v.s, "cache_working")) {
             sprintf(msg_rule4b_warn,
-                    "WARN: bench %lu/sec below expected %lu (cache diag PASS — TSR stealing cycles or thermal throttle)",
+                    "WARN: bench %lu/sec below expected %lu (cache diag PASS - TSR stealing cycles or thermal throttle)",
                     iters, lo);
         } else if (r_cache && r_cache->v.s && strstr(r_cache->v.s, "no_cache_effect")) {
             sprintf(msg_rule4b_warn,
-                    "WARN: bench %lu/sec below expected %lu (cache diag FAIL — cache disabled in BIOS or absent)",
+                    "WARN: bench %lu/sec below expected %lu (cache diag FAIL - cache disabled in BIOS or absent)",
                     iters, lo);
         } else {
             sprintf(msg_rule4b_warn,
@@ -676,7 +676,7 @@ static void rule_dma_class_coherence(result_table_t *t)
                        CONF_HIGH, VERDICT_PASS);
     } else if (strcmp(c5, "pass") == 0) {
         report_add_str(t, "consistency.dma_class_coherence",
-                       "WARN: XT-class CPU but DMA slave channel responsive — detection contradiction",
+                       "WARN: XT-class CPU but DMA slave channel responsive - detection contradiction",
                        CONF_HIGH, VERDICT_WARN);
     }
     /* else: fail / unknown token — silent no-op, surface via
