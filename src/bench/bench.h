@@ -16,5 +16,6 @@ void bench_fpu(result_table_t *t, const opts_t *o);
 
 /* v0.4 historical benchmarks — see docs/plans/v0.4-historical-benchmarks.md */
 void bench_dhrystone(result_table_t *t, const opts_t *o);
+void bench_whetstone(result_table_t *t, const opts_t *o);
 
 #endif

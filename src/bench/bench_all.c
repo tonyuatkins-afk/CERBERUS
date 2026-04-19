@@ -20,6 +20,7 @@ void bench_all(result_table_t *t, const opts_t *o)
     WRAP_BENCH("memory",     bench_memory(t, o));
     WRAP_BENCH("fpu",        bench_fpu(t, o));
     WRAP_BENCH("dhrystone",  bench_dhrystone(t, o));
-    /* bench_whetstone + PC-XT ratios land in follow-up commits. */
+    WRAP_BENCH("whetstone",  bench_whetstone(t, o));
+    /* PC-XT ratios land in follow-up commit. */
     /* bench_cache / bench_video land as Phase 3 continues. */
 }

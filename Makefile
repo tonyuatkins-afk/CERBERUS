@@ -46,7 +46,7 @@ OBJS = src\main.obj                                                  &
        src\diag\diag_video.obj                                       &
        src\bench\bench_all.obj src\bench\bench_cpu.obj               &
        src\bench\bench_memory.obj src\bench\bench_fpu.obj            &
-       src\bench\bench_dhrystone.obj                                 &
+       src\bench\bench_dhrystone.obj src\bench\bench_whetstone.obj   &
        src\upload\upload.obj
 
 all: $(TARGET) .SYMBOLIC
@@ -184,6 +184,9 @@ src\bench\bench_fpu.obj: src\bench\bench_fpu.c src\bench\bench.h src\core\timing
 
 src\bench\bench_dhrystone.obj: src\bench\bench_dhrystone.c src\bench\bench.h src\core\timing.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_dhrystone.c
+
+src\bench\bench_whetstone.obj: src\bench\bench_whetstone.c src\bench\bench.h src\core\timing.h src\core\report.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_whetstone.c
 
 src\upload\upload.obj: src\upload\upload.c src\upload\upload.h
 	$(CC) $(CFLAGS) -fo=$^@ src\upload\upload.c
