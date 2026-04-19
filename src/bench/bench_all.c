@@ -117,6 +117,7 @@ void bench_all(result_table_t *t, const opts_t *o)
     WRAP_BENCH("memory",     bench_memory(t, o));
     WRAP_BENCH("fpu",        bench_fpu(t, o));
     WRAP_BENCH("cache",      bench_cache(t, o));
+    WRAP_BENCH("video",      bench_video(t, o));
     WRAP_BENCH("dhrystone",  bench_dhrystone(t, o));
     WRAP_BENCH("whetstone",  bench_whetstone(t, o));
 
@@ -126,6 +127,4 @@ void bench_all(result_table_t *t, const opts_t *o)
      * and is silent rather than incorrect. Consumed by the Whetstone-
      * implied consistency rule via detect_fpu cross-check (Rule 10). */
     emit_xt_ratios(t);
-
-    /* bench_video lands in the v0.4 sequence alongside this module. */
 }

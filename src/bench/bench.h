@@ -30,8 +30,20 @@ void bench_whetstone(result_table_t *t, const opts_t *o);
 void bench_cache(result_table_t *t, const opts_t *o);
 
 /* Pure math kernel used by bench_cache's emit path. Exposed for host
- * tests so the rate arithmetic can be exercised without PIT hardware. */
+ * tests so the rate arithmetic can be exercised without PIT hardware.
+ * bench_video reuses this kernel — the envelope (bytes ≤ 20 MB per
+ * measurement, elapsed ≥ 1 BIOS tick) fits the same overflow bounds. */
 unsigned long bench_cache_kb_per_sec(unsigned long bytes,
                                      unsigned long elapsed_us);
+
+/* v0.4 video bandwidth — see docs/plans/v0.4-benchmarks-and-polish.md §2.
+ *
+ * Quick-mode only for v0.4 (matches bench_cache's posture — see note
+ * above). Emits bench.video.text_write_kbps for every adapter and
+ * bench.video.mode13h_kbps for VGA-on-real-iron. Skips mode 13h under
+ * emulators (mode-switch mangles the host terminal under DOSBox-X and
+ * friends). Writes disturb the live text-mode display for ~1 second
+ * then restore it from a FAR save buffer. */
+void bench_video(result_table_t *t, const opts_t *o);
 
 #endif
