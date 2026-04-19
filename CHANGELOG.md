@@ -43,7 +43,10 @@ All five surfaced on contact with an actual BEK-V409 / i486DX-2 / S3 Trio64 / Vi
 - Video-RAM diagnostic (`667d7a3`) — direct VRAM walk, plane consistency on EGA / VGA.
 - Cache-coherence + DMA diagnostics deferred (`3ca0d7e`) — documented in plan, no stubs left in code.
 
-**Status: 4 of 6 subsystems covered (ALU, memory, FPU, video). Cache + DMA deferred per plan.**
+- **Cache-coherence diagnostic** (`7a28850`) — stride-ratio timing test: 2 KB small buffer + 32 KB large buffer (both __far), compare per-iteration times. Verdict: ratio ≥ 40× = PASS (cache working), 20-40× = WARN (partial), < 20× = FAIL (cache disabled or absent). Skips on 8088-class floor hardware where `cache.present=no` from detect. Pure classifier kernel `diag_cache_classify_ratio_x100` host-tested across 17 scenarios.
+- **DMA controller diagnostic** (`7a28850`) — 8237 count-register write+readback probe on channels 1/2/3/5/6/7. Safety-skips channel 0 (DRAM refresh) and channel 4 (cascade link). XT-class detection via `cpu.class` or `bus.class=isa8` skips the slave controller (channels 5-7) with `skipped_no_slave` status. Per-channel pass/fail + summary verdict. Pure summary kernel `diag_dma_summary_verdict` host-tested across 10 scenarios.
+
+**Status: 6 of 6 subsystems covered (ALU, memory, FPU, video, cache, DMA). v0.3 complete pending real-hardware gate on BEK-V409.**
 
 ### Benchmarks
 

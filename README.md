@@ -17,7 +17,7 @@ Part of the Barely Booting / NetISA ecosystem — CERBERUS is the tool, NetISA i
 | Audio DB `mixer_chip` column (CT1745 discriminator for SB16 family) | v0.2 | complete — 3 seeded rows, 28 `unknown` pending real-hardware |
 | Unknown-hardware submission path (`CERBERUS.UNK`) | v0.2 | complete |
 | Summary UI with confidence meters + consistency alert box | v0.2 | complete (three-pane polish + bar-graph comparison — see [checkit-comparison.md](docs/plans/checkit-comparison.md) — deferred behind UI-hang resolution) |
-| Diagnostic tests (ALU, memory walking-1s/0s/AinA, FPU bit-exact, video RAM) | v0.3 | 4 of 6 complete (cache + DMA deferred per plan) |
+| Diagnostic tests (ALU, memory walking-1s/0s/AinA, FPU bit-exact, video RAM, cache-stride, DMA-controller) | v0.3 | **6 of 6 complete** — cache + DMA landed via [v0.3 re-plan](docs/plans/v0.3-diagnose-completion.md); real-hardware gate on BEK-V409 pending |
 | Benchmark suite (integer / FPU / memory, calibrated multi-pass for thermal) | v0.4 | 3 of 5 complete (cache + video bandwidth deferred; Dhrystone 2.1 + Whetstone adoption planned — see [checkit-comparison.md](docs/plans/checkit-comparison.md)) |
 | Consistency engine (10 rules) + thermal stability (Mann-Kendall, α=0.05, N≥5) | v0.5 | quality-gated clean, 7 rounds adversarial review |
 | Timing self-check (PIT C2 vs BIOS tick cross-check, rule 4a) | v0.5 | complete |
