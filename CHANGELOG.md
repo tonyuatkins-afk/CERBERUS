@@ -2,7 +2,17 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
-## [Unreleased — approaching v0.2-rc1]
+## [v0.4.0], 2026-04-19
+
+Fourth release in the weekend arc. Closes the UI defects found in v0.4-rc1's BEK-V409 screenshot. Full release notes at [`docs/releases/v0.4.0.md`](docs/releases/v0.4.0.md).
+
+- `diag_cache` and `consist` status-string CP437 corruption (`2d6a0a7`). UTF-8 em-dash and multiplication-sign bytes in runtime-emitted format strings were rendering as CP437 garbage in the SYSTEM VERDICTS pane. Replaced with ASCII equivalents. Audit swept three latent paths in `consist.c` (Rule 4b cache-contextualized WARNs plus Rule 11 XT-class DMA WARN).
+- UI `value_str` type-aware rendering (`841d7c3`). Five V_U32 BENCHMARKS rows (`fpu ops/s`, `mem write`, `mem read`, `mem copy`, `k-whet (LOW)`) rendered labels but blank values in the rc1 screenshot because `value_str` returned `""` for non-V_STR rows with `display=NULL`. Mirrored `format_result_value`'s switch inside `value_str` with a 32-byte static scratch buffer.
+- `bench_dhrystone.c` comment updated per Phase 2 T2 lesson (`6acb559`). CheckIt's "Dhrystones" is a custom synthetic, not a Dhrystone port. Comment now frames the 33,609 BEK-V409 anchor as an empirical match target, not an algorithmic equivalence. Full derivation at `docs/research/homage/checkit-dhrystone-version.md`.
+
+EXE: 144,166 bytes. DGROUP: 53,184 / 56,000. Host tests: 163 assertions green except the 4 pre-existing `test_timing` failures (issue #1, gated). Real-hardware validated on BEK-V409 with full INI capture at `tests/captures/486-real-2026-04-19-v0.4.0/` plus four screenshots at `docs/releases/v0.4.0/screenshots/`.
+
+## [Unreleased, covers v0.2-rc1 through v0.4-rc1]
 
 ### Detection
 
