@@ -23,6 +23,13 @@
  *     their respective phases, which are serialized by main.
  */
 
+/* Both byte sizes must fit in medium-model size_t (16-bit on Watcom
+ * medium). 32768 fits; bumping CACHE_BUFFERS_LARGE_BYTES to 65536 or
+ * above requires changing cache_buffers_reset() to loop _fmemset on
+ * sub-64-KB chunks, because a single _fmemset(far_ptr, 0, 65536U) wraps
+ * the count argument to zero. Any consumer that strides size as
+ * `unsigned int j` (both stride loops in diag_cache and bench_cache do)
+ * would also need a widening pass. */
 #define CACHE_BUFFERS_SMALL_BYTES  2048U
 #define CACHE_BUFFERS_LARGE_BYTES  32768U
 #define CACHE_BUFFERS_LINE_SIZE    16U   /* 486 cache line — per-line

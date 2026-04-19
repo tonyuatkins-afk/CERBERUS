@@ -59,6 +59,12 @@
  * per-iteration volatile observer for write loops so Watcom's -ox DSE
  * cannot hoist all but the final iteration's writes outside the outer
  * loop. Read loops do NOT use volatile-in-loop; see stride_read_loop.
+ *
+ * The final `bench.cache.checksum` value is a 16-bit composite
+ * reproducibility signal (read-sink low byte << 8 | write-sink byte) —
+ * useful for detecting run-over-run drift, but NOT a byte-level
+ * fingerprint of the buffer contents. See the comment at the publish
+ * site below.
  */
 
 #include <stdio.h>
@@ -68,21 +74,27 @@
 #include "../core/report.h"
 #include "../core/cache_buffers.h"
 
-/* Iteration counts calibrated for ~1-3 second runs across the 486 family
- * so that BIOS-tick resolution (~55 ms) becomes ~2-5% granularity:
+/* Iteration counts calibrated for ~1-5 second runs across the 486 family
+ * so that BIOS-tick resolution (~55 ms) stays below ~10% granularity
+ * even on the fastest 486-class hardware:
  *
- *   - Write-back 486 DX-2 (Intel i486DX2, AMD 5x86): small_read / small_
- *     write ~0.6 sec (~11 BIOS ticks = ~9% resolution). Acceptable —
- *     lowering iters further drops below 10 ticks and the quantization
- *     grows. large_* at 200 iters ~1.5 sec (~27 ticks = ~4% resolution).
+ *   - Write-back 486 DX-2 (Intel i486DX2): small_read / small_write
+ *     ~1.2 sec (~22 BIOS ticks = ~4.5% resolution). large_* at 400
+ *     iters ~2-3 sec (plenty of ticks = <2% resolution).
  *
  *   - Write-through 486 (Cyrix Cx486DX, strap-set write-through Intel):
  *     small_write goes through to DRAM at ~15 MB/s sustained, producing
- *     a ~2-3 sec runtime at 20k iters. Acceptable — still inside the
- *     "quick" bench budget and still gives ~40 ticks of resolution.
+ *     a ~4-5 sec runtime at 40k iters (~80-90 ticks = ~1.2% resolution).
+ *     Still inside the "quick" bench budget.
+ *
+ *   - AMD 5x86 / 486 DX-4-100 (fastest 486-class silicon): small_*
+ *     ~0.6 sec (~11 BIOS ticks = ~9% resolution). Stays above the
+ *     single-digit-tick floor where ±1-tick edge-race noise would
+ *     dominate. A prior 20k-iter calibration dropped this class to
+ *     ~5 ticks and ~20% noise.
  *
  *   - XT-class / 286 / 386: SKIPPED via the gates in bench_cache(). The
- *     large-buffer loop at 200 iters would run multiple minutes at 4.77
+ *     large-buffer loop at 400 iters would run multiple minutes at 4.77
  *     to 33 MHz. Any auto-calibration would still need a skip for these
  *     classes; explicit skip is clearer.
  *
@@ -91,8 +103,8 @@
  * wall-time per measurement. Until then, the fixed-iters approach above
  * is tuned for the 486 hardware that forms the bulk of real-iron captures.
  */
-#define BENCH_CACHE_SMALL_ITERS   20000UL
-#define BENCH_CACHE_LARGE_ITERS     200UL
+#define BENCH_CACHE_SMALL_ITERS   40000UL
+#define BENCH_CACHE_LARGE_ITERS     400UL
 
 /* External-linkage sinks — same anti-DCE convention as diag_cache's
  * stride_sink and bench_memory's bench_read_sink. Watcom cannot prove
@@ -121,12 +133,14 @@ static const result_t *find_local(const result_table_t *t, const char *key)
  * elapsed.
  *
  * bench_cache's envelope is substantially larger than bench_memory's:
- * 20,000 iters × 2 KB = 40 MB on the small loop, which still would
+ * 40,000 iters × 2 KB = 80 MB on the small loop, which still would
  * overflow bench_memory's (bytes * 1000 / 1024) * 1000 intermediate.
  * Pre-divide by 1024 and by 1000 first so every intermediate stays
- * within 32 bits at the upper envelope:
+ * within 32 bits at the upper envelope (the kernel was originally
+ * dimensioned for a 100 MB total-bytes ceiling, so 80 MB is well
+ * inside the verified overflow envelope):
  *
- *   kb          = bytes / 1024            max 4×10^4 at 40 MB total
+ *   kb          = bytes / 1024            max 8×10^4 at 80 MB total
  *   elapsed_ms  = elapsed_us / 1000       min 1 at bench_cache's 55 ms
  *                                         BIOS-tick floor
  *   result      = kb * 1000 / elapsed_ms  max 10^8 intermediate, fits
@@ -149,14 +163,25 @@ unsigned long bench_cache_kb_per_sec(unsigned long bytes, unsigned long elapsed_
 }
 
 /* Byte-stride read loop over a FAR buffer. The accumulator is NON-volatile
- * — the DCE defense comes from the external-linkage bench_cache_read_sink
- * store after the loop, matching bench_memory's bench_read_sink pattern
- * (bench_memory.c:112,145). A volatile-in-loop accumulator forces a
- * DGROUP read-modify-write cycle per byte, which on L1-cached reads adds
- * ~3 cycles of overhead on top of a ~2-cycle operation — biasing L1 read
- * kbps 2-3× low versus absolute bandwidth. Using a plain local and a
- * final external-linkage store keeps the loop body tight while preventing
- * Watcom -ox from eliding the whole thing. */
+ * — the DCE defense is TWO-LEGGED and requires BOTH legs to stand:
+ *
+ *   1. The buffer is reached only via a cross-TU function call
+ *      (cache_buffers_small() / cache_buffers_large() in core/cache_buffers.c)
+ *      so Watcom cannot prove the contents compile-time constant and
+ *      cannot fold the reads.
+ *
+ *   2. The final bench_cache_read_sink store has external linkage, so
+ *      Watcom cannot prove `sum` is unused cross-TU and must keep the
+ *      accumulator live — which keeps the whole loop live.
+ *
+ * WARNING: if either leg collapses — e.g., cache_buffers_small() becomes
+ * `static inline` in a future refactor, OR bench_cache_read_sink picks up
+ * the `static` qualifier — the defense collapses and Watcom -ox may
+ * eliminate the entire loop. In that case the inner `sum` must be made
+ * `volatile`, paying the per-byte DGROUP read-modify-write cost (adds
+ * ~3 cycles on an L1-cached ~2-cycle operation, biasing small-buffer
+ * read kbps 2-3× low). Matches bench_memory's bench_read_sink pattern
+ * (bench_memory.c:112,145). */
 static unsigned int stride_read_loop(unsigned char __far *buf,
                                       unsigned int size,
                                       unsigned long iters)
@@ -279,11 +304,18 @@ void bench_cache(result_table_t *t, const opts_t *o)
     }
 
     /* Second gate: skip on XT-class + pre-486 AT-class CPUs where the
-     * large-buffer loop would run multiple minutes. Even if a miscal-
-     * ibrated detect_cache somehow reported present=yes on an XT/286/386
-     * board, the 32 KB read loop at 200 iters = 6.4 MB of byte-stride
-     * work would take 60+ seconds at 4.77-33 MHz — skip rather than
-     * hang the run. */
+     * large-buffer loop would run multiple minutes at 4.77-33 MHz.
+     *
+     * Coverage envelope — NOT "defense-in-depth against miscalibrated
+     * detect." Both gates read from detect outputs, so a detect bug that
+     * mislabels the CPU corrupts both in lockstep; one gate cannot
+     * rescue the other from a wrong detect. The real value of this
+     * second gate is catching the case where cache.present is MISSING
+     * from the report table while cpu.class is PRESENT — e.g., a future
+     * detect_cache refactor that drops cache.present emission for some
+     * CPU families but leaves cpu.class intact. Without this gate that
+     * scenario would fall through the first gate and run the 32 KB loop
+     * on whatever CPU is under the hood. */
     if (cpu_class && cpu_class->type == V_STR && cpu_class->v.s) {
         const char *cv = cpu_class->v.s;
         if (strcmp(cv, "8088") == 0 || strcmp(cv, "8086") == 0 ||
@@ -322,22 +354,24 @@ void bench_cache(result_table_t *t, const opts_t *o)
                     large_buf, CACHE_BUFFERS_LARGE_BYTES,
                     BENCH_CACHE_LARGE_ITERS, 1);
 
-    /* Publish a composite checksum so a downstream consumer can detect
-     * run-over-run reproducibility at the byte level (beyond the kbps
-     * rate, which carries PIT-tick quantization noise). Also closes the
-     * anti-DCE loop: report_add_u32 into a separate TU means Watcom
-     * cannot prove the sinks are unused even with inter-procedural flow. */
+    /* Publish a composite 16-bit reproducibility signal so a downstream
+     * consumer can detect run-over-run drift beyond the kbps rate (which
+     * carries PIT-tick quantization noise). The read sink is `unsigned
+     * int` (16-bit in Watcom medium model), so the top 8 bits of the
+     * packed checksum come from the read accumulator's low byte and the
+     * bottom 8 bits are the final write-sink XOR — a 16-bit signal, not
+     * a per-byte fingerprint. Widening to unsigned long was considered
+     * and rejected: it would cost 4 bytes DGROUP per sink and require
+     * matching conversions in report_add_u32, which is not worth it for
+     * a signal this loose. Also closes the anti-DCE loop: report_add_u32
+     * into a separate TU means Watcom cannot prove the sinks are unused
+     * even with inter-procedural flow. */
     {
         unsigned long checksum = ((unsigned long)bench_cache_read_sink << 8) |
                                   (unsigned long)bench_cache_write_sink;
         report_add_u32(t, "bench.cache.checksum", checksum, (const char *)0,
                        CONF_LOW, VERDICT_UNKNOWN);
     }
-
-    /* Reference the per-iter observer so Watcom doesn't warn at -w3
-     * about an unused file-scope identifier. The actual anti-DCE work
-     * happens inside stride_write_loop via the per-iteration store. */
-    (void)bench_cache_iter_observer;
 
     report_add_str(t, "bench.cache.status", "ok",
                    CONF_HIGH, VERDICT_UNKNOWN);
