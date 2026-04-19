@@ -91,9 +91,12 @@ static volatile int    J, K, L;
 #define N9  616
 #define N11 93
 
-/* INI-emit buffers — static lifetime for report_add_* */
-static char whet_elapsed_val[24];
-static char whet_per_sec_val[24];
+/* V_U32 emits below pass NULL display per the b6c179b / 6c3a023 fix
+ * pattern — format_result_value in report.c handles "%lu" formatting
+ * from r->v.u at INI-write time. Avoids the static-buffer-dangling
+ * corruption class (v7 capture showed "fpu.whetstone_elapsed_us=(�"
+ * garbage). Do not re-add dedicated display buffers; the NULL path
+ * is correct and bug-free. */
 
 /* ------------------------------------------------------------------- */
 /* Module helper procedures (Curnow reference)                          */
@@ -318,9 +321,8 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
                        CONF_HIGH, VERDICT_UNKNOWN);
     }
 
-    sprintf(whet_elapsed_val, "%lu", (unsigned long)main_us);
     report_add_u32(t, "bench.fpu.whetstone_elapsed_us",
-                   (unsigned long)main_us, whet_elapsed_val,
+                   (unsigned long)main_us, (const char *)0,
                    CONF_HIGH, VERDICT_UNKNOWN);
 
     if (main_us > 0) {
@@ -338,9 +340,8 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
                 k_whet_per_sec = 0;
             }
         }
-        sprintf(whet_per_sec_val, "%lu", k_whet_per_sec);
         report_add_u32(t, "bench.fpu.k_whetstones",
-                       k_whet_per_sec, whet_per_sec_val,
+                       k_whet_per_sec, (const char *)0,
                        CONF_HIGH, VERDICT_UNKNOWN);
         report_add_str(t, "bench.fpu.whetstone_status", "ok",
                        CONF_HIGH, VERDICT_UNKNOWN);
