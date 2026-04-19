@@ -170,9 +170,18 @@ static int bench_video_text(result_table_t *t)
                            CONF_HIGH, VERDICT_UNKNOWN);
             return 0;
     }
-    /* Each text page is 4096 bytes; write to whichever page is live. */
-    vram = (unsigned char __far *)MK_FP(seg,
-        (unsigned int)active_page * 0x1000U);
+    /* Page stride differs by mode: 40x25 modes (0/1) allocate 0x0800
+     * bytes per page (2000 displayed + padding), 80x25 modes (2/3/7)
+     * allocate 0x1000. A hardcoded 0x1000 on mode 0/1 with active_page
+     * > 0 would point past the live page into the next page's displayed
+     * region — the bench would corrupt and then "restore" the wrong
+     * bytes, visibly mangling the adjacent page. F1 from the v0.4 QG
+     * R3 characterization. */
+    {
+        unsigned int page_stride = (cur_mode <= 1U) ? 0x0800U : 0x1000U;
+        vram = (unsigned char __far *)MK_FP(seg,
+            (unsigned int)active_page * page_stride);
+    }
 
     /* Capture the live display bytes so they can be put back after. */
     for (j = 0U; j < BENCH_VIDEO_TEXT_BYTES; j++) {
@@ -258,7 +267,13 @@ static int bench_video_mode13h(result_table_t *t)
     memset(&regs, 0, sizeof(regs));
     regs.h.ah = 0x0F;
     int86(0x10, &regs, &regs);
-    saved_mode = regs.h.al;
+    /* Mask bit 7 of AL — some VGA BIOSes reflect the "no-clear VRAM"
+     * flag in the returned mode byte. Writing that value back via
+     * AH=00h would honor the flag and preserve the garbled mode-13h
+     * VRAM during restore, leaving the user's display corrupted. The
+     * text-mode path at line 153 already masks; this parity with F2
+     * from the v0.4 QG R3 characterization closes the inconsistency. */
+    saved_mode = (unsigned char)(regs.h.al & 0x7FU);
 
     /* INT 10h AH=00h AL=13h — set mode 13h (320x200x256, VGA). */
     memset(&regs, 0, sizeof(regs));
