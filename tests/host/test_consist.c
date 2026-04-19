@@ -379,6 +379,111 @@ int main(void)
     CHECK(v_of(k(&t, "consistency.audio_mixer_chip")) == VERDICT_WARN,
           "Scenario II: mixer expected=CT1745 + observed=unknown → rule 7 WARN (not FAIL)");
 
+    /* Scenario JJ: Rule 4b bench in the expected range → PASS. Smoke-test of
+     * the path that was uncovered before the v0.4 narration-extension work. */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "bench.cpu.int_iters_per_sec",
+                   7000000UL, "7000000", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "cpu.bench_iters_low",
+                   4700000UL, "4700000",  CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "cpu.bench_iters_high",
+                   10500000UL, "10500000", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.cpu_ipc_bench")) == VERDICT_PASS,
+          "Scenario JJ: bench 7M/s in 4.7M-10.5M range → rule 4b PASS");
+
+    /* Scenario KK: bench under expected AND diagnose.cache.status reports the
+     * cache is live ("cache_working" substring from diag_cache's verdict
+     * string). v0.4 narration extension must finger TSR/thermal throttle,
+     * NOT cache-disabled, because the cache diagnostic proves the cache is
+     * working. */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "bench.cpu.int_iters_per_sec",
+                   1800000UL, "1800000", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "cpu.bench_iters_low",
+                   4700000UL, "4700000",  CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "cpu.bench_iters_high",
+                   10500000UL, "10500000", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "diagnose.cache.status",
+                   "pass (ratio=1.70 × — cache_working)",
+                   CONF_HIGH, VERDICT_PASS);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.cpu_ipc_bench")) == VERDICT_WARN,
+          "Scenario KK: bench under, cache working → rule 4b WARN");
+    {
+        const result_t *r = k(&t, "consistency.cpu_ipc_bench");
+        CHECK(r && r->v.s && strstr(r->v.s, "TSR stealing") != NULL,
+              "Scenario KK: narration names TSR/thermal (cache exonerated)");
+        CHECK(r && r->v.s && strstr(r->v.s, "cache diag PASS") != NULL,
+              "Scenario KK: narration cites cache diag PASS");
+    }
+
+    /* Scenario LL: bench under expected AND diagnose.cache.status reports
+     * "no_cache_effect" — cache is provably dead (BIOS-disabled or absent).
+     * v0.4 narration extension must finger the cache, NOT TSR. */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "bench.cpu.int_iters_per_sec",
+                   1200000UL, "1200000", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "cpu.bench_iters_low",
+                   4700000UL, "4700000",  CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "cpu.bench_iters_high",
+                   10500000UL, "10500000", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "diagnose.cache.status",
+                   "fail (ratio=1.01 × — no_cache_effect)",
+                   CONF_HIGH, VERDICT_FAIL);
+    consist_check(&t);
+    CHECK(v_of(k(&t, "consistency.cpu_ipc_bench")) == VERDICT_WARN,
+          "Scenario LL: bench under, cache dead → rule 4b WARN");
+    {
+        const result_t *r = k(&t, "consistency.cpu_ipc_bench");
+        CHECK(r && r->v.s && strstr(r->v.s, "cache disabled in BIOS or absent") != NULL,
+              "Scenario LL: narration names cache-BIOS-disabled (TSR exonerated)");
+    }
+
+    /* Scenario MM: bench under expected, diagnose.cache.status absent
+     * (e.g. skipped on an 8088-class floor box where cache.present=no). Must
+     * fall back to the original three-cause ambiguous narration — the rule
+     * has no evidence to blame any one cause. */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "bench.cpu.int_iters_per_sec",
+                   1800000UL, "1800000", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "cpu.bench_iters_low",
+                   4700000UL, "4700000",  CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "cpu.bench_iters_high",
+                   10500000UL, "10500000", CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    {
+        const result_t *r = k(&t, "consistency.cpu_ipc_bench");
+        CHECK(v_of(r) == VERDICT_WARN,
+              "Scenario MM: bench under, no cache status → rule 4b WARN");
+        CHECK(r && r->v.s && strstr(r->v.s,
+              "(throttle, cache disabled, or TSR stealing cycles)") != NULL,
+              "Scenario MM: narration falls back to ambiguous three-cause form");
+    }
+
+    /* Scenario NN: bench ABOVE expected (overclock / CPU misidentified). The
+     * cache.status field is irrelevant to this branch and must not affect
+     * narration — over-range uses its own message. */
+    memset(&t, 0, sizeof(t));
+    report_add_u32(&t, "bench.cpu.int_iters_per_sec",
+                   15000000UL, "15000000", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "cpu.bench_iters_low",
+                   4700000UL, "4700000",  CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(&t, "cpu.bench_iters_high",
+                   10500000UL, "10500000", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "diagnose.cache.status",
+                   "pass (ratio=1.70 × — cache_working)",
+                   CONF_HIGH, VERDICT_PASS);
+    consist_check(&t);
+    {
+        const result_t *r = k(&t, "consistency.cpu_ipc_bench");
+        CHECK(v_of(r) == VERDICT_WARN,
+              "Scenario NN: bench above → rule 4b WARN (overclock)");
+        CHECK(r && r->v.s && strstr(r->v.s,
+              "overclock or CPU misidentified") != NULL,
+              "Scenario NN: narration uses over-range message (cache status ignored)");
+    }
+
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }

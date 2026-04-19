@@ -375,9 +375,16 @@ static void rule_timing_independence(result_table_t *t)
  * most CPUs won't trigger the rule yet — a clean signal path rather than
  * a wall of MEDIUM-confidence WARNs on unknowns.
  *
- * Verdict: PASS when in range, WARN when outside. We cannot distinguish
- *          under-range-from-throttle vs under-range-from-TSR vs
- *          under-range-from-miscalibration; the operator has to triage.
+ * Verdict: PASS when in range, WARN when outside. Under-range narration
+ *          is three-way split with v0.4:
+ *            - diagnose.cache.status contains "cache_working" → cache is
+ *              provably live, so the deficit is TSR/thermal throttle.
+ *            - diagnose.cache.status contains "no_cache_effect" → cache
+ *              is provably dead, so the deficit is cache-BIOS-disabled
+ *              (or cache silicon failure).
+ *            - cache status missing or inconclusive (partial, anomaly,
+ *              no_measurement) → fall back to the original ambiguous
+ *              three-cause narration.
  *          Above-range is rarer and usually indicates overclock or
  *          counterfeit; same WARN, different message.                  */
 /* ----------------------------------------------------------------------- */
@@ -387,6 +394,7 @@ static void rule_cpu_ipc_bench(result_table_t *t)
     const result_t *r_iters = find_key(t, "bench.cpu.int_iters_per_sec");
     const result_t *r_low   = find_key(t, "cpu.bench_iters_low");
     const result_t *r_high  = find_key(t, "cpu.bench_iters_high");
+    const result_t *r_cache;
     unsigned long iters, lo, hi;
 
     if (!r_iters || !r_low || !r_high) return;  /* missing data — no-op */
@@ -403,9 +411,20 @@ static void rule_cpu_ipc_bench(result_table_t *t)
         report_add_str(t, "consistency.cpu_ipc_bench", msg_rule4b_pass,
                        CONF_HIGH, VERDICT_PASS);
     } else if (iters < lo) {
-        sprintf(msg_rule4b_warn,
-                "WARN: bench %lu/sec below expected %lu (throttle, cache disabled, or TSR stealing cycles)",
-                iters, lo);
+        r_cache = find_key(t, "diagnose.cache.status");
+        if (r_cache && r_cache->v.s && strstr(r_cache->v.s, "cache_working")) {
+            sprintf(msg_rule4b_warn,
+                    "WARN: bench %lu/sec below expected %lu (cache diag PASS — TSR stealing cycles or thermal throttle)",
+                    iters, lo);
+        } else if (r_cache && r_cache->v.s && strstr(r_cache->v.s, "no_cache_effect")) {
+            sprintf(msg_rule4b_warn,
+                    "WARN: bench %lu/sec below expected %lu (cache diag FAIL — cache disabled in BIOS or absent)",
+                    iters, lo);
+        } else {
+            sprintf(msg_rule4b_warn,
+                    "WARN: bench %lu/sec below expected %lu (throttle, cache disabled, or TSR stealing cycles)",
+                    iters, lo);
+        }
         report_add_str(t, "consistency.cpu_ipc_bench", msg_rule4b_warn,
                        CONF_HIGH, VERDICT_WARN);
     } else {
