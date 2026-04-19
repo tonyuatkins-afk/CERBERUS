@@ -54,11 +54,13 @@
  * for 1-3 seconds on a 486 DX-2, well past the 55 ms PIT single-wrap
  * limit that timing_start / timing_stop handles.
  *
- * Anti-DCE strategy mirrors bench_memory's bench_read_sink (file-scope,
- * external linkage sink for the accumulator) for read loops, and adds a
- * per-iteration volatile observer for write loops so Watcom's -ox DSE
- * cannot hoist all but the final iteration's writes outside the outer
- * loop. Read loops do NOT use volatile-in-loop; see stride_read_loop.
+ * Anti-DCE strategy: read loops rely on a non-static external-linkage
+ * sink (bench_cache_read_sink) into which the accumulator is stored
+ * once post-loop; write loops add a per-iteration volatile observer so
+ * Watcom's -ox cannot fold the final iteration's stores back through
+ * the outer loop (cross-iteration dead-store elimination, DSE). See
+ * stride_read_loop and stride_write_loop below for the leg-by-leg
+ * defense descriptions and the toolchain coverage caveats.
  *
  * The final `bench.cache.checksum` value is a 16-bit composite
  * reproducibility signal (read-sink low byte << 8 | write-sink byte) —
@@ -106,9 +108,14 @@
 #define BENCH_CACHE_SMALL_ITERS   40000UL
 #define BENCH_CACHE_LARGE_ITERS     400UL
 
-/* External-linkage sinks — same anti-DCE convention as diag_cache's
- * stride_sink and bench_memory's bench_read_sink. Watcom cannot prove
- * these are unread across TUs. */
+/* Non-static external-linkage sinks — STRONGER than diag_cache.c:73's
+ * static stride_sink and bench_memory.c:112's static bench_read_sink,
+ * because Watcom -ox truly cannot prove the storage unread across TUs
+ * for an external-linkage symbol. The static-sink pattern in those two
+ * modules is defended additionally by a volatile-in-loop accumulator
+ * (diag_cache.c:78); bench_cache can omit volatile because the sink
+ * linkage alone fences the loop. If bench_cache ever moves to static
+ * sinks, a volatile-in-loop accumulator becomes mandatory. */
 unsigned int  bench_cache_read_sink;
 unsigned char bench_cache_write_sink;
 
@@ -177,11 +184,14 @@ unsigned long bench_cache_kb_per_sec(unsigned long bytes, unsigned long elapsed_
  * WARNING: if either leg collapses — e.g., cache_buffers_small() becomes
  * `static inline` in a future refactor, OR bench_cache_read_sink picks up
  * the `static` qualifier — the defense collapses and Watcom -ox may
- * eliminate the entire loop. In that case the inner `sum` must be made
- * `volatile`, paying the per-byte DGROUP read-modify-write cost (adds
- * ~3 cycles on an L1-cached ~2-cycle operation, biasing small-buffer
- * read kbps 2-3× low). Matches bench_memory's bench_read_sink pattern
- * (bench_memory.c:112,145). */
+ * eliminate the entire loop. The volatile-in-loop fallback matches
+ * diag_cache's working pattern at a measurable but not-dramatic L1-read
+ * throughput cost; if ever needed, add `volatile` and re-measure rather
+ * than trying to justify the decision from this comment. Note that
+ * bench_cache's non-static sinks are STRONGER than bench_memory.c:112's
+ * static bench_read_sink and diag_cache.c:73's static stride_sink: the
+ * external-linkage fence removes the need for a volatile accumulator
+ * that those two modules' static-sink pattern requires. */
 static unsigned int stride_read_loop(unsigned char __far *buf,
                                       unsigned int size,
                                       unsigned long iters)
@@ -205,14 +215,32 @@ static unsigned int stride_read_loop(unsigned char __far *buf,
  * so every byte stored is a function of both loop indices; Watcom cannot
  * hoist the inner store outside the iter loop body.
  *
- * Cross-iteration DSE defense: a post-loop sink read alone would let
- * Watcom keep only the final iteration's stores (the only ones whose
- * values the sink could observe), collapsing the outer loop to a single
- * iteration and massively inflating the reported throughput. A
- * PER-ITERATION volatile observer read forces each iteration's writes to
- * be independently observable, matching bench_dhrystone's per-iter
- * volatile-sink pattern. The `size - 1U` mask works because both buffer
- * sizes are powers of two. */
+ * Cross-iteration DSE defense — coverage envelope:
+ *
+ *   COVERS: Watcom 2.0 -ox empirically does NOT perform cross-iteration
+ *   dead-store elimination on __far indexed stores. The per-iter
+ *   volatile observer read of buf[i & (size-1)] anchors ONE byte per
+ *   outer iteration, which is sufficient for today's toolchain — the
+ *   remaining (size - 1) inner-loop stores stay live because Watcom's
+ *   DSE analysis does not see them as provably overwritten before
+ *   observation across iterations.
+ *
+ *   DOES NOT COVER: a future toolchain with more aggressive DSE could
+ *   reason that the non-anchored inner-loop stores are overwritten by
+ *   the next outer iteration before any observer read, and fold all
+ *   but the final iteration's non-anchored writes. The observer
+ *   anchors only one byte per outer iteration; nothing in C's memory
+ *   model prevents a sufficiently clever compiler from eliminating
+ *   the other (size - 1) stores per outer iteration.
+ *
+ * TODO(v0.5): if toolchain drift (newer Watcom, LLVM-WASM cross, etc.)
+ * makes the current defense insufficient, the fix is to either
+ * (a) move bench_cache.obj to CFLAGS_NOOPT in Makefile — same mitigation
+ * applied to bench_dhrystone.obj and bench_whetstone.obj, or
+ * (b) introduce a `#pragma aux` REP STOSB helper that performs the
+ * far-buffer writes in assembly, bypassing the C-level optimizer
+ * entirely. The `size - 1U` mask works because both buffer sizes are
+ * powers of two. */
 static void stride_write_loop(unsigned char __far *buf, unsigned int size,
                                unsigned long iters)
 {
@@ -234,13 +262,19 @@ static void stride_write_loop(unsigned char __far *buf, unsigned int size,
                                              buf[size - 1U]);
 }
 
-static void bench_cache_one(result_table_t *t,
-                             const char *key_kbps,
-                             const char *key_us,
-                             unsigned char __far *buf,
-                             unsigned int size,
-                             unsigned long iters,
-                             int is_read)
+/* Runs one timed pass and publishes kbps + us. Returns 1 if the computed
+ * rate came back zero (degenerate elapsed or degenerate bytes — should be
+ * unreachable under timing_start_long's ~55 ms BIOS-tick floor, but
+ * reachable if future hardware or a refactor produces sub-ms intervals),
+ * 0 otherwise. Caller ORs the returns together to drive the composite
+ * bench.cache.status verdict. */
+static int bench_cache_one(result_table_t *t,
+                            const char *key_kbps,
+                            const char *key_us,
+                            unsigned char __far *buf,
+                            unsigned int size,
+                            unsigned long iters,
+                            int is_read)
 {
     us_t elapsed;
     unsigned long total_bytes;
@@ -257,6 +291,7 @@ static void bench_cache_one(result_table_t *t,
                    CONF_HIGH, VERDICT_UNKNOWN);
     report_add_u32(t, key_us,   (unsigned long)elapsed, (const char *)0,
                    CONF_HIGH, VERDICT_UNKNOWN);
+    return rate == 0UL ? 1 : 0;
 }
 
 void bench_cache(result_table_t *t, const opts_t *o)
@@ -265,6 +300,7 @@ void bench_cache(result_table_t *t, const opts_t *o)
     const result_t *cpu_class;
     unsigned char __far *small_buf;
     unsigned char __far *large_buf;
+    int any_zero = 0;
     /* bench_cache is quick-mode-only for v0.4 — the (void)o cast below
      * is intentional, not an oversight. Calibrated mode (opts->mode /
      * opts->runs) lands in v0.5 alongside the bar-graph comparison UI.
@@ -337,22 +373,22 @@ void bench_cache(result_table_t *t, const opts_t *o)
     small_buf = cache_buffers_small();
     large_buf = cache_buffers_large();
 
-    bench_cache_one(t, "bench.cache.small_write_kbps",
-                       "bench.cache.small_write_us",
-                    small_buf, CACHE_BUFFERS_SMALL_BYTES,
-                    BENCH_CACHE_SMALL_ITERS, 0);
-    bench_cache_one(t, "bench.cache.small_read_kbps",
-                       "bench.cache.small_read_us",
-                    small_buf, CACHE_BUFFERS_SMALL_BYTES,
-                    BENCH_CACHE_SMALL_ITERS, 1);
-    bench_cache_one(t, "bench.cache.large_write_kbps",
-                       "bench.cache.large_write_us",
-                    large_buf, CACHE_BUFFERS_LARGE_BYTES,
-                    BENCH_CACHE_LARGE_ITERS, 0);
-    bench_cache_one(t, "bench.cache.large_read_kbps",
-                       "bench.cache.large_read_us",
-                    large_buf, CACHE_BUFFERS_LARGE_BYTES,
-                    BENCH_CACHE_LARGE_ITERS, 1);
+    any_zero |= bench_cache_one(t, "bench.cache.small_write_kbps",
+                                   "bench.cache.small_write_us",
+                                small_buf, CACHE_BUFFERS_SMALL_BYTES,
+                                BENCH_CACHE_SMALL_ITERS, 0);
+    any_zero |= bench_cache_one(t, "bench.cache.small_read_kbps",
+                                   "bench.cache.small_read_us",
+                                small_buf, CACHE_BUFFERS_SMALL_BYTES,
+                                BENCH_CACHE_SMALL_ITERS, 1);
+    any_zero |= bench_cache_one(t, "bench.cache.large_write_kbps",
+                                   "bench.cache.large_write_us",
+                                large_buf, CACHE_BUFFERS_LARGE_BYTES,
+                                BENCH_CACHE_LARGE_ITERS, 0);
+    any_zero |= bench_cache_one(t, "bench.cache.large_read_kbps",
+                                   "bench.cache.large_read_us",
+                                large_buf, CACHE_BUFFERS_LARGE_BYTES,
+                                BENCH_CACHE_LARGE_ITERS, 1);
 
     /* Publish a composite 16-bit reproducibility signal so a downstream
      * consumer can detect run-over-run drift beyond the kbps rate (which
@@ -373,6 +409,16 @@ void bench_cache(result_table_t *t, const opts_t *o)
                        CONF_LOW, VERDICT_UNKNOWN);
     }
 
-    report_add_str(t, "bench.cache.status", "ok",
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    /* If any of the four measurements produced a zero KB/s (degenerate
+     * elapsed — unreachable under today's ~55 ms BIOS-tick floor, but
+     * reachable on hypothetical faster hardware or after a sub-ms timing
+     * refactor), emit a distinct warning status so downstream consumers
+     * don't conflate "zero rate" with a healthy "ok" measurement. */
+    if (any_zero) {
+        report_add_str(t, "bench.cache.status", "warn_zero_elapsed",
+                       CONF_HIGH, VERDICT_WARN);
+    } else {
+        report_add_str(t, "bench.cache.status", "ok",
+                       CONF_HIGH, VERDICT_UNKNOWN);
+    }
 }
