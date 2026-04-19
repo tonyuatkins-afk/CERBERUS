@@ -105,8 +105,8 @@ int main(void)
     /* Structure checks */
     CHECK(strstr(buf, "[cerberus]") == buf,
           "[cerberus] is first section");
-    CHECK(strstr(buf, "\nversion=0.1.0\n") != NULL,
-          "version field present");
+    CHECK(strstr(buf, "\nversion=" CERBERUS_VERSION "\n") != NULL,
+          "version field sourced from CERBERUS_VERSION macro");
     CHECK(strstr(buf, "\nschema_version=") != NULL,
           "schema_version field present");
     CHECK(strstr(buf, "\nsignature_schema=1\n") != NULL,

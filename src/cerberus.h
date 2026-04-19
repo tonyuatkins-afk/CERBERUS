@@ -1,7 +1,7 @@
 #ifndef CERBERUS_H
 #define CERBERUS_H
 
-#define CERBERUS_VERSION          "0.1.0"
+#define CERBERUS_VERSION          "0.4.0-dev"
 #define CERBERUS_SCHEMA_VERSION   "1.0"
 #define CERBERUS_SIGNATURE_SCHEMA "1"
 
