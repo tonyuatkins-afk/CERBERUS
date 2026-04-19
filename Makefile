@@ -67,6 +67,7 @@ OBJS = src\main.obj                                                  &
        src\diag\diag_all.obj  src\diag\diag_cpu.obj                  &
        src\diag\diag_mem.obj  src\diag\diag_fpu.obj                  &
        src\diag\diag_video.obj                                       &
+       src\diag\diag_cache.obj src\diag\diag_dma.obj                 &
        src\bench\bench_all.obj src\bench\bench_cpu.obj               &
        src\bench\bench_memory.obj src\bench\bench_fpu.obj            &
        src\bench\bench_dhrystone.obj src\bench\bench_whetstone.obj   &
@@ -192,6 +193,12 @@ src\diag\diag_fpu.obj: src\diag\diag_fpu.c src\diag\diag.h src\core\report.h src
 
 src\diag\diag_video.obj: src\diag\diag_video.c src\diag\diag.h src\core\display.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_video.c
+
+src\diag\diag_cache.obj: src\diag\diag_cache.c src\diag\diag.h src\core\timing.h src\core\report.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_cache.c
+
+src\diag\diag_dma.obj: src\diag\diag_dma.c src\diag\diag.h src\core\report.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_dma.c
 
 src\bench\bench_all.obj: src\bench\bench_all.c src\bench\bench.h src\core\crumb.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_all.c

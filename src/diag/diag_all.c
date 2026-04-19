@@ -21,21 +21,15 @@ void diag_all(result_table_t *t, const opts_t *o)
     WRAP_DIAG("mem",   diag_mem(t));
     WRAP_DIAG("fpu",   diag_fpu(t));
     WRAP_DIAG("video", diag_video(t));
+    WRAP_DIAG("cache", diag_cache(t));
+    WRAP_DIAG("dma",   diag_dma(t));
     /*
-     * Deferred from Phase 2 — needs real-hardware iteration:
+     * v0.3 completion landed diag_cache (stride-ratio timing probe) and
+     * diag_dma (8237 count-register readback on channels 1/2/3/5/6/7 —
+     * channels 0 + 4 safety-skipped as refresh/cascade).
      *
-     *   Cache coherence  Requires 486+ INVD/WBINVD or explicit cache
-     *                    line flush to get meaningful results. Blind
-     *                    implementation risks false positives from
-     *                    emulator cache synthesis. Re-evaluate once
-     *                    Task 1.10 real-hardware gate surfaces actual
-     *                    failure modes.
-     *
-     *   DMA liveness     The plan is explicit: "diagnostics MUST NOT
-     *                    damage hardware. No DMA that overwrites DOS
-     *                    kernel memory." A safe harness needs careful
-     *                    address-space negotiation via INT 21h — scope
-     *                    grows fast. Deferred until benchmark module
-     *                    establishes DMA handling in Phase 3.
+     * See docs/plans/v0.3-diagnose-completion.md for the verdict tables,
+     * safety rationale, and real-hardware verification gate. Real-iron
+     * acceptance is user-run on BEK-V409 after host-side green.
      */
 }

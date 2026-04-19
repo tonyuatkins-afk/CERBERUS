@@ -14,4 +14,13 @@ void diag_mem(result_table_t *t);
 void diag_fpu(result_table_t *t);
 void diag_video(result_table_t *t);
 
+/* v0.3 completion — see docs/plans/v0.3-diagnose-completion.md */
+void diag_cache(result_table_t *t);
+void diag_dma(result_table_t *t);
+
+/* Pure-math kernels exposed for host-testing. */
+verdict_t diag_cache_classify_ratio_x100(unsigned long ratio_x100,
+                                         const char **out_msg_prefix);
+verdict_t diag_dma_summary_verdict(int ch_pass, int ch_fail, int ch_skip);
+
 #endif
