@@ -70,6 +70,39 @@ us_t timing_bios_ticks_to_us(unsigned long bios_ticks)
     return (us_t)(bios_ticks * 54925UL);
 }
 
+us_t timing_bios_ticks_to_us_delta(unsigned long start_ticks,
+                                   unsigned long end_ticks)
+{
+    /*
+     * Pure math kernel for timing_stop_long. Computes the elapsed us
+     * between two BIOS tick counter readings at ~54.925 ms/tick, using
+     * the same 54925 us/tick rounding as timing_bios_ticks_to_us.
+     *
+     * Normal case: end_ticks >= start_ticks → delta is their difference.
+     *
+     * Midnight rollover: the BIOS tick counter resets to 0 after reaching
+     * 0x001800B0 (1,573,040 ticks ~ 23h 59m 59.96s) — INT 1Ah service 02h
+     * toggles the "past midnight" flag and zeroes the count. If end_ticks
+     * is numerically less than start_ticks, the counter rolled over
+     * between readings, and the real delta is:
+     *   (0x001800B0 - start_ticks) + end_ticks
+     * A 5-second benchmark never spans midnight in practice, but the
+     * handling is trivial and keeps the kernel correct for any caller.
+     *
+     * Note: does NOT detect multi-day rollover (two-plus midnights). The
+     * BIOS counter is 32-bit but the DOS convention zeroes daily, so the
+     * helper is only correct for deltas < 24 hours. Callers measuring
+     * benchmark intervals (seconds to minutes) are well within that.
+     */
+    unsigned long delta;
+    if (end_ticks >= start_ticks) {
+        delta = end_ticks - start_ticks;
+    } else {
+        delta = (0x001800B0UL - start_ticks) + end_ticks;
+    }
+    return (us_t)(delta * 54925UL);
+}
+
 int timing_compute_dual(unsigned int initial_c2,
                         unsigned int final_c2,
                         unsigned long c2_wraps_observed,
@@ -398,6 +431,37 @@ us_t timing_stop(void)
     c2_gate_off();
     ticks = timing_elapsed_ticks(measurement_start_ct, stop_ct);
     return timing_ticks_to_us(ticks);
+}
+
+/* --- Long-interval timing (BIOS tick) -------------------------------- */
+
+/* Forward-declare read_bios_tick (defined further down alongside the
+ * timing_dual_measure HW layer). Both timing_start_long/stop_long and
+ * timing_dual_measure share the same coherent-read primitive. */
+static unsigned long read_bios_tick(void);
+
+/* Module-scope scratch for timing_start_long / timing_stop_long. Single-
+ * call contract is looser than the self-check helpers: each benchmark
+ * (Dhrystone warmup + main, Whetstone warmup + main) makes a paired
+ * start/stop call; nesting is not supported but is not a concern because
+ * the bench orchestrator serializes them. */
+static unsigned long long_start_ticks = 0UL;
+
+void timing_start_long(void)
+{
+    /* Read the BIOS tick via the same coherent-read idiom as
+     * read_bios_tick (MSB/LSB/MSB re-check — INT 8 can fire between our
+     * LSB and MSB reads on slow hardware). We do NOT _disable() here:
+     * read_bios_tick's retry loop tolerates an INT-8 mid-read, and
+     * disabling interrupts around benchmark boundaries would distort
+     * long-running workloads that assume normal interrupt service. */
+    long_start_ticks = read_bios_tick();
+}
+
+us_t timing_stop_long(void)
+{
+    unsigned long end = read_bios_tick();
+    return timing_bios_ticks_to_us_delta(long_start_ticks, end);
 }
 
 void timing_wait_us(us_t microseconds)

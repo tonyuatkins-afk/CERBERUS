@@ -21,6 +21,12 @@
  *   - Auto-calibration: a short warmup estimates scale; the main run
  *     targets ~5 seconds on the detected CPU. Fallback to a fixed loop
  *     count if warmup returns 0.
+ *   - BIOS-tick-timed via timing_start_long / timing_stop_long. Same
+ *     reasoning as bench_dhrystone: a 5-second target is ~91 PIT C2
+ *     wraps, and the C2-based timing_start/timing_stop helpers can only
+ *     resolve one wrap. The BIOS-tick pair (~55 ms resolution) is the
+ *     right primitive for multi-wrap intervals; the ~1% discretization
+ *     at 5 seconds is well under the ±5% match-target budget.
  *   - Reference constants and module weights preserved. Iteration count
  *     per module from the reference (N1..N11).
  *
@@ -273,7 +279,10 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
     us_t warmup_us, main_us;
     unsigned long units;
     unsigned long k_whet_per_sec;
+    int warmup_is_main;
     (void)o;
+
+    warmup_is_main = 0;
 
     if (!fpu_looks_present(t)) {
         report_add_str(t, "bench.fpu.whetstone_status", "skipped_no_fpu",
@@ -282,22 +291,33 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
     }
 
     /* Warmup to calibrate iteration count. */
-    timing_start();
+    timing_start_long();
     run_whetstone_units(W_WARMUP_UNITS);
-    warmup_us = timing_stop();
+    warmup_us = timing_stop_long();
 
     if (warmup_us == 0) {
         units = 500UL;
+    } else if (warmup_us >= W_TARGET_MAIN_US / 2UL) {
+        /* Slow-hardware short-circuit (S1 round-2 fix — same pattern as
+         * bench_dhrystone). A warmup that already consumed half the
+         * target runtime means the main run would blow past target; the
+         * cleanest semantics are to treat the warmup AS the main run.
+         * Skip the second pass by reusing warmup_us as main_us. */
+        main_us        = warmup_us;
+        units          = W_WARMUP_UNITS;
+        warmup_is_main = 1;
     } else {
         units = (W_WARMUP_UNITS * W_TARGET_MAIN_US) / (unsigned long)warmup_us;
         if (units < W_MIN_UNITS) units = W_MIN_UNITS;
         if (units > W_MAX_UNITS) units = W_MAX_UNITS;
     }
 
-    /* Real run */
-    timing_start();
-    run_whetstone_units(units);
-    main_us = timing_stop();
+    if (!warmup_is_main) {
+        /* Real run */
+        timing_start_long();
+        run_whetstone_units(units);
+        main_us = timing_stop_long();
+    }
 
     /* Anti-DCE observer — consume final FPU accumulator state via
      * report_add_u32 (external linkage via report.c, opaque to Watcom

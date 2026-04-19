@@ -13,6 +13,22 @@ us_t          timing_ticks_to_us(unsigned long ticks);
 void          timing_wait_us(us_t microseconds);
 int           timing_emulator_hint(void);
 
+/* Long-interval timing via BIOS tick count. Resolution ~55 ms. Use
+ * for multi-wrap intervals (>50 ms) where timing_start/timing_stop
+ * would return modulo-wrap garbage — specifically Dhrystone and
+ * Whetstone, which target 5-second runs (91 PIT C2 wraps). */
+void          timing_start_long(void);
+us_t          timing_stop_long(void);
+
+/* Pure math kernel for timing_start_long/timing_stop_long — exposed
+ * so host tests can exercise the BIOS-tick delta arithmetic without
+ * poking the BDA. Returns (end_ticks - start_ticks) * 54925 us,
+ * handling the midnight-rollover wrap at 0x1800B0 ticks (~24h) so a
+ * benchmark that straddles midnight still produces the correct
+ * elapsed us. Normal case: end >= start. Rollover: end < start. */
+us_t          timing_bios_ticks_to_us_delta(unsigned long start_ticks,
+                                            unsigned long end_ticks);
+
 /* Pure helper — exposed so host tests can exercise both rollover branches.
  * PIT counts DOWN. Normal: start >= stop. Wrap: stop > start. */
 unsigned long timing_elapsed_ticks(unsigned int start_count,

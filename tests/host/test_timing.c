@@ -113,6 +113,48 @@ static void test_bios_ticks_to_us(void)
 }
 
 /* ----------------------------------------------------------------------- */
+/* timing_bios_ticks_to_us_delta — pure math for timing_start_long /        */
+/* timing_stop_long. Exercises normal + midnight-rollover branches.         */
+/* ----------------------------------------------------------------------- */
+
+static void test_bios_ticks_to_us_delta(void)
+{
+    printf("timing_bios_ticks_to_us_delta (BIOS-tick delta math):\n");
+
+    /* Normal case: end >= start, plain subtraction. */
+    EXPECT_EQ_UL(timing_bios_ticks_to_us_delta(100UL, 100UL), 0UL,
+                 "equal start/end -> 0 us");
+    EXPECT_EQ_UL(timing_bios_ticks_to_us_delta(100UL, 101UL), 54925UL,
+                 "1-tick delta -> 54925 us");
+    /* Realistic benchmark scenarios. 91 ticks ~ 5 seconds (Dhrystone /
+     * Whetstone main-run target). 91 * 54925 = 4998175 us (~4.998 sec),
+     * under-reporting the idealized 5 sec by 1825 us (~0.04%) because
+     * the rounding of 54.9254 ms/tick down to 54925 us/tick compounds
+     * over 91 ticks. Well under the bench target ±5% budget. */
+    EXPECT_EQ_UL(timing_bios_ticks_to_us_delta(1000UL, 1091UL),
+                 4998175UL, "91-tick (~5 sec) benchmark delta");
+    EXPECT_EQ_UL(timing_bios_ticks_to_us_delta(0UL, 18UL),
+                 988650UL, "18-tick (~1 sec) delta");
+
+    /* Pre-rollover: start shortly before midnight rollover point
+     * (0x001800B0 = 1,573,040 ticks), end right at zero. */
+    EXPECT_EQ_UL(timing_bios_ticks_to_us_delta(0x001800AFUL, 0UL),
+                 54925UL, "midnight-rollover: 1 tick before -> end=0");
+    EXPECT_EQ_UL(timing_bios_ticks_to_us_delta(0x001800A0UL, 10UL),
+                 /* (0x001800B0 - 0x001800A0) + 10 = 16 + 10 = 26 ticks */
+                 26UL * 54925UL,
+                 "midnight-rollover: 16 ticks before -> 10 ticks after");
+
+    /* Any end < start triggers rollover branch. Sanity-check a
+     * near-midnight delta that lands a reasonable us value. */
+    EXPECT_EQ_UL(timing_bios_ticks_to_us_delta(0x00180000UL, 0x000000B0UL),
+                 /* (0x001800B0 - 0x00180000) + 0x000000B0
+                  *   = 0xB0 + 0xB0 = 0x160 = 352 ticks */
+                 352UL * 54925UL,
+                 "midnight-rollover: small-to-small across midnight");
+}
+
+/* ----------------------------------------------------------------------- */
 /* timing_compute_dual — pure-math kernel extracted from timing_dual_measure */
 /* ----------------------------------------------------------------------- */
 
@@ -313,6 +355,7 @@ int main(void)
     test_ticks_to_us();
     test_elapsed_ticks();
     test_bios_ticks_to_us();
+    test_bios_ticks_to_us_delta();
     test_compute_dual();
     test_emit_self_check();
     printf("=== %d failure(s) ===\n", failures);

@@ -18,8 +18,14 @@
  *   - Auto-calibration: a sub-second warmup measures scale factor, then
  *     the real run targets ~5 seconds on the detected CPU. Fallback to a
  *     fixed 50,000 iterations if warmup returns nonsense.
- *   - PIT-timed via timing_start / timing_stop rather than the reference's
- *     time() / clock() which don't work portably on real-mode DOS.
+ *   - BIOS-tick-timed via timing_start_long / timing_stop_long. We cannot
+ *     use the PIT Channel 2 primitives (timing_start / timing_stop) here
+ *     because Dhrystone targets a 5-second main run — 91 PIT C2 wraps —
+ *     and the C2-based helpers handle at most ONE wrap. Every multi-wrap
+ *     reading would be (start-stop) mod 65536 μs, pseudorandom and
+ *     uncorrelated with real elapsed time. BIOS tick resolution is
+ *     ~55 ms / tick which is ~1% of a 5-second interval, comfortably
+ *     under the ±5% match-target budget.
  *
  * CheckIt reference on the BEK-V409 bench box: 33,609 Dhrystones/sec at
  * DSP-measured 66.74 MHz. Our port targets ±5% of that number. Wider
@@ -329,16 +335,33 @@ void bench_dhrystone(result_table_t *t, const opts_t *o)
     us_t warmup_us, main_us;
     unsigned long main_iters;
     unsigned long dhry_per_sec;
+    int warmup_is_main;
     (void)o;
 
-    /* Warmup. If warmup_us is 0 we're running faster than PIT resolution
-     * (unlikely, but emulator artifact) — fall back to a fixed count. */
-    timing_start();
+    warmup_is_main = 0;
+
+    /* Warmup. If warmup_us is 0 we're running faster than BIOS-tick
+     * resolution (~55 ms) — warmup at 2000 iters took under one tick.
+     * Fall back to a fixed count sized for the fastest plausible CPU. */
+    timing_start_long();
     run_dhrystone_iterations(WARMUP_ITERS);
-    warmup_us = timing_stop();
+    warmup_us = timing_stop_long();
 
     if (warmup_us == 0) {
         main_iters = 50000UL;
+    } else if (warmup_us >= TARGET_MAIN_US / 2UL) {
+        /* Slow-hardware short-circuit (S1 round-2 fix). On an 8088 at
+         * ~200 Dhrystones/sec, a 2000-iter warmup takes ~10 seconds —
+         * already double the 5-second target. The naive division
+         * `TARGET_MAIN_US / warmup_us` would round to 0 and clamp to
+         * MIN_MAIN_ITERS, producing a second 10-second run for a
+         * 20-second total. Instead, treat the warmup as the main run:
+         * copy its timing + iter count into main_us / main_iters and
+         * skip the second pass entirely. Simplest sensible semantics
+         * for hardware where even the warmup blows past target. */
+        main_us         = warmup_us;
+        main_iters      = WARMUP_ITERS;
+        warmup_is_main  = 1;
     } else {
         /* main_iters = WARMUP_ITERS * TARGET_MAIN_US / warmup_us, but the
          * direct form overflows 32-bit unsigned long: WARMUP_ITERS=2000 *
@@ -354,10 +377,12 @@ void bench_dhrystone(result_table_t *t, const opts_t *o)
         if (main_iters > MAX_MAIN_ITERS) main_iters = MAX_MAIN_ITERS;
     }
 
-    /* Real run */
-    timing_start();
-    run_dhrystone_iterations(main_iters);
-    main_us = timing_stop();
+    if (!warmup_is_main) {
+        /* Real run */
+        timing_start_long();
+        run_dhrystone_iterations(main_iters);
+        main_us = timing_stop_long();
+    }
 
     /* Anti-DCE observer — consume final Dhrystone state so Watcom -ox
      * cannot eliminate the writes that produced it. Emitting the
