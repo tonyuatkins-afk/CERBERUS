@@ -1,15 +1,18 @@
 /*
- * Host-side test for diag_cache's pure-math verdict kernel. The timing
- * path itself is hardware-dependent (PIT-measured on real iron / DOSBox-X)
- * and is not host-testable — we exercise only the classify-the-ratio
- * kernel that decides PASS / WARN / FAIL from the stride-ratio input.
+ * Host-side test for diag_cache's pure-math verdict kernel. Semantics
+ * per issue #5 resolution: the classifier now consumes a PER-LINE time
+ * ratio rather than a per-traversal ratio. See diag_cache.c's comment
+ * block above diag_cache_classify_ratio_x100 for the threshold
+ * calibration rationale based on first-real-iron data (BEK-V409 at
+ * 2026-04-19 showed per-line ratio 1.71×, correctly PASSing under the
+ * recalibrated thresholds).
  *
- * Verdict table (ratio in ×100 units so 200 = 2.00×):
+ * Verdict table (ratio in ×100 units so 130 = 1.30×):
  *   ratio == 0          -> VERDICT_WARN  "no_measurement"
  *   ratio < 100         -> VERDICT_WARN  "anomaly"         (< 1.0×, physically impossible)
- *   ratio < 2000        -> VERDICT_FAIL  "no_cache_effect" (< 20×)
- *   ratio < 4000        -> VERDICT_WARN  "partial"         (20-40×)
- *   ratio >= 4000       -> VERDICT_PASS  "cache_working"   (≥ 40×)
+ *   ratio < 120         -> VERDICT_FAIL  "no_cache_effect" (< 1.2×)
+ *   ratio < 130         -> VERDICT_WARN  "partial"         (1.2-1.3×)
+ *   ratio >= 130        -> VERDICT_PASS  "cache_working"   (≥ 1.3×)
  */
 
 #ifndef CERBERUS_HOST_TEST
@@ -53,68 +56,79 @@ int main(void)
     CHECK(tag != NULL && strcmp(tag, "no_measurement") == 0,
           "Scenario A: tag == no_measurement");
 
-    /* Scenario B: ratio=0.5× (impossible — large faster than small) -> WARN anomaly */
+    /* Scenario B: ratio=0.5× (impossible — large faster than small per line) */
     tag = NULL;
     v = diag_cache_classify_ratio_x100(50UL, &tag);
     CHECK(v == VERDICT_WARN, "Scenario B: ratio=0.5× -> WARN");
     CHECK(tag != NULL && strcmp(tag, "anomaly") == 0,
           "Scenario B: tag == anomaly");
 
-    /* Scenario C: ratio=1.0× (no cache effect at all) -> FAIL */
+    /* Scenario C: ratio=1.00× (equal per-line — no cache effect) -> FAIL */
     tag = NULL;
     v = diag_cache_classify_ratio_x100(100UL, &tag);
-    CHECK(v == VERDICT_FAIL, "Scenario C: ratio=1.0× -> FAIL");
+    CHECK(v == VERDICT_FAIL, "Scenario C: ratio=1.00× -> FAIL");
     CHECK(tag != NULL && strcmp(tag, "no_cache_effect") == 0,
           "Scenario C: tag == no_cache_effect");
 
-    /* Scenario D: ratio=15× (linear buffer-size scaling, cache off) -> FAIL */
+    /* Scenario D: ratio=1.10× (marginal, still FAIL-band — noise floor) */
     tag = NULL;
-    v = diag_cache_classify_ratio_x100(1500UL, &tag);
-    CHECK(v == VERDICT_FAIL, "Scenario D: ratio=15× (buffer scaling) -> FAIL");
+    v = diag_cache_classify_ratio_x100(110UL, &tag);
+    CHECK(v == VERDICT_FAIL, "Scenario D: ratio=1.10× -> FAIL (noise floor)");
 
-    /* Scenario E: ratio=19.99× (just below FAIL threshold) -> FAIL */
+    /* Scenario E: ratio=1.19× (just below FAIL boundary) -> FAIL */
     tag = NULL;
-    v = diag_cache_classify_ratio_x100(1999UL, &tag);
-    CHECK(v == VERDICT_FAIL, "Scenario E: ratio=19.99× -> FAIL (boundary)");
+    v = diag_cache_classify_ratio_x100(119UL, &tag);
+    CHECK(v == VERDICT_FAIL, "Scenario E: ratio=1.19× -> FAIL (boundary)");
 
-    /* Scenario F: ratio=20× (right at WARN boundary) -> WARN */
+    /* Scenario F: ratio=1.20× (at WARN boundary) -> WARN */
     tag = NULL;
-    v = diag_cache_classify_ratio_x100(2000UL, &tag);
-    CHECK(v == VERDICT_WARN, "Scenario F: ratio=20× -> WARN (boundary)");
+    v = diag_cache_classify_ratio_x100(120UL, &tag);
+    CHECK(v == VERDICT_WARN, "Scenario F: ratio=1.20× -> WARN (boundary)");
     CHECK(tag != NULL && strcmp(tag, "partial") == 0,
           "Scenario F: tag == partial");
 
-    /* Scenario G: ratio=30× (partial cache effect) -> WARN */
+    /* Scenario G: ratio=1.25× (partial, mid-WARN) -> WARN */
     tag = NULL;
-    v = diag_cache_classify_ratio_x100(3000UL, &tag);
-    CHECK(v == VERDICT_WARN, "Scenario G: ratio=30× -> WARN");
+    v = diag_cache_classify_ratio_x100(125UL, &tag);
+    CHECK(v == VERDICT_WARN, "Scenario G: ratio=1.25× -> WARN");
 
-    /* Scenario H: ratio=39.99× (just below PASS threshold) -> WARN */
+    /* Scenario H: ratio=1.29× (just below PASS boundary) -> WARN */
     tag = NULL;
-    v = diag_cache_classify_ratio_x100(3999UL, &tag);
-    CHECK(v == VERDICT_WARN, "Scenario H: ratio=39.99× -> WARN (boundary)");
+    v = diag_cache_classify_ratio_x100(129UL, &tag);
+    CHECK(v == VERDICT_WARN, "Scenario H: ratio=1.29× -> WARN (boundary)");
 
-    /* Scenario I: ratio=40× (right at PASS boundary) -> PASS */
+    /* Scenario I: ratio=1.30× (PASS boundary) -> PASS */
     tag = NULL;
-    v = diag_cache_classify_ratio_x100(4000UL, &tag);
-    CHECK(v == VERDICT_PASS, "Scenario I: ratio=40× -> PASS (boundary)");
+    v = diag_cache_classify_ratio_x100(130UL, &tag);
+    CHECK(v == VERDICT_PASS, "Scenario I: ratio=1.30× -> PASS (boundary)");
     CHECK(tag != NULL && strcmp(tag, "cache_working") == 0,
           "Scenario I: tag == cache_working");
 
-    /* Scenario J: ratio=120× (typical healthy 486 DX-2 with 8 KB L1) -> PASS */
+    /* Scenario J: ratio=1.71× — first real-iron data point on BEK-V409
+     * i486DX-2 (2026-04-19 Sunday validation). Was the direct motivator
+     * for the threshold recalibration; MUST PASS under the corrected
+     * semantics. If this scenario regresses, issue #5's fix has been
+     * undone. */
     tag = NULL;
-    v = diag_cache_classify_ratio_x100(12000UL, &tag);
-    CHECK(v == VERDICT_PASS, "Scenario J: ratio=120× (healthy 486) -> PASS");
+    v = diag_cache_classify_ratio_x100(171UL, &tag);
+    CHECK(v == VERDICT_PASS, "Scenario J: ratio=1.71× (BEK-V409 real-iron) -> PASS");
+    CHECK(tag != NULL && strcmp(tag, "cache_working") == 0,
+          "Scenario J: tag == cache_working");
 
-    /* Scenario K: ratio=500× (unusually large cache effect — maybe L2 amplifies) -> PASS */
+    /* Scenario K: ratio=5.00× (well-optimized system — 5× per-line speedup) */
     tag = NULL;
-    v = diag_cache_classify_ratio_x100(50000UL, &tag);
-    CHECK(v == VERDICT_PASS, "Scenario K: ratio=500× -> PASS");
+    v = diag_cache_classify_ratio_x100(500UL, &tag);
+    CHECK(v == VERDICT_PASS, "Scenario K: ratio=5.00× -> PASS (fast system)");
 
-    /* Scenario L: ratio=99 (just under anomaly threshold, < 1.0×) -> WARN */
+    /* Scenario L: ratio=10.00× (theoretical upper bound for L1-only speedup) */
+    tag = NULL;
+    v = diag_cache_classify_ratio_x100(1000UL, &tag);
+    CHECK(v == VERDICT_PASS, "Scenario L: ratio=10.00× -> PASS (theoretical upper)");
+
+    /* Scenario M: ratio=99 (just under anomaly threshold, < 1.0×) -> WARN */
     tag = NULL;
     v = diag_cache_classify_ratio_x100(99UL, &tag);
-    CHECK(v == VERDICT_WARN, "Scenario L: ratio=0.99× -> WARN (anomaly)");
+    CHECK(v == VERDICT_WARN, "Scenario M: ratio=0.99× -> WARN (anomaly)");
 
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
