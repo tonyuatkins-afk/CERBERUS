@@ -94,23 +94,35 @@ static void bench_copy(result_table_t *t)
                    (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
 }
 
+/* File-scope sink prevents the optimizer from eliding the read loop
+ * without forcing volatile stores inside the inner loop. volatile inside
+ * the loop makes each iteration do a memory write-back of the checksum
+ * (~20+ cycles added per byte on 486), which turns a memory-read bench
+ * into a checksum-spill bench — reported 7400 us on the 486DX2-66 when
+ * the real read should be under 1 ms. A module-level sink written once
+ * after the loop keeps the compiler honest without distorting timing. */
+static unsigned long bench_read_sink;
+
 static void bench_read(result_table_t *t)
 {
     us_t elapsed;
     unsigned long rate;
-    volatile unsigned long checksum = 0;
+    unsigned long checksum = 0;
     unsigned int i;
 
     /* Pre-fill so we're reading defined values */
     memset(mem_src, 0x3C, MEM_BUF_BYTES);
 
     timing_start();
-    /* Read every byte, fold into volatile checksum so the optimizer
-     * can't elide the reads */
     for (i = 0; i < MEM_BUF_BYTES; i++) {
         checksum += mem_src[i];
     }
     elapsed = timing_stop();
+
+    /* Commit the result to the module-level sink AFTER timing stops.
+     * This prevents dead-code elimination of the loop without the
+     * per-iteration store overhead that volatile forced. */
+    bench_read_sink = checksum;
 
     rate = kb_per_sec((unsigned long)MEM_BUF_BYTES, elapsed);
     report_add_u32(t, "bench.memory.read_kbps", rate, (const char *)0,

@@ -102,6 +102,16 @@ static int probe_e801_kb(unsigned long *out_kb)
     return 1;
 }
 
+/* XMS extended-memory query (see mem_a.asm). Returns 1 and populates
+ * *out_largest_kb / *out_total_kb on success; returns 0 if XMS is
+ * absent or the driver reports no free memory. */
+extern int xms_query_free(unsigned long *out_largest_kb,
+                          unsigned long *out_total_kb);
+#pragma aux xms_query_free "xms_query_free_" \
+    parm [ax] [dx] \
+    value [ax] \
+    modify exact [ax bx cx dx es];
+
 static int probe_xms(unsigned int *out_version_bcd)
 {
     union REGS r;
@@ -245,11 +255,34 @@ void detect_mem(result_table_t *t)
         have_e801 = probe_e801_kb(&e801_kb);
     }
 
+    /* XMS detection (presence check only for now). Runs BEFORE the
+     * extended_kb emit so we can choose the XMS value over the HIMEM-
+     * blinded INT 15h value. */
+    crumb_enter("detect.mem.xms");
+    have_xms = probe_xms(&xms_ver);
+
+    /* HIMEM.SYS hooks INT 15h AH=88h / AX=E801h and returns 0 extended
+     * memory to steer DOS clients through XMS. Our INT 15h probes
+     * therefore report 0 whenever HIMEM is active (seen on the 486 DX-2
+     * bench box with 64 MB RAM). Re-query via the XMS entry point
+     * (mem_a.asm) and use it as the authoritative value when XMS is
+     * loaded. Emitted exactly once below so we don't pollute the INI
+     * with duplicate rows. */
+    if (have_xms) {
+        unsigned long xms_largest = 0, xms_total = 0;
+        crumb_enter("detect.mem.xms_query");
+        if (xms_query_free(&xms_largest, &xms_total) && xms_total > ext_kb) {
+            ext_kb = xms_total;
+            have_e801 = 0;           /* XMS supersedes the INT 15h probes */
+            e801_disagreed = 0;
+        }
+    }
+
     {
-        /* Pick max(AH=88h, E801h). If they disagree significantly flag
-         * MEDIUM confidence so the consistency engine can pick it up
-         * (an AH=88h saturation vs a fuller E801h response is expected
-         * on systems with >64MB extended). */
+        /* Pick max(AH=88h, E801h, XMS). If AH=88h and E801h disagree
+         * significantly (but XMS didn't override), flag MEDIUM confidence
+         * so consist can pick it up (AH=88h saturation at 64MB vs a
+         * fuller E801h response is expected on systems with >64MB). */
         unsigned long reported = ext_kb;
         confidence_t conf = CONF_HIGH;
         if (have_e801 && e801_kb > reported) {
@@ -268,9 +301,6 @@ void detect_mem(result_table_t *t)
         }
     }
 
-    /* XMS and EMS work on any CPU — gate only by BIOS response */
-    crumb_enter("detect.mem.xms");
-    have_xms = probe_xms(&xms_ver);
     report_add_str(t, "memory.xms_present", have_xms ? "yes" : "no",
                    env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
 

@@ -39,62 +39,81 @@
 static char audio_sb_dsp_version_val[8];
 static char audio_match_key[24];
 
-#define OPL_ADDR 0x388
-#define OPL_DATA 0x389
+#define OPL_DEFAULT_ADDR 0x388
+#define OPL_DEFAULT_DATA 0x389
 
 /* ----------------------------------------------------------------------- */
 /* OPL probe (canonical 13-step sequence)                                   */
+/*                                                                          */
+/* Port layout: industry-standard Adlib mirror lives at 0x388/0x389 on      */
+/* most ISA SB clones and when a PnP SB card is in its default/unmanaged    */
+/* state. After Creative's CTCM.EXE configures a Vibra 16S PnP, the legacy  */
+/* 0x388 mirror may be disabled and OPL only answers at BLASTER-base + 8.   */
+/* Probe logic: try BLASTER-base+8 first if we have a base; fall back to    */
+/* 0x388. Avoids a silent false-negative on CTCM-managed Vibra cards.       */
 /* ----------------------------------------------------------------------- */
 
-static int probe_opl(int *out_opl3)
+static int probe_opl_at(unsigned int addr_port, unsigned int data_port,
+                        int *out_opl3)
 {
     unsigned char s1, s2;
 
     *out_opl3 = 0;
 
     /* Reset timers (write 60h to R4) */
-    outp(OPL_ADDR, 0x04);
-    outp(OPL_DATA, 0x60);
+    outp(addr_port, 0x04);
+    outp(data_port, 0x60);
     /* Reset IRQ status (write 80h to R4) */
-    outp(OPL_ADDR, 0x04);
-    outp(OPL_DATA, 0x80);
+    outp(addr_port, 0x04);
+    outp(data_port, 0x80);
     /* Read status — expect bits 7:6 = 00 */
-    s1 = (unsigned char)(inp(OPL_ADDR) & 0xE0);
+    s1 = (unsigned char)(inp(addr_port) & 0xE0);
     if (s1 != 0) {
         /* OPL in an unexpected state — retry once */
-        outp(OPL_ADDR, 0x04); outp(OPL_DATA, 0x60);
-        outp(OPL_ADDR, 0x04); outp(OPL_DATA, 0x80);
-        s1 = (unsigned char)(inp(OPL_ADDR) & 0xE0);
+        outp(addr_port, 0x04); outp(data_port, 0x60);
+        outp(addr_port, 0x04); outp(data_port, 0x80);
+        s1 = (unsigned char)(inp(addr_port) & 0xE0);
         if (s1 != 0) return 0;  /* no OPL present */
     }
     /* Set Timer 1 to overflow immediately */
-    outp(OPL_ADDR, 0x02);
-    outp(OPL_DATA, 0xFF);
+    outp(addr_port, 0x02);
+    outp(data_port, 0xFF);
     /* Start Timer 1 (mask Timer 2) */
-    outp(OPL_ADDR, 0x04);
-    outp(OPL_DATA, 0x21);
+    outp(addr_port, 0x04);
+    outp(data_port, 0x21);
     /* Wait for overflow — at least 80µs */
     timing_wait_us(100UL);
     /* Read status — expect bits 7:6 = 11 if OPL present */
-    s2 = (unsigned char)(inp(OPL_ADDR) & 0xE0);
+    s2 = (unsigned char)(inp(addr_port) & 0xE0);
     /* Reset */
-    outp(OPL_ADDR, 0x04);
-    outp(OPL_DATA, 0x60);
-    outp(OPL_ADDR, 0x04);
-    outp(OPL_DATA, 0x80);
+    outp(addr_port, 0x04);
+    outp(data_port, 0x60);
+    outp(addr_port, 0x04);
+    outp(data_port, 0x80);
 
     if ((s2 & 0xC0) != 0xC0) return 0;
 
-    /* OPL2 confirmed. Check for OPL3 by attempting the extended register
-     * bank at 38Ah/38Bh — OPL2 ignores these, OPL3 accepts. A post-write
-     * status read should have distinct bits on OPL3. For v0.2 we use a
-     * simpler heuristic: OPL2 returns 0x06 in the low 5 bits of status,
-     * OPL3 returns 0x00. */
+    /* OPL2 confirmed. OPL3 detection heuristic: OPL2 returns 0x06 in the
+     * low 5 bits of status, OPL3 returns 0x00. */
     {
-        unsigned char op_status = (unsigned char)(inp(OPL_ADDR) & 0x06);
+        unsigned char op_status = (unsigned char)(inp(addr_port) & 0x06);
         if (op_status == 0x00) *out_opl3 = 1;
     }
     return 1;
+}
+
+static int probe_opl(int *out_opl3)
+{
+    unsigned int sb_base = 0;
+
+    /* Prefer BLASTER-base+8 when BLASTER is set — covers CTCM-managed
+     * Vibra 16S and similar PnP cards whose Adlib mirror is off. */
+    if (parse_blaster(&sb_base) && sb_base != 0) {
+        if (probe_opl_at(sb_base + 0x08, sb_base + 0x09, out_opl3)) return 1;
+    }
+
+    /* Fallback: industry-standard Adlib port. */
+    return probe_opl_at(OPL_DEFAULT_ADDR, OPL_DEFAULT_DATA, out_opl3);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -130,9 +149,25 @@ static int parse_blaster(unsigned int *out_port)
 
 static int probe_sb_dsp(unsigned int base, unsigned int *out_major, unsigned int *out_minor)
 {
-    unsigned int reset_port = base + 0x06;
-    unsigned int data_port  = base + 0x0A;
-    unsigned int write_port = base + 0x0C;
+    /*
+     * Creative Sound Blaster DSP port layout (standard SB/SB16/Vibra):
+     *   base+0x06  Reset (write 1, delay, write 0, delay)
+     *   base+0x0A  Read Data (the byte the DSP hands us)
+     *   base+0x0C  Write Command/Data
+     *   base+0x0E  Read-Buffer Status (bit 7 = data available)
+     *
+     * Pre-fix, this code polled base+0x0A for bit 7 as a data-ready
+     * signal. Reading base+0x0A returns the current data byte (or stale
+     * contents when no data is pending); bit 7 set there depends on the
+     * value of that byte, not on DSP readiness. On the Vibra 16S it
+     * would either loop-timeout (stale byte had bit 7 clear) or read
+     * garbage (bit 7 set coincidentally). Status polling goes through
+     * base+0x0E — correct per the Creative programmer's reference.
+     */
+    unsigned int reset_port  = base + 0x06;
+    unsigned int data_port   = base + 0x0A;
+    unsigned int write_port  = base + 0x0C;
+    unsigned int status_port = base + 0x0E;
     unsigned int i;
     unsigned char v;
 
@@ -142,9 +177,9 @@ static int probe_sb_dsp(unsigned int base, unsigned int *out_major, unsigned int
     outp(reset_port, 0);
     timing_wait_us(100UL);
 
-    /* Wait for DSP to indicate data available (bit 7 of data_port) */
+    /* Wait for DSP to place 0xAA in the read buffer (status bit 7 = ready) */
     for (i = 0; i < 1000; i++) {
-        if (inp(data_port) & 0x80) break;
+        if (inp(status_port) & 0x80) break;
     }
     if (i == 1000) return 0;
 
@@ -155,12 +190,12 @@ static int probe_sb_dsp(unsigned int base, unsigned int *out_major, unsigned int
     outp(write_port, 0xE1);
     timing_wait_us(10UL);
     for (i = 0; i < 1000; i++) {
-        if (inp(data_port) & 0x80) break;
+        if (inp(status_port) & 0x80) break;
     }
     if (i == 1000) return 0;
     *out_major = (unsigned int)inp(data_port);
     for (i = 0; i < 1000; i++) {
-        if (inp(data_port) & 0x80) break;
+        if (inp(status_port) & 0x80) break;
     }
     if (i == 1000) return 0;
     *out_minor = (unsigned int)inp(data_port);

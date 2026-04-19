@@ -92,3 +92,4 @@ dist/
 devenv/SMOKE.INI
 devenv/SMOKE.LOG
 devenv/SMOKE.RC
+runs/

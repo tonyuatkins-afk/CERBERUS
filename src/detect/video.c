@@ -19,6 +19,7 @@
 #include <string.h>
 #include <dos.h>
 #include <i86.h>
+#include <conio.h>
 #include "detect.h"
 #include "env.h"
 #include "video_db.h"
@@ -103,6 +104,65 @@ typedef struct {
 
 static vbe_info_t vbe_buf;
 
+/* S3 CRTC chip-ID probe. Some S3 SVGA cards (Trio64 seen on the
+ * 486 DX-2 bench) ship BIOS ROMs that contain the literal "IBM VGA"
+ * compatibility signature earlier than any "S3"/"Trio64" substring,
+ * so scan_video_bios() matches the IBM VGA entry and we lose the
+ * chipset identity.
+ *
+ * S3's chip identifier lives in CRTC extended register 0x30, gated
+ * behind an unlock at extended register 0x38. Write 0x48 to 0x38,
+ * then read 0x30 via the standard CRTC index/data pair at 0x3D4/0x3D5.
+ *
+ * Known IDs we map here: 0xE1 → Trio64 (and 32/64 siblings that land
+ * on the same chip-id value). Add more mappings as we validate them
+ * on real hardware. Returns a video_db_entry_t* via signature lookup
+ * or NULL if no S3 chip is present or the ID doesn't match a known DB
+ * row. */
+static const video_db_entry_t *find_video_db_entry(const char *signature)
+{
+    unsigned int i;
+    for (i = 0; i < video_db_count; i++) {
+        if (strcmp(video_db[i].bios_signature, signature) == 0) {
+            return &video_db[i];
+        }
+    }
+    return (const video_db_entry_t *)0;
+}
+
+static const video_db_entry_t *probe_s3_chipid(void)
+{
+    unsigned char saved_38, saved_idx, id;
+
+    /* Save then unlock extended CRTC registers (S3 "CR38 unlock"). */
+    saved_idx = (unsigned char)inp(0x3D4);
+    outp(0x3D4, 0x38);
+    saved_38 = (unsigned char)inp(0x3D5);
+    outp(0x3D5, 0x48);
+
+    /* Read CRTC index 0x30 — chip ID. */
+    outp(0x3D4, 0x30);
+    id = (unsigned char)inp(0x3D5);
+
+    /* Restore CR38 and the prior CRTC index so we don't disturb the
+     * display state of any later consumer. */
+    outp(0x3D4, 0x38);
+    outp(0x3D5, saved_38);
+    outp(0x3D4, saved_idx);
+
+    switch (id) {
+        case 0xE1:
+            return find_video_db_entry("Trio64");
+        case 0xE6:
+            return find_video_db_entry("Virge");
+        /* Other S3 IDs (0xE0 911/924, 0x90/0xB0 928, 0xC0 864, 0xD0 964,
+         * 0xE3 Vision864, 0xE5 Vision964, 0xA5 801/805) fall through —
+         * add DB rows + cases here as real hardware validates them. */
+        default:
+            return (const video_db_entry_t *)0;
+    }
+}
+
 static int probe_vbe(unsigned int *out_version)
 {
     union  REGS  r;
@@ -145,8 +205,15 @@ void detect_video(result_table_t *t)
                    display_has_color() ? "yes" : "no",
                    env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
 
-    /* Chipset: scan video BIOS for any known vendor signature. */
-    chip = scan_video_bios();
+    /* Chipset: HW probe first (S3 chip-ID register), then fall back to
+     * BIOS ROM string scan. The HW probe wins because many SVGA cards
+     * embed "IBM VGA" for compatibility, which the BIOS scan would match
+     * with higher priority than the true vendor signature. */
+    chip = (const video_db_entry_t *)0;
+    if (a == ADAPTER_VGA_COLOR || a == ADAPTER_VGA_MONO || a == ADAPTER_MCGA) {
+        chip = probe_s3_chipid();
+    }
+    if (!chip) chip = scan_video_bios();
     if (chip) {
         report_add_str(t, "video.vendor",  chip->vendor,
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);

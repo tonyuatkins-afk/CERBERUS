@@ -36,7 +36,7 @@ OBJS = src\main.obj                                                  &
        src\detect\cpu_db.obj                                         &
        src\detect\fpu.obj     src\detect\fpu_a.obj                   &
        src\detect\fpu_db.obj                                         &
-       src\detect\mem.obj                                            &
+       src\detect\mem.obj     src\detect\mem_a.obj                   &
        src\detect\cache.obj   src\detect\bus.obj                     &
        src\detect\video.obj   src\detect\video_db.obj                &
        src\detect\audio.obj   src\detect\audio_db.obj                &
@@ -117,6 +117,9 @@ regen-fpu-db: .SYMBOLIC
 
 src\detect\mem.obj: src\detect\mem.c src\detect\detect.h src\detect\cpu.h src\detect\env.h src\core\report.h src\core\crumb.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\mem.c
+
+src\detect\mem_a.obj: src\detect\mem_a.asm
+	$(ASM) $(ASFLAGS) -o src\detect\mem_a.obj src\detect\mem_a.asm
 
 src\detect\cache.obj: src\detect\cache.c src\detect\detect.h src\detect\cpu.h src\detect\env.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\detect\cache.c

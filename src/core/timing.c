@@ -109,6 +109,22 @@ int timing_compute_dual(unsigned int initial_c2,
      * timing_self_check uses target=4; well within the cap. */
     if (c2_wraps_observed > 16UL) return 1;
 
+    /* Upper-bound sanity check: PIT C2 should wrap at most once per BIOS
+     * tick (they share the 1.193 MHz crystal with a 65536:1 ratio). A
+     * genuine measurement over `target_bios_ticks` BIOS ticks sees at
+     * most `target_bios_ticks + 1` C2 wraps (the +1 accounts for a
+     * partial wrap boundary at each end).
+     *
+     * If we observed more than that, phantom wraps from chipset latch
+     * races slipped past the shape-check + verify-reread defenses in the
+     * observer loop. Observed on the 486 DX-2 bench box: exactly 6 wraps
+     * over a 4-tick target = PIT reports 1.5x the real interval.
+     *
+     * Reject the measurement as unreliable. Rule 4a will no-op on key
+     * absence (timing_emit_self_check emits measurement_failed status
+     * and a consistency WARN row in the emit helper's failure branch). */
+    if (c2_wraps_observed > (unsigned long)target_bios_ticks) return 1;
+
     c2_wraps = c2_wraps_observed;
 
     /* Expected: one C2 wrap per BIOS tick (they share the crystal at
@@ -150,6 +166,20 @@ int timing_compute_dual(unsigned int initial_c2,
     c2_total_ticks = c2_wraps * 65536UL + sub_ticks;
     pit_us  = timing_ticks_to_us(c2_total_ticks);
     bios_us = timing_bios_ticks_to_us(bios_ticks_elapsed);
+
+    /* Post-defensive sanity: if pit_us and bios_us diverge by more than
+     * 25%, the measurement is unreliable — either the defensive wrap
+     * increment fired on a legitimate near-equal init/final pair, or a
+     * phantom wrap slipped past the shape-check + verify-reread in the
+     * observer loop. Rejecting here keeps biased data out of the INI;
+     * rule 4a will no-op on key absence and timing_emit_self_check will
+     * surface a WARN row instead.
+     *
+     * 25% threshold picked to be well above expected jitter on healthy
+     * hardware (typically <2%) and below the 49% ratio seen on the 486
+     * DX-2 bench box where the defensive increment fires spuriously. */
+    if (pit_us > bios_us && (pit_us - bios_us) > (bios_us >> 2)) return 1;
+    if (bios_us > pit_us && (bios_us - pit_us) > (bios_us >> 2)) return 1;
 
     if (out_pit_us)  *out_pit_us  = pit_us;
     if (out_bios_us) *out_bios_us = bios_us;
