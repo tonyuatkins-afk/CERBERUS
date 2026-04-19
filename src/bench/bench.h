@@ -18,7 +18,15 @@ void bench_fpu(result_table_t *t, const opts_t *o);
 void bench_dhrystone(result_table_t *t, const opts_t *o);
 void bench_whetstone(result_table_t *t, const opts_t *o);
 
-/* v0.4 cache bandwidth — see docs/plans/v0.4-benchmarks-and-polish.md §1 */
+/* v0.4 cache bandwidth — see docs/plans/v0.4-benchmarks-and-polish.md §1.
+ *
+ * Quick-mode ONLY for v0.4. Unlike the other bench_* entry points in
+ * this header, bench_cache does NOT consult opts->mode or opts->runs;
+ * the `(void)o` cast in its body is intentional. Calibrated-mode support
+ * (N-pass with per-pass values + min/max/median) lands in v0.5 alongside
+ * the bar-graph comparison UI, where the additional run data has a
+ * presentation surface. Until then, a single quick-mode pass produces
+ * one KB/s number per (size, direction) pair — four rows total. */
 void bench_cache(result_table_t *t, const opts_t *o);
 
 /* Pure math kernel used by bench_cache's emit path. Exposed for host

@@ -8,7 +8,7 @@
 
 CC  = wcc
 LD  = wlink
-ASM = "C:\Program Files\NASM\nasm.exe"
+ASM = C:\PROGRA~1\NASM\nasm.exe
 
 # OpenWatcom flags:
 #   -0          8088/8086 instructions only (maximum compatibility)

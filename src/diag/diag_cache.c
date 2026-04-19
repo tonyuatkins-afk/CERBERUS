@@ -201,6 +201,13 @@ void diag_cache(result_table_t *t)
         }
     }
 
+    /* Explicit inter-caller ownership protocol — establish known-zero
+     * state before the stride reads so we don't inherit whatever pattern
+     * bench_cache left behind (or, on an /ONLY:DIAG run, uninitialized
+     * BSS fill that the C runtime already zeroed but we re-assert for
+     * robustness against future storage changes). See cache_buffers.h. */
+    cache_buffers_reset();
+
     /* Small-buffer timed run */
     timing_start();
     stride_read_loop(cache_buffers_small(), DIAG_CACHE_SMALL_BYTES,

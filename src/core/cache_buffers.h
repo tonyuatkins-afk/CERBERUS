@@ -12,10 +12,12 @@
  * FAR segment under medium model) and keeps the geometry single-sourced.
  *
  * Access rules:
- *   - Buffers are initialized to zero by the C runtime startup (BSS). No
- *     caller should assume any particular content.
- *   - Callers that write then read MUST treat the two buffers as volatile
- *     across calls; there is no inter-caller ownership protocol.
+ *   - Callers MUST call `cache_buffers_reset()` before first read; the
+ *     helper establishes a known-zero state regardless of prior consumers.
+ *     This is the sole inter-caller ownership protocol — both diag_cache
+ *     and bench_cache invoke it after their skip-checks and before any
+ *     measurement loop, so whichever module runs second sees zeros rather
+ *     than leftover pattern data from the first.
  *   - Buffers are NOT thread-safe. CERBERUS is single-threaded; the only
  *     contention is between diag_cache and bench_cache. Both call during
  *     their respective phases, which are serialized by main.
@@ -31,5 +33,12 @@
  * happens at static link time; there is no runtime failure mode. */
 unsigned char __far *cache_buffers_small(void);
 unsigned char __far *cache_buffers_large(void);
+
+/* Zero both buffers. Callers MUST invoke this before their first read of
+ * either buffer; the helper establishes a known-zero starting state and
+ * is the explicit inter-caller ownership protocol between diag_cache and
+ * bench_cache. Cheap — two _fmemset calls totalling 34 KB, a small cost
+ * paid once per module entry (not per-iteration). */
+void cache_buffers_reset(void);
 
 #endif
