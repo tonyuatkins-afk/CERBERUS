@@ -32,9 +32,10 @@
 
 /* Display buffers per emitted key. report_add_str stores the value
  * pointer verbatim (report.c:55), so stack-local sprintf targets would
- * dangle after detect_audio returns. Two buffers at risk here:
- *   - audio.sb_dsp_version  when SB probe succeeds
- *   - audio.detected        on the DB-miss path (entry == NULL)
+ * dangle after detect_audio returns. Three buffers at risk here:
+ *   - audio.sb_dsp_version     when SB probe succeeds
+ *   - audio.detected           on the DB-miss path (entry == NULL)
+ *   - audio.opl_probe_trace    diagnostic trace (issue #2)
  * Each gets its own static so INI write and UI render see valid bytes.
  *
  * mixer_chip_observed and mixer_chip_expected both point at string
@@ -42,6 +43,15 @@
  * entry's mixer_chip field), so they don't need buffers of their own. */
 static char audio_sb_dsp_version_val[8];
 static char audio_match_key[24];
+
+/* OPL probe diagnostic buffer for issue #2 (Vibra 16 PnP intermittency).
+ * Each probe_opl_at call appends its sequence of status-register reads.
+ * Rendered as audio.opl_probe_trace in the INI so multiple cold-boot
+ * captures can be diffed to identify which byte value differs between
+ * "opl3 detected" runs and "none detected" runs. Format per port:
+ *   <port>:s1=XX[/s1b=XX] s2=XX op=XX,<verdict> ...
+ * with " fallback=<port>..." appended when the primary probe bailed. */
+static char audio_opl_trace[128];
 
 #define OPL_DEFAULT_ADDR 0x388
 #define OPL_DEFAULT_DATA 0x389
@@ -67,12 +77,31 @@ static int parse_blaster_t(int *out_t);
 /* 0x388. Avoids a silent false-negative on CTCM-managed Vibra cards.       */
 /* ----------------------------------------------------------------------- */
 
+/* Append a fragment to the diagnostic trace, bounded by the buffer size
+ * so we never overrun audio_opl_trace regardless of how many fallback
+ * retries append data. Silent truncation is acceptable here; the buffer
+ * is diagnostic, not load-bearing. */
+static void opl_trace_append(const char *fragment)
+{
+    unsigned int cur = 0;
+    unsigned int cap = sizeof(audio_opl_trace);
+    while (cur < cap && audio_opl_trace[cur] != '\0') cur++;
+    while (cur < cap - 1 && *fragment != '\0') {
+        audio_opl_trace[cur++] = *fragment++;
+    }
+    audio_opl_trace[cur] = '\0';
+}
+
 static int probe_opl_at(unsigned int addr_port, unsigned int data_port,
                         int *out_opl3)
 {
-    unsigned char s1, s2;
+    unsigned char s1, s1b, s2, op;
+    char frag[32];
 
     *out_opl3 = 0;
+
+    sprintf(frag, " %04X:", addr_port);
+    opl_trace_append(frag);
 
     /* Reset timers (write 60h to R4) */
     outp(addr_port, 0x04);
@@ -82,12 +111,19 @@ static int probe_opl_at(unsigned int addr_port, unsigned int data_port,
     outp(data_port, 0x80);
     /* Read status — expect bits 7:6 = 00 */
     s1 = (unsigned char)(inp(addr_port) & 0xE0);
+    sprintf(frag, "s1=%02X", s1);
+    opl_trace_append(frag);
     if (s1 != 0) {
         /* OPL in an unexpected state — retry once */
         outp(addr_port, 0x04); outp(data_port, 0x60);
         outp(addr_port, 0x04); outp(data_port, 0x80);
-        s1 = (unsigned char)(inp(addr_port) & 0xE0);
-        if (s1 != 0) return 0;  /* no OPL present */
+        s1b = (unsigned char)(inp(addr_port) & 0xE0);
+        sprintf(frag, "/s1b=%02X", s1b);
+        opl_trace_append(frag);
+        if (s1b != 0) {
+            opl_trace_append(",absent");
+            return 0;  /* no OPL present */
+        }
     }
     /* Set Timer 1 to overflow immediately */
     outp(addr_port, 0x02);
@@ -99,19 +135,29 @@ static int probe_opl_at(unsigned int addr_port, unsigned int data_port,
     timing_wait_us(100UL);
     /* Read status — expect bits 7:6 = 11 if OPL present */
     s2 = (unsigned char)(inp(addr_port) & 0xE0);
+    sprintf(frag, " s2=%02X", s2);
+    opl_trace_append(frag);
     /* Reset */
     outp(addr_port, 0x04);
     outp(data_port, 0x60);
     outp(addr_port, 0x04);
     outp(data_port, 0x80);
 
-    if ((s2 & 0xC0) != 0xC0) return 0;
+    if ((s2 & 0xC0) != 0xC0) {
+        opl_trace_append(",no-overflow");
+        return 0;
+    }
 
     /* OPL2 confirmed. OPL3 detection heuristic: OPL2 returns 0x06 in the
      * low 5 bits of status, OPL3 returns 0x00. */
-    {
-        unsigned char op_status = (unsigned char)(inp(addr_port) & 0x06);
-        if (op_status == 0x00) *out_opl3 = 1;
+    op = (unsigned char)(inp(addr_port) & 0x06);
+    sprintf(frag, " op=%02X", op);
+    opl_trace_append(frag);
+    if (op == 0x00) {
+        *out_opl3 = 1;
+        opl_trace_append(",opl3");
+    } else {
+        opl_trace_append(",opl2");
     }
     return 1;
 }
@@ -119,15 +165,33 @@ static int probe_opl_at(unsigned int addr_port, unsigned int data_port,
 static int probe_opl(int *out_opl3)
 {
     unsigned int sb_base = 0;
+    char frag[32];
+
+    /* Reset the trace buffer once per detect_audio invocation. Subsequent
+     * probe_opl_at calls append their findings in order. */
+    audio_opl_trace[0] = '\0';
 
     /* Prefer BLASTER-base+8 when BLASTER is set — covers CTCM-managed
      * Vibra 16S and similar PnP cards whose Adlib mirror is off. */
     if (parse_blaster(&sb_base) && sb_base != 0) {
-        if (probe_opl_at(sb_base + 0x08, sb_base + 0x09, out_opl3)) return 1;
+        sprintf(frag, "blaster=%04X", sb_base);
+        opl_trace_append(frag);
+        if (probe_opl_at(sb_base + 0x08, sb_base + 0x09, out_opl3)) {
+            opl_trace_append(" result=primary");
+            return 1;
+        }
+        opl_trace_append(" fallback");
+    } else {
+        opl_trace_append("no-blaster");
     }
 
     /* Fallback: industry-standard Adlib port. */
-    return probe_opl_at(OPL_DEFAULT_ADDR, OPL_DEFAULT_DATA, out_opl3);
+    if (probe_opl_at(OPL_DEFAULT_ADDR, OPL_DEFAULT_DATA, out_opl3)) {
+        opl_trace_append(" result=fallback");
+        return 1;
+    }
+    opl_trace_append(" result=none");
+    return 0;
 }
 
 /* ----------------------------------------------------------------------- */
@@ -313,6 +377,14 @@ void detect_audio(result_table_t *t)
         report_add_str(t, "audio.opl", "none",
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
     }
+
+    /* Issue #2 diagnostic: emit the full OPL probe trace so cross-boot
+     * captures can be diffed to find the byte value that differs between
+     * "opl3 detected" and "none detected" runs on the same Vibra 16 PnP
+     * card. Silent-absent on builds without the trace buffer; but the
+     * buffer is always initialized so the emit is always safe. */
+    report_add_str(t, "audio.opl_probe_trace", audio_opl_trace,
+                   env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
 
     /* Sound Blaster (only probed if BLASTER env names a port) */
     if (parse_blaster(&sb_base)) {
