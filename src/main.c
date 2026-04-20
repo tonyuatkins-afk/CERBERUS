@@ -6,6 +6,7 @@
 #include "core/report.h"
 #include "core/crumb.h"
 #include "core/ui.h"
+#include "core/intro.h"
 #include "core/consist.h"
 #include "core/thermal.h"
 #include "core/timing.h"
@@ -116,6 +117,12 @@ int main(int argc, char *argv[])
     unknown_init();
     display_init();
     crumb_check_previous();
+
+    /* Boot splash runs before the text banner. Skipped under /NOUI,
+     * /NOINTRO. Returns with screen cleared and cursor at (0,0) so
+     * display_banner starts on a fresh frame. */
+    intro_splash(&opts);
+
     display_banner();
 
     /* PIT Channel 2 sanity probe — flags the emulator-or-broken hint
