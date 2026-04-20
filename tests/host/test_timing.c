@@ -205,21 +205,28 @@ static void test_compute_dual(void)
     EXPECT_EQ_UL(pit_us, 229974UL, "missed-wrap: pit_us includes extra 65536");
 
     /* target_bios_ticks=1 edge: should NOT bail even with 0 wraps.
-     * c2_wraps + 1 = 1 NOT < 1. */
+     * c2_wraps + 1 = 1 NOT < 1. Post-divergence-check (b6c179b /
+     * 6c3a023) the kernel also rejects inputs where pit_us and
+     * bios_us differ by more than 25%, so the test c2 values are
+     * chosen so sub_ticks approaches the 65536 ceiling: the only
+     * way to make pit_us land within tolerance of bios_us=54925
+     * when c2_wraps=0 is a near-full-wrap sub_ticks count. */
     pit_us = 0; bios_us = 0;
-    rc = timing_compute_dual(0xF000, 0x8000, 0UL, 1UL, 1, &pit_us, &bios_us);
+    rc = timing_compute_dual(0xFFFF, 0x0001, 0UL, 1UL, 1, &pit_us, &bios_us);
     EXPECT_EQ_UL(rc, 0UL, "target=1: rc=0 even with 0 wraps");
-    /* sub_ticks = 0xF000 - 0x8000 = 0x7000 = 28672.
-     * pit_us = (28672 * 838 + 500) / 1000 = 24027
-     * bios_us = 1 * 54925 = 54925 */
-    EXPECT_EQ_UL(pit_us,  24027UL, "target=1: pit_us");
+    /* sub_ticks = 0xFFFF - 0x0001 = 65534.
+     * pit_us = (65534 * 838 + 500) / 1000 = 54917
+     * bios_us = 1 * 54925 = 54925
+     * Divergence: |54925-54917| = 8 us; threshold = 54925/4 = 13731. Pass. */
+    EXPECT_EQ_UL(pit_us,  54917UL, "target=1: pit_us");
     EXPECT_EQ_UL(bios_us, 54925UL, "target=1: bios_us");
 
-    /* target_bios_ticks=0 is treated as 1 by the kernel (defensive —
-     * the HW layer has the same clamp at the top of timing_dual_measure
-     * but the pure kernel enforces it too so it's safe to call directly). */
+    /* target_bios_ticks=0 is treated as 1 by the kernel (defensive:
+     * the HW layer clamps at the top of timing_dual_measure but
+     * the pure kernel enforces it too). Reuses the same
+     * near-full-wrap sub_ticks so the divergence check passes. */
     pit_us = 0; bios_us = 0;
-    rc = timing_compute_dual(0xE000, 0xD000, 0UL, 1UL, 0, &pit_us, &bios_us);
+    rc = timing_compute_dual(0xFFFF, 0x0001, 0UL, 1UL, 0, &pit_us, &bios_us);
     EXPECT_EQ_UL(rc, 0UL, "target=0 treated as 1: rc=0");
 
     /* NULL output pointers are tolerated. */
@@ -246,6 +253,31 @@ static void test_compute_dual(void)
     pit_us = 0xAAAAUL; bios_us = 0xBBBBUL;
     rc = timing_compute_dual(0xE000, 0xD000, 17UL, 16UL, 16, &pit_us, &bios_us);
     EXPECT_EQ_UL(rc, 1UL, "upper-bail edge: wraps=17 bails");
+
+    /* Divergence-check coverage. The kernel rejects measurements
+     * where pit_us and bios_us differ by more than 25% of bios_us,
+     * so biased data never reaches rule 4a. Exercise both the
+     * pit>bios overflow and the bios>pit undercount branches. */
+
+    /* pit >> bios: force a huge pit by passing 4 wraps observed but
+     * claiming target=1 with the wrap-count guard relaxed by using
+     * target_bios_ticks=4 (so line 159 does not bail on 4 wraps).
+     * 4 wraps + small sub = pit near 220 ms; bios = 54925 us (1 tick).
+     * pit is ~4x bios, well over the 25% threshold. */
+    pit_us = 0x1111UL; bios_us = 0x2222UL;
+    rc = timing_compute_dual(0xFFFF, 0xFFF0, 4UL, 1UL, 4, &pit_us, &bios_us);
+    EXPECT_EQ_UL(rc, 1UL, "divergence: pit>>bios rejected");
+    EXPECT_EQ_UL(pit_us,  0x1111UL, "divergence: pit_us untouched");
+    EXPECT_EQ_UL(bios_us, 0x2222UL, "divergence: bios_us untouched");
+
+    /* bios >> pit: already exercised by the target=1 failing-variant
+     * at the old line (c2=0xF000,0x8000,wraps=0,target=1) where pit
+     * was ~24 ms against bios=55 ms. Replicate as explicit coverage. */
+    pit_us = 0x3333UL; bios_us = 0x4444UL;
+    rc = timing_compute_dual(0xF000, 0x8000, 0UL, 1UL, 1, &pit_us, &bios_us);
+    EXPECT_EQ_UL(rc, 1UL, "divergence: bios>>pit rejected");
+    EXPECT_EQ_UL(pit_us,  0x3333UL, "divergence: pit_us untouched");
+    EXPECT_EQ_UL(bios_us, 0x4444UL, "divergence: bios_us untouched");
 }
 
 /* ----------------------------------------------------------------------- */
