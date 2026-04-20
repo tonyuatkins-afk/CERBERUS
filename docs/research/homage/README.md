@@ -112,29 +112,125 @@ copying code structure or algorithms verbatim.
   without an exact match. Community contribution is possible
   but requires a CERBERUS-keys → TOPBENCH-keys mapping; deferred.
 
-## Not authorized / not produced this pass
+## Phase 3, 2026-04-19 evening
 
-- **T3 — CheckIt Whetstone.** Deferred pending v0.4 Whetstone
-  FPU-asm rework decision.
-- **T5 — CheckIt video benchmark methodology.** `bench_video`
-  is already sealed at c507990; lessons can influence v0.5 but
-  not v0.4.
-- **T8 — CACHECHK UMC timer workaround.** Not directly
-  CERBERUS-relevant unless a UMC chipset enters the target set.
-- **T9, T10 — SPEEDSYS.** The `SPEEDSYS.HIS` file was
-  sufficient for Phase 1 understanding at the level CERBERUS
-  needs.
+Seven additional lesson docs shipped under the same ethical
+frame as Phase 2: no decompiled code reproduced, no binaries
+redistributed, attribution preserved, corrections flagged
+openly. Ordered by CERBERUS-issue relevance:
 
-All of the above remain accessible for a future Phase 3 pass if
-the project owner judges the effort warranted.
+### Deferred tasks from Phase 2 now closed
+
+- [`checkit-whetstone-version.md`](checkit-whetstone-version.md)
+  . **T3.** CheckIt's "Whetstones" is NOT a Curnow-Wichmann
+  port. Zero canonical markers (Module 1..11, Curnow, Wichmann,
+  PA, P0, Wichmann constants, MFLOPS). Custom FPU synthetic
+  using the familiar label, mirroring the T2 Dhrystone finding.
+  Direct consequence for issue #4: the 100x gap between
+  CERBERUS's ~109 K-Whet and CheckIt's 11,420 is a label
+  collision, not a port defect. Reframe issue #4 around
+  published Curnow Whetstone reference numbers
+  (1,500-3,000 K-Whet on 486 DX-2-66) instead of CheckIt.
+- [`checkit-video-methodology.md`](checkit-video-methodology.md)
+  . **T5.** CheckIt measures ONLY text-mode video throughput
+  (BIOS Video CPS and Direct Video CPS), never mode 13h. No
+  CheckIt reference exists for CERBERUS's
+  `bench.video.mode13h_kbps`. Reference sources for issue #6's
+  mode 13h bandwidth question must come from tools that
+  actually measure mode 13h: PCPBENCH, 3DBENCH, CHRISB,
+  REPSTOSD.
+- [`cachechk-umc-timer.md`](cachechk-umc-timer.md) . **T8.**
+  CACHECHK uses the same 8254 PIT C2 / C0 cross-check CERBERUS
+  uses in `timing_compute_dual`. Workaround is structural
+  match, not a technique delta. Useful addition from the
+  finding: emit raw forensic values on failure (the "Timer
+  messed up! %08lx %08lx %08lx" pattern) instead of just a
+  "measurement_failed" status string. Filed as v0.5+ Rule 4a
+  enhancement.
+- [`speedsys-methodology.md`](speedsys-methodology.md) . **T9
+  + T10.** SPEEDSYS is Vladimir Afanasiev's Russian-origin
+  benchmark, calibrated to Pentium MMX 200 + ASUS TXP4 rev1.02
+  as its memory-speed-index anchor (later abandoned in v4.76
+  for absolute Peak Bandwidth). Feature matrix overlaps
+  CERBERUS only at pre-CPUID CPU detection; CHKCPU (Phase 2
+  T12) already covers that range better. No CERBERUS action.
+  Attribution correction: Phase 1 notes had Roedy Green;
+  actual author is Vladimir Afanasiev.
+
+### New tasks for issue-#6 second-opinion data
+
+- [`pcpbench-methodology.md`](pcpbench-methodology.md) .
+  **T14.** PCPBENCH by PC Player magazine (Computec Media,
+  Germany, 1995-1996), NOT Jim "Trixter" Leonard as Phase 2
+  planning notes assumed. DOS/4GW 32-bit 3D scene renderer
+  using 16x REP STOSD + 11x REP MOVSD, the theoretical upper
+  bound for DOS-era VRAM throughput. Reports frame rate (fps),
+  not raw bandwidth. Useful as a "does the VLB path work at
+  all" signal if a run on BEK-V409 lands in community-reference
+  fps ranges for 486 DX-2-66 + Trio64 VLB.
+- [`3dbench-methodology.md`](3dbench-methodology.md) . **T15.**
+  3DBENCH v1 and v2 by Superscape VRT Ltd (UK), NOT Future
+  Crew / Paralax as Phase 2 planning notes assumed. Key
+  finding: 3DBENCH reports a **per-frame phase breakdown**
+  (`Mov Prc Srt Clr Drw Cpy Tot Fps`), with Clr as a
+  dedicated column for VRAM-clear time. This is the most
+  directly-comparable reference for CERBERUS's
+  `bench.video.mode13h_kbps`: convert 3DBENCH's Clr ms/frame
+  into KB/s via (64000 / 1024) * (1000 / clr_ms) and
+  compare.
+- [`chrisb-3d-benchmark.md`](chrisb-3d-benchmark.md) . **T16.**
+  "Chris's 3d Benchmark" (VGA) and "Chris's 3d SVGA Benchmark"
+  (VBE 2.0 + S3-specific paths). Author first name only
+  ("Chris", surname not embedded), DJGPP-built 1996. Reports a
+  unitless "Bench Score." SVGA variant's S3-specific code path
+  is particularly interesting for the BEK-V409 Trio64
+  (S3 chipset) VLB system.
+- [`lm60-landmark-speed.md`](lm60-landmark-speed.md) . **T17.**
+  Landmark System Speed Test 6.0 (Landmark Research
+  International Corp, 1993). Tightly packed binary; deeper
+  methodology details not accessible without disassembly. The
+  externally-documented "Landmark Speed" rating uses the same
+  IBM PC/XT anchor CheckIt does (Phase 2 T1 finding). The PC/XT
+  anchor was era convention, not a tool-specific decision.
+  CERBERUS's absolute-numbers approach sidesteps the need.
+
+## Not produced this pass
+
+The corpus still holds three tools untouched that would be
+plausible future Phase 3+ candidates:
+
+- **MTRRLFBE.** A FASTVID-family MTRR write-combining enabler
+  for VESA Linear Framebuffers, UPX-packed. Same category as
+  the T11 FASTVID correction; would need unpacking before
+  useful research.
+- **SYSINFO (Norton Utilities 8, Symantec 1993).** Classic
+  distinguished DOS utility. Detection technique catalog
+  likely to be rich. Full study would be its own pass.
+- **DOOMS and QUAKES.** Full game installations, not
+  benchmarks. id Software's TIMEDEMO mode in these engines
+  provides community-reference fps numbers per timedemo; a
+  separate research pass could extract the measurement
+  methodology from those engines' source (which is now open-
+  source, so the technique is documented upstream).
+
+All deferred; not urgent.
 
 ## Upstream references
 
 - Reinhold Weicker, "Dhrystone: A Synthetic Systems Programming
   Benchmark," *Communications of the ACM*, Oct 1984 + ACM
   SIGPLAN Notices, Aug 1988 (v2.1 revision).
+- Harold J. Curnow and Brian A. Wichmann, "A Synthetic
+  Benchmark," *The Computer Journal*, Vol. 19 No. 1, Feb 1976
+  (original Whetstone algorithm).
 - Intel 80287 / 80387 datasheets (FPU opcode semantics).
+- Intel 8254 datasheet (PIT Channel 0 / 2 timing semantics
+  that CACHECHK and CERBERUS both exploit).
 - IIT 2C87 / 3C87 datasheets (undefined-opcode extensions used
   by CheckIt's vendor discrimination).
+- VESA Bios Extensions (VBE) 1.2 and 2.0 specifications (3D
+  benchmark Linear Framebuffer paths).
+- JEDEC JEP-106 manufacturer identification codes (referenced
+  by SPEEDSYS for DDR SPD analysis).
 - Ben Castricum's UNP 4.11 (DOS executable unpacker, used for
   CACHECHK PKLITE unwrap).
