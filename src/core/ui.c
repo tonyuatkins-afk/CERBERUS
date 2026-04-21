@@ -138,13 +138,13 @@ static const result_t *find_key(const result_table_t *t, const char *key)
  * V_U32 row using the NULL-display anti-DCE pattern (8552c6d) rendered as a
  * blank value in the BENCHMARKS pane, even though the INI emit path formatted
  * them correctly via format_result_value. Observed in v0.4-rc1 BEK-V409
- * screenshot: fpu ops/s, mem write/read/copy, k-whet (LOW) all blank.
+ * screenshot: fpu ops/s, mem write/read/copy, k-whet all blank.
  *
  * Scratch buffer is static. Return pointer is valid until the next call to
  * value_str. Current callers all consume the pointer before re-calling:
- * render_kv_row / render_kv_row_dim_value use it once then exit; render_title
- * passes it straight through bounded_append which copies immediately. Do not
- * hold two value_str results simultaneously (e.g., strcmp(value_str(a),
+ * render_kv_row uses it once then exits; render_title passes it straight
+ * through bounded_append which copies immediately. Do not hold two
+ * value_str results simultaneously (e.g., strcmp(value_str(a),
  * value_str(b))) without copying out first. */
 static const char *value_str(const result_t *r)
 {
@@ -167,7 +167,13 @@ static const char *value_str(const result_t *r)
 }
 
 /* Render a "label   value" row with value right-truncated to fit. Labels
- * are gray; values bright white. Used for detection + benchmark panes. */
+ * are gray; values bright white.
+ *
+ * CONF_LOW values get an explicit " (low conf.)" text marker appended to
+ * the value rather than the historical dim-color rendering. Text is more
+ * robust across adapters (no attribute-degradation surprise on MDA /
+ * Hercules) and self-documenting in screenshots. Falls back to " (low)"
+ * if the primary marker would overflow the value column. */
 static void render_kv_row(int row, int col, int pane_width,
                           const char *label, const result_t *r)
 {
@@ -175,38 +181,56 @@ static void render_kv_row(int row, int col, int pane_width,
     int label_width = 12;            /* fixed-width label column */
     int value_col = col + label_width + 1;
     int value_width = pane_width - label_width - 2;
+    /* Composition buffer: val + " (low conf.)" fits any realistic bench
+     * value. value_str points into its own static scratch; we copy
+     * before we'd risk a second value_str clobber. */
+    static char disp[48];
     int vlen;
+    int slen;
+    int total;
     int i;
+    const char *suffix;
 
     vram_puts(row, col, label, ATTR_NORMAL);
-    /* value */
-    vlen = (int)strlen(val);
-    if (vlen > value_width) {
+
+    /* Pick suffix: primary first, fallback if overflow, none if not LOW. */
+    suffix = "";
+    slen   = 0;
+    vlen   = (int)strlen(val);
+    if (r->confidence == CONF_LOW) {
+        const char *primary  = " (low conf.)";
+        const char *fallback = " (low)";
+        int plen = (int)strlen(primary);
+        int flen = (int)strlen(fallback);
+        if (vlen + plen <= value_width) {
+            suffix = primary;  slen = plen;
+        } else {
+            suffix = fallback; slen = flen;  /* may still trigger truncation */
+        }
+    }
+
+    /* Compose val + suffix into disp[], bounded by disp capacity. */
+    {
+        int cap = (int)sizeof(disp) - 1;
+        int vcap = vlen <= cap ? vlen : cap;
+        int room = cap - vcap;
+        int j;
+        for (i = 0; i < vcap; i++) disp[i] = val[i];
+        for (j = 0; j < slen && j < room; j++) disp[vcap + j] = suffix[j];
+        disp[vcap + j] = '\0';
+    }
+
+    total = (int)strlen(disp);
+    if (total > value_width) {
         /* truncate with trailing '.' indicator */
         for (i = 0; i < value_width - 1; i++) {
-            vram_putc(row, value_col + i, (unsigned char)val[i], ATTR_BOLD);
+            vram_putc(row, value_col + i, (unsigned char)disp[i], ATTR_BOLD);
         }
         vram_putc(row, value_col + value_width - 1, '.', ATTR_DIM);
     } else {
-        for (i = 0; i < vlen; i++) {
-            vram_putc(row, value_col + i, (unsigned char)val[i], ATTR_BOLD);
+        for (i = 0; i < total; i++) {
+            vram_putc(row, value_col + i, (unsigned char)disp[i], ATTR_BOLD);
         }
-    }
-}
-
-/* Like render_kv_row but the value gets CONF_LOW dim formatting. For
- * rows the DB warned on (e.g., whetstone k-whet). */
-static void render_kv_row_dim_value(int row, int col, int pane_width,
-                                    const char *label, const result_t *r)
-{
-    const char *val = value_str(r);
-    int label_width = 12;
-    int value_col = col + label_width + 1;
-    int vlen = (int)strlen(val);
-    int i;
-    vram_puts(row, col, label, ATTR_NORMAL);
-    for (i = 0; i < vlen && i < pane_width - label_width - 2; i++) {
-        vram_putc(row, value_col + i, (unsigned char)val[i], ATTR_DIM);
     }
 }
 
@@ -342,30 +366,27 @@ static void render_detection_pane(const result_table_t *t)
 /* Benchmark pane (right 40 cols)                                           */
 /* ----------------------------------------------------------------------- */
 
-/* Bench rows are grouped by subsystem so the eye can process each cluster
+/* Bench rows grouped by subsystem so the eye can process each cluster
  * without jumping types: CPU/FPU raw values, then memory raw values, then
- * the PC-XT ratio block. k-whet and its ratio stay marked as dim/LOW
- * because Whetstone is still a known-low-confidence measurement (issue #4). */
-typedef struct {
-    const char *key;
-    const char *label;
-    int dim;              /* 1 = render value in CONF_LOW dim style */
-} bench_row_t;
-
-static const bench_row_t bench_rows[] = {
+ * the PC-XT ratio block. The per-row "dim" flag is gone — render_kv_row
+ * now reads confidence directly from the result_t and appends an explicit
+ * " (low conf.)" text marker to any CONF_LOW value. The data owns its
+ * confidence; the UI just surfaces it. k-whet and x-PC-XT-fpu inherit
+ * the marker automatically because bench_whetstone emits at CONF_LOW. */
+static const display_row_t bench_rows[] = {
     /* CPU + FPU raw values */
-    { "bench.cpu.int_iters_per_sec", "cpu int/s",     0 },
-    { "bench.cpu.dhrystones",        "dhrystones",    0 },
-    { "bench.fpu.ops_per_sec",       "fpu ops/s",     0 },
-    { "bench.fpu.k_whetstones",      "k-whet (LOW)",  1 },
+    { "bench.cpu.int_iters_per_sec", "cpu int/s"   },
+    { "bench.cpu.dhrystones",        "dhrystones"  },
+    { "bench.fpu.ops_per_sec",       "fpu ops/s"   },
+    { "bench.fpu.k_whetstones",      "k-whet"      },
     /* Memory raw values */
-    { "bench.memory.write_kbps",     "mem write",     0 },
-    { "bench.memory.read_kbps",      "mem read",      0 },
-    { "bench.memory.copy_kbps",      "mem copy",      0 },
+    { "bench.memory.write_kbps",     "mem write"   },
+    { "bench.memory.read_kbps",      "mem read"    },
+    { "bench.memory.copy_kbps",      "mem copy"    },
     /* PC-XT ratios */
-    { "bench.cpu_xt_factor",         "x PC-XT cpu",   0 },
-    { "bench.mem_xt_factor",         "x PC-XT mem",   0 },
-    { "bench.fpu_xt_factor",         "x PC-XT fpu",   1 }
+    { "bench.cpu_xt_factor",         "x PC-XT cpu" },
+    { "bench.mem_xt_factor",         "x PC-XT mem" },
+    { "bench.fpu_xt_factor",         "x PC-XT fpu" }
 };
 #define BENCH_ROWS_COUNT (sizeof(bench_rows) / sizeof(bench_rows[0]))
 
@@ -383,11 +404,7 @@ static void render_benchmark_pane(const result_table_t *t)
     for (i = 0; i < BENCH_ROWS_COUNT && r <= 14; i++) {
         const result_t *row = find_key(t, bench_rows[i].key);
         if (!row) continue;
-        if (bench_rows[i].dim) {
-            render_kv_row_dim_value(r, 41, 38, bench_rows[i].label, row);
-        } else {
-            render_kv_row(r, 41, 38, bench_rows[i].label, row);
-        }
+        render_kv_row(r, 41, 38, bench_rows[i].label, row);
         r++;
     }
 }
