@@ -2,6 +2,125 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [v0.5.0], 2026-04-20 evening
+
+v0.5.0 is a UI + FPU release. The three-pane fixed-width summary
+retires in favor of a scrollable full-width layout where each
+section (Detection, Benchmarks, System Verdicts) is headed by a
+Cerberus dog head in CP437 block art — the mythology becomes
+literal, three heads guarding three domains. The Whetstone
+benchmark gets a hand-coded x87 assembly kernel, and a Mandelbrot
+set visual fires at the end as a post-run proof-of-life for the
+FPU.
+
+### v0.4.1 UI polish (`3b88d3a`)
+
+Landed first on top of v0.4.0 as a recovery point before the
+v0.5.0 rewrite. Narration rewrites so no consistency-rule text
+truncates in the 48-col SYSTEM VERDICTS pane (the original defect
+hid the exoneration on Rule 4b's "cache diag PASS" branch).
+Human-readable DETECTION labels (`CPU`/`FPU`/`BIOS`/`Emulator` with
+acronym preservation, sentence case elsewhere). `<TAG>` brackets
+for diagnostic heads, `[TAG]` for consistency rules. BENCHMARKS
+grouped by subsystem (CPU/FPU raw, memory raw, PC-XT ratios).
+Runtime `audit_narration_widths` assert in consist.c fires to
+stderr if any narration exceeds 48 cols on-screen after prefix
+strip. Validated on BEK-V409 CRT as `CERB-UI2.EXE` (151,044 B).
+
+### T1 — CONF_LOW text marker (`b769f08`)
+
+Dim-color rendering of CONF_LOW values replaced with an explicit
+`" (low conf.)"` text marker appended at render time. Text is
+adapter-neutral and self-documenting in screenshots;
+render_kv_row_dim_value deleted; per-row dim flags in the bench
+table gone. Data owns its confidence; the UI surfaces it.
+
+### T2 — scrollable three-heads summary (`00d6f6b`)
+
+Full ui.c rewrite. Virtual-row table (80-entry cap) holds one
+entry per content row; viewport renders 24 rows starting at
+scroll_top. Each section is prefixed by a 9x4 CP437 Cerberus dog
+head using the same visual primitives as intro.c (dark-shade
+skull, half-block edges, eye glyph, fang glyph). BIOS INT 16h
+navigation — Up/Dn arrows scroll one row, PgUp/PgDn one viewport,
+Home/End jump top/bottom, Q or Esc exits. Status bar on row 24
+shows current row range ("rows 1-24 of 54") and nav hints.
+
+No information truncation anywhere: the old 8-row VERDICTS pane
+cap silently dropped the 9th verdict on BEK-V409 (Whetstone FPU
+was consistently lost). With the scroll buffer, all verdicts
+display regardless of count. /NOUI now dispatches to
+`ui_render_batch()` which prints the same content as plain text to
+stdout — batch mode preserves the issue-#3 escape hatch while
+still surfacing run results.
+
+### T3 — Whetstone verdict investigation (no code)
+
+Documented: the old `ui_render_consistency_alerts` capped at
+`r <= 24` which is 8 rows in rows 17-24. On BEK-V409 9 verdicts
+fire (cache.status, dma.summary, 7 consistency rules), so the 9th
+(whetstone_fpu, last emitted) was silently dropped. T2's scroll
+buffer self-fixes this.
+
+### T4a — Whetstone x87 asm kernel (`3537c00`)
+
+New file `src/bench/bench_whet_fpu.asm` (NASM). Hand-coded
+Curnow-Wichmann 1976 Whetstone using native x87 (FSIN, FCOS,
+FPATAN, FSQRT, F2XM1, FYL2X). Replaces the Watcom-compiled C
+kernel that was forced through volatile memory traffic for DCE
+suppression. Dispatch: FPU present → asm kernel at CONF_HIGH; no
+FPU → skip (as before). bench_whetstone.c now compiles at -ox
+instead of -od because the asm kernel is opaque to the optimizer
+and owns the DCE-barrier responsibility via its external globals.
+
+Issue #4 stays open. Real-hardware validation on BEK-V409 is the
+next step: the published 486 DX-2-66 envelope is 1500-3000 K-Whet
+and pre-asm C ran ~110. Multi-cold-boot capture needed before the
+CONF_HIGH claim gets anchored.
+
+### T4b — Mandelbrot FPU visual (`e2f3dea`)
+
+`src/bench/bench_mandelbrot.c`. Fires at end of bench_whetstone
+on FPU-equipped VGA-capable machines. VGA mode 13h, 320x200x256.
+Center (-0.6, 0), window [-2.0, 0.8] x [-1.2, 1.2], 64
+iterations. Pixel-by-pixel progressive render so the fractal
+emerges visibly on a 486. DAC palette is a blue → cyan → white
+gradient programmed via 0x3C8/0x3C9. Blocking INT 16h keypress
+exits, mode 3h restores text. /NOUI skips. Non-VGA skips without
+mode-switching.
+
+Not timed, not reported as a measured value. A post-run visual
+coda that makes the tool memorable and proves the FPU is live.
+
+### T4c — forensic-value INI emit for Rule 4b (`b639d6a`)
+
+Rule 4b (cpu_ipc_bench) now emits three additional INI rows when
+it fires on any branch:
+- `consistency.cpu_ipc_bench.measured` (bench iters/sec)
+- `consistency.cpu_ipc_bench.expected_low` (CPU-DB low bound)
+- `consistency.cpu_ipc_bench.expected_high` (CPU-DB high bound)
+
+VERDICT_UNKNOWN on the forensic rows keeps them INI-only (filtered
+from the SYSTEM VERDICTS pane). Post-run readers can reconstruct
+why Rule 4b fired without re-running the tool. Pattern sourced
+from the CACHECHK Phase 3 "Timer messed up! %08lx" forensic-emit
+lesson.
+
+### Build state
+
+- `CERBERUS.EXE`: 146,290 bytes (target <160KB)
+- DGROUP: 54,528 / 56,000 (1,472 bytes headroom)
+- Host tests: 7 suites, 201 OK, 0 failures
+- Version string: `0.5.0`
+
+### Issue posture
+
+- **#1** closed in v0.4.1 work (test_timing reassertions).
+- **#3** closed pre-v0.5.0 (UI hang cannot reproduce).
+- **#4** OPEN — Whetstone calibration needs multi-cold-boot
+  BEK-V409 capture.
+- **#6** OPEN — VLB bandwidth investigation continues.
+
 ## [Unreleased, post-v0.4.0], 2026-04-19 evening through 2026-04-20
 
 Development work on `main` past the `v0.4.0` tag. Not yet
