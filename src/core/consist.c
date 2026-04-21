@@ -408,6 +408,22 @@ static void rule_cpu_ipc_bench(result_table_t *t)
     hi    = r_high->v.u;
     if (iters == 0 || lo == 0 || hi == 0 || lo > hi) return;
 
+    /* Forensic-value emit (CACHECHK Phase 3 pattern). The screen
+     * narration condenses the signal to "bench below range; cache OK,
+     * check TSR/thermal" and similar — the raw numbers that drove the
+     * verdict live here as INI-only rows so a post-run reader can
+     * reconstruct why Rule 4b fired without re-running the tool.
+     *
+     * VERDICT_UNKNOWN gates these out of the UI's SYSTEM VERDICTS
+     * pane (is_verdict_row rejects UNKNOWN verdicts). INI consumers
+     * pick them up through the full key-value dump. */
+    report_add_u32(t, "consistency.cpu_ipc_bench.measured",
+                   iters, (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(t, "consistency.cpu_ipc_bench.expected_low",
+                   lo, (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_u32(t, "consistency.cpu_ipc_bench.expected_high",
+                   hi, (const char *)0, CONF_HIGH, VERDICT_UNKNOWN);
+
     if (iters >= lo && iters <= hi) {
         (void)iters; (void)lo; (void)hi;  /* raw values on BENCHMARKS pane + INI */
         sprintf(msg_rule4b_pass,
