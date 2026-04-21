@@ -23,4 +23,10 @@ verdict_t diag_cache_classify_ratio_x100(unsigned long ratio_x100,
                                          const char **out_msg_prefix);
 verdict_t diag_dma_summary_verdict(int ch_pass, int ch_fail, int ch_skip);
 
+/* v0.6.0 visual journey hooks. Called after the corresponding
+ * diagnostic/benchmark completes and the verdict has been emitted.
+ * Each honors journey_should_skip() on entry and no-ops on /NOUI,
+ * /QUICK, or after the skip-all latch. */
+void diag_bit_parade(const opts_t *o);
+
 #endif

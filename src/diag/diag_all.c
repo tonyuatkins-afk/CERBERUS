@@ -15,9 +15,10 @@
 
 void diag_all(result_table_t *t, const opts_t *o)
 {
-    (void)o;
     puts("[diagnose] running...");
     WRAP_DIAG("cpu",   diag_cpu(t));
+    /* v0.6.0 T2: visual journey hook — bit parade after CPU ALU diag. */
+    diag_bit_parade(o);
     WRAP_DIAG("mem",   diag_mem(t));
     WRAP_DIAG("fpu",   diag_fpu(t));
     WRAP_DIAG("video", diag_video(t));
