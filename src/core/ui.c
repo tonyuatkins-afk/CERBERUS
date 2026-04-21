@@ -1,39 +1,39 @@
 /*
- * Post-detection three-pane summary renderer.
+ * Scrollable three-heads summary UI — v0.5.0.
  *
- * Replaces the minimum-viable v0.2 text-panel output with a screenshot-
- * quality 80×25 text-mode layout:
+ * Three full-width vertical sections (Detection, Benchmarks, System
+ * Verdicts), each headed by a Cerberus dog head in CP437 block art
+ * echoing the intro.c emblem at section-header scale. The mythology
+ * is now literal: three heads, each guarding a different domain of
+ * what the tool reports.
  *
- *   Row 0       Title bar (full width, bright attribute)
- *   Row 1       Double-line separator
- *   Rows 2-14   DETECTION pane (left 40 cols) │ BENCHMARK pane (right 40 cols)
- *   Row 15      Double-line separator
- *   Rows 16-24  CONSISTENCY VERDICTS pane (full width)
+ * Rendering model: a single virtual-row table (vrows[]) holds one
+ * entry per logical content row (head-art row, horizontal rule, k/v
+ * row, verdict row). The viewport displays 24 rows of that table
+ * starting at scroll_top. No per-cell pre-render — each vrow is drawn
+ * on demand from its type + data, so memory footprint is ~1 KB for
+ * the vrow table, flat.
  *
- * Color scheme on VGA / EGA color / MCGA:
- *   Title bar          yellow-on-blue
- *   Pane headers       bright cyan
- *   Labels             gray
- *   Values             bright white
- *   Verdict PASS       bright green
- *   Verdict WARN       bright yellow
- *   Verdict FAIL       bright red
- *   CONF_LOW tag       dim
+ * Navigation via BIOS INT 16h (8088 compatible):
+ *   Up / Down arrow    scroll one row
+ *   PgUp / PgDn        scroll one viewport
+ *   Home / End         jump to top / bottom
+ *   Q or Esc           exit to DOS
  *
- * On MDA / Hercules / EGA_MONO / VGA_MONO the attribute byte still
- * applies (intensity + underline + inverse) — ATTR_BOLD for values,
- * ATTR_INVERSE for verdict WARN/FAIL. Color-class attributes degrade
- * to something visually distinguishable on monochrome.
+ * Row 24 hosts the status bar (position indicator + nav hints).
+ * No information is truncated or dropped — a run with 100 verdicts
+ * scrolls cleanly through 100 verdicts.
  *
- * Direct VRAM writes are used (B800:0000 color / B000:0000 mono) rather
- * than BIOS INT 10h teletype, because teletype does not set the cell's
- * attribute byte in text mode — colors require AH=09h or direct VRAM.
- * Direct VRAM is faster and simpler for a single-frame render.
+ * Adapter compatibility: VRAM base selection same as v0.4
+ * (B800 color / B000 mono). Head-art glyphs are CP437 primitives
+ * that render identically on every adapter that renders the intro.
+ * On MDA / Hercules the body color degrades to high-intensity white;
+ * eyes and fangs stay bright.
  *
- * v0.3 scope: /NOUI bypass still works — main.c guards the render call
- * and this module never touches VRAM when the flag is set. UI hang
- * investigation (issue #3) is not reproducing on current state; the
- * stash remains preserved should a future session need to re-instrument.
+ * /NOUI path: ui_render_batch() prints a plain-text rendition of the
+ * virtual rows to stdout without touching VRAM. Main.c dispatches
+ * based on opts->no_ui. Preserves the escape hatch for real-iron
+ * UI-render hangs (issue #3).
  */
 
 #include <stdio.h>
@@ -44,14 +44,44 @@
 #include "../core/report.h"
 
 /* ----------------------------------------------------------------------- */
+/* Geometry                                                                 */
+/* ----------------------------------------------------------------------- */
+
+#define VRAM_COLS       80
+#define VRAM_ROWS       25
+#define VIEWPORT_ROWS   24    /* rows 0..23 display content; row 24 = status */
+
+/* Head art — 9 cols wide, 4 rows tall, positioned with a 3-col left margin
+ * so there's room for the status-bar scroll-position glyph on the right. */
+#define HEAD_LEFT_COL   3
+#define HEAD_WIDTH      9
+#define HEAD_HEIGHT     4
+#define TITLE_COL       14    /* section title begins here, past the head */
+#define KV_LABEL_COL    4     /* k/v label start */
+#define KV_LABEL_WIDTH  14    /* wider than v0.4's 12 to fit "Conv memory" */
+#define KV_VALUE_COL    (KV_LABEL_COL + KV_LABEL_WIDTH + 1)
+#define KV_VALUE_MAX    (VRAM_COLS - KV_VALUE_COL - 2)
+
+#define VERDICT_TAG_COL     4    /* "<TAG>" or "[TAG]" starts here */
+#define VERDICT_LABEL_COL   11   /* display label starts here */
+#define VERDICT_LABEL_WIDTH 20
+#define VERDICT_NARR_COL    (VERDICT_LABEL_COL + VERDICT_LABEL_WIDTH + 1)
+#define VERDICT_NARR_MAX    (VRAM_COLS - VERDICT_NARR_COL - 2)
+
+/* Head-art glyphs. Kept local — the only ui.c consumers outside intro.c.
+ * Codes match intro.c's G_* defines. */
+#define G_HEAD_BODY  0xB2  /* CP437 dark shade — skull body */
+#define G_HEAD_HDN   0xDC  /* lower half block — top arc */
+#define G_HEAD_HUP   0xDF  /* upper half block — jaw arc */
+#define G_HEAD_HLT   0xDD  /* right half block — anchors left edge */
+#define G_HEAD_HRT   0xDE  /* left half block — anchors right edge */
+#define G_HEAD_EYE   0x09  /* hollow bullet — eye */
+#define G_HEAD_FANG  0x1F  /* down-pointing triangle — fang */
+
+/* ----------------------------------------------------------------------- */
 /* VRAM helpers                                                             */
 /* ----------------------------------------------------------------------- */
 
-#define VRAM_COLS   80
-#define VRAM_ROWS   25
-
-/* Returns the correct VRAM base segment for the detected adapter. Called
- * once per render function; cheap enough to not cache. */
 static unsigned char __far *vram_base(void)
 {
     adapter_t a = display_adapter();
@@ -62,9 +92,13 @@ static unsigned char __far *vram_base(void)
     return (unsigned char __far *)MK_FP(0xB800, 0x0000);
 }
 
-/* Set the terminal cursor position via BIOS INT 10h AH=02h. Called after
- * rendering so the DOS prompt lands below the UI, leaving rows 0-23
- * intact for screenshot capture. */
+static int ui_is_mono(void)
+{
+    adapter_t a = display_adapter();
+    return (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
+            a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO);
+}
+
 static void vram_cursor(int row, int col)
 {
     union REGS r;
@@ -75,8 +109,6 @@ static void vram_cursor(int row, int col)
     int86(0x10, &r, &r);
 }
 
-/* Write a single character+attribute pair to the given cell. No bounds
- * check — caller ensures 0<=row<25, 0<=col<80. */
 static void vram_putc(int row, int col, unsigned char ch, unsigned char attr)
 {
     unsigned char __far *v = vram_base();
@@ -85,8 +117,6 @@ static void vram_putc(int row, int col, unsigned char ch, unsigned char attr)
     v[off + 1] = attr;
 }
 
-/* Write a null-terminated string at (row, col). Truncates at col 80
- * silently — the caller is responsible for pane-boundary discipline. */
 static void vram_puts(int row, int col, const char *s, unsigned char attr)
 {
     while (*s && col < VRAM_COLS) {
@@ -94,10 +124,6 @@ static void vram_puts(int row, int col, const char *s, unsigned char attr)
     }
 }
 
-/* Fill a row-range with a single character and attribute. Used to clear
- * the screen at the start of render before drawing, so leftover scroll
- * text from [benchmark] running... output doesn't show through empty
- * cells in the layout. */
 static void vram_fill(int row_start, int row_end,
                       unsigned char ch, unsigned char attr)
 {
@@ -109,8 +135,6 @@ static void vram_fill(int row_start, int row_end,
     }
 }
 
-/* Draw a horizontal double-line run from col_start to col_end inclusive
- * on the given row. Used for pane separators. */
 static void vram_hline_double(int row, int col_start, int col_end,
                               unsigned char attr)
 {
@@ -133,19 +157,9 @@ static const result_t *find_key(const result_table_t *t, const char *key)
     return (const result_t *)0;
 }
 
-/* Mirror of report.c's format_result_value. Before this, value_str returned
- * "" for any row where r->display was NULL and r->type != V_STR — so every
- * V_U32 row using the NULL-display anti-DCE pattern (8552c6d) rendered as a
- * blank value in the BENCHMARKS pane, even though the INI emit path formatted
- * them correctly via format_result_value. Observed in v0.4-rc1 BEK-V409
- * screenshot: fpu ops/s, mem write/read/copy, k-whet all blank.
- *
- * Scratch buffer is static. Return pointer is valid until the next call to
- * value_str. Current callers all consume the pointer before re-calling:
- * render_kv_row uses it once then exits; render_title passes it straight
- * through bounded_append which copies immediately. Do not hold two
- * value_str results simultaneously (e.g., strcmp(value_str(a),
- * value_str(b))) without copying out first. */
+/* Mirror of report.c's format_result_value. Scratch buffer is static.
+ * Return pointer is valid until the next call. Callers that compose
+ * with the returned string must copy it out before re-calling. */
 static const char *value_str(const result_t *r)
 {
     static char scratch[32];
@@ -166,38 +180,82 @@ static const char *value_str(const result_t *r)
     return "";
 }
 
-/* Render a "label   value" row with value right-truncated to fit. Labels
- * are gray; values bright white.
- *
- * CONF_LOW values get an explicit " (low conf.)" text marker appended to
- * the value rather than the historical dim-color rendering. Text is more
- * robust across adapters (no attribute-degradation surprise on MDA /
- * Hercules) and self-documenting in screenshots. Falls back to " (low)"
- * if the primary marker would overflow the value column. */
-static void render_kv_row(int row, int col, int pane_width,
-                          const char *label, const result_t *r)
+/* ----------------------------------------------------------------------- */
+/* Head rendering                                                           */
+/* ----------------------------------------------------------------------- */
+
+/* Draw one row (0..3) of a 9-col Cerberus head starting at HEAD_LEFT_COL
+ * on the given screen row. body_attr = skull body color, eye_attr = eye
+ * and fang highlight color. */
+static void render_head_row(int screen_row, int head_row,
+                            unsigned char body_attr, unsigned char eye_attr)
 {
-    const char *val = value_str(r);
-    int label_width = 12;            /* fixed-width label column */
-    int value_col = col + label_width + 1;
-    int value_width = pane_width - label_width - 2;
-    /* Composition buffer: val + " (low conf.)" fits any realistic bench
-     * value. value_str points into its own static scratch; we copy
-     * before we'd risk a second value_str clobber. */
-    static char disp[48];
-    int vlen;
-    int slen;
-    int total;
-    int i;
-    const char *suffix;
+    int c = HEAD_LEFT_COL;
+    switch (head_row) {
+    case 0:  /* Top arc */
+        vram_putc(screen_row, c++, ' ',         body_attr);
+        vram_putc(screen_row, c++, G_HEAD_HDN,  body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_HDN,  body_attr);
+        vram_putc(screen_row, c++, ' ',         body_attr);
+        break;
+    case 1:  /* Skull shoulders */
+        vram_putc(screen_row, c++, G_HEAD_HRT,  body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_HLT,  body_attr);
+        break;
+    case 2:  /* Eye line */
+        vram_putc(screen_row, c++, G_HEAD_HRT,  body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_EYE,  eye_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_EYE,  eye_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_HLT,  body_attr);
+        break;
+    case 3:  /* Lower jaw with fangs */
+        vram_putc(screen_row, c++, ' ',         body_attr);
+        vram_putc(screen_row, c++, G_HEAD_HUP,  body_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_FANG, eye_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_FANG, eye_attr);
+        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
+        vram_putc(screen_row, c++, G_HEAD_HUP,  body_attr);
+        vram_putc(screen_row, c++, ' ',         body_attr);
+        break;
+    default: break;
+    }
+}
 
-    vram_puts(row, col, label, ATTR_NORMAL);
+/* ----------------------------------------------------------------------- */
+/* K/V row + verdict row renderers                                          */
+/* ----------------------------------------------------------------------- */
 
-    /* Pick suffix: primary first, fallback if overflow, none if not LOW. */
-    suffix = "";
-    slen   = 0;
-    vlen   = (int)strlen(val);
-    if (r->confidence == CONF_LOW) {
+/* Write val + optional CONF_LOW text marker into disp[], bounded by cap. */
+static void compose_value(char *disp, int cap,
+                          const char *val, int conf_low, int value_width)
+{
+    int vlen = (int)strlen(val);
+    int vcap = vlen <= cap ? vlen : cap;
+    int room = cap - vcap;
+    const char *suffix = "";
+    int slen = 0;
+    int i, j;
+
+    if (conf_low) {
         const char *primary  = " (low conf.)";
         const char *fallback = " (low)";
         int plen = (int)strlen(primary);
@@ -209,266 +267,38 @@ static void render_kv_row(int row, int col, int pane_width,
         }
     }
 
-    /* Compose val + suffix into disp[], bounded by disp capacity. */
-    {
-        int cap = (int)sizeof(disp) - 1;
-        int vcap = vlen <= cap ? vlen : cap;
-        int room = cap - vcap;
-        int j;
-        for (i = 0; i < vcap; i++) disp[i] = val[i];
-        for (j = 0; j < slen && j < room; j++) disp[vcap + j] = suffix[j];
-        disp[vcap + j] = '\0';
-    }
+    for (i = 0; i < vcap; i++) disp[i] = val[i];
+    for (j = 0; j < slen && j < room; j++) disp[vcap + j] = suffix[j];
+    disp[vcap + j] = '\0';
+}
 
+static void render_kv(int screen_row, const char *label, const result_t *r)
+{
+    const char *val = value_str(r);
+    static char disp[64];
+    int total, i;
+
+    vram_puts(screen_row, KV_LABEL_COL, label, ATTR_NORMAL);
+    compose_value(disp, (int)sizeof(disp) - 1, val,
+                  r->confidence == CONF_LOW, KV_VALUE_MAX);
     total = (int)strlen(disp);
-    if (total > value_width) {
-        /* truncate with trailing '.' indicator */
-        for (i = 0; i < value_width - 1; i++) {
-            vram_putc(row, value_col + i, (unsigned char)disp[i], ATTR_BOLD);
+    if (total > KV_VALUE_MAX) {
+        for (i = 0; i < KV_VALUE_MAX - 1; i++) {
+            vram_putc(screen_row, KV_VALUE_COL + i,
+                      (unsigned char)disp[i], ATTR_BOLD);
         }
-        vram_putc(row, value_col + value_width - 1, '.', ATTR_DIM);
+        vram_putc(screen_row, KV_VALUE_COL + KV_VALUE_MAX - 1,
+                  '.', ATTR_DIM);
     } else {
         for (i = 0; i < total; i++) {
-            vram_putc(row, value_col + i, (unsigned char)disp[i], ATTR_BOLD);
+            vram_putc(screen_row, KV_VALUE_COL + i,
+                      (unsigned char)disp[i], ATTR_BOLD);
         }
     }
 }
 
-/* ----------------------------------------------------------------------- */
-/* Title bar                                                                */
-/* ----------------------------------------------------------------------- */
+/* Verdict row support — same tag/attr/label tables as v0.4.1. */
 
-/* Safely append `src` to `dst[]` without overrunning `cap`. Treats
- * `*dst_len` as the current length (not including the trailing NUL).
- * Truncates silently at cap-1 so the buffer always stays NUL-terminated.
- * Written as a separate helper because the title bar is the ONE place
- * in the UI that concatenates multiple variable-length strings into a
- * fixed-size buffer, and sprintf can silently overflow past its format-
- * width guards (F1 of the UI review — was the most likely cause of the
- * historical UI hang in issue #3 on machines with verbose cpu.detected
- * / video.chipset strings). Belt-and-suspenders bounded concat.
- */
-static void bounded_append(char *dst, int *dst_len, int cap, const char *src)
-{
-    int room = cap - 1 - *dst_len;
-    if (room <= 0 || src == NULL) return;
-    while (*src && room > 0) {
-        dst[*dst_len] = *src++;
-        (*dst_len)++;
-        room--;
-    }
-    dst[*dst_len] = '\0';
-}
-
-static void render_title(const result_table_t *t)
-{
-    const result_t *cpu  = find_key(t, "cpu.detected");
-    const result_t *vid  = find_key(t, "video.chipset");
-    const result_t *bios = find_key(t, "bios.date");
-    /* 81 bytes = 80 display columns + trailing NUL. We use bounded_append
-     * throughout rather than sprintf to guarantee no overrun regardless
-     * of detected-value length. */
-    char line[VRAM_COLS + 1];
-    int  len = 0;
-    char sep[4];
-
-    /* Compose: " CERBERUS <ver> = <cpu> / <video> / <bios>"  */
-    line[0] = '\0';
-    bounded_append(line, &len, VRAM_COLS + 1, " CERBERUS ");
-#ifdef CERBERUS_VERSION
-    bounded_append(line, &len, VRAM_COLS + 1, CERBERUS_VERSION);
-#else
-    bounded_append(line, &len, VRAM_COLS + 1, "dev");
-#endif
-    /* Use a literal ' = ' as the separator rather than CP437_DBL_HORIZ —
-     * the inline byte shows up cleanly on any adapter without the %c
-     * cast-width game the sprintf path played. */
-    bounded_append(line, &len, VRAM_COLS + 1, " ");
-    sep[0] = (char)CP437_DBL_HORIZ;
-    sep[1] = ' ';
-    sep[2] = '\0';
-    bounded_append(line, &len, VRAM_COLS + 1, sep);
-    bounded_append(line, &len, VRAM_COLS + 1, cpu  ? value_str(cpu)  : "(cpu ?)");
-    bounded_append(line, &len, VRAM_COLS + 1, " / ");
-    bounded_append(line, &len, VRAM_COLS + 1, vid  ? value_str(vid)  : "(video ?)");
-    bounded_append(line, &len, VRAM_COLS + 1, " / ");
-    bounded_append(line, &len, VRAM_COLS + 1, bios ? value_str(bios) : "(bios ?)");
-
-    /* Fill full row with title-bar attribute (yellow on blue), then
-     * overlay the composed string starting at col 0. */
-    {
-        int c;
-        unsigned char title_attr = 0x1E;  /* yellow on blue */
-        for (c = 0; c < VRAM_COLS; c++) {
-            vram_putc(0, c, ' ', title_attr);
-        }
-        vram_puts(0, 0, line, title_attr);
-    }
-
-    /* Row 1: full-width double-line separator */
-    vram_hline_double(1, 0, VRAM_COLS - 1, ATTR_NORMAL);
-}
-
-/* ----------------------------------------------------------------------- */
-/* Detection pane (left 40 cols)                                            */
-/* ----------------------------------------------------------------------- */
-
-typedef struct {
-    const char *key;
-    const char *label;
-} display_row_t;
-
-/* Display labels are human-readable; INI keys stay unchanged for machine
- * parsing. Acronyms get full caps (CPU, FPU, BIOS, DMA); plain nouns get
- * sentence case. Sub-property rows keep a two-space indent to show the
- * parent-child visual relationship. F/M/Step is the universal CPUID
- * leaf-01h shorthand and preserves the indent — the full phrase
- * "Family/Model/Step" (17 chars) does not fit the 12-wide label column.
- * environment.emulator renders as "Emulator" so the value "none" reads
- * as "no emulator detected" instead of the ambiguous "env: none". */
-static const display_row_t detect_rows[] = {
-    { "environment.emulator",      "Emulator" },
-    { "cpu.detected",              "CPU" },
-    { "cpu.family_model_stepping", "  F/M/Step" },
-    { "fpu.friendly",              "FPU" },
-    { "memory.conventional_kb",    "Conv memory" },
-    { "memory.extended_kb",        "Ext memory" },
-    { "cache.present",             "Cache" },
-    { "bus.class",                 "Bus" },
-    { "video.adapter",             "Video" },
-    { "video.chipset",             "  Chipset" },
-    { "audio.detected",            "Audio" },
-    { "bios.family",               "BIOS" },
-    { "bios.date",                 "  Date" }
-};
-#define DETECT_ROWS_COUNT (sizeof(detect_rows) / sizeof(detect_rows[0]))
-
-static void render_detection_pane(const result_table_t *t)
-{
-    unsigned int i;
-    int r = 3;
-
-    /* Pane header row 2: "DETECTION" in cyan, centered-ish with shade bars */
-    vram_putc(2, 1, CP437_SHADE_DARK, ATTR_CYAN);
-    vram_putc(2, 2, ' ', ATTR_CYAN);
-    vram_puts(2, 3, "DETECTION", ATTR_BOLD);
-    vram_putc(2, 13, ' ', ATTR_CYAN);
-
-    for (i = 0; i < DETECT_ROWS_COUNT && r <= 14; i++) {
-        const result_t *row = find_key(t, detect_rows[i].key);
-        if (!row) continue;
-        render_kv_row(r, 1, 38, detect_rows[i].label, row);
-        r++;
-    }
-}
-
-/* ----------------------------------------------------------------------- */
-/* Benchmark pane (right 40 cols)                                           */
-/* ----------------------------------------------------------------------- */
-
-/* Bench rows grouped by subsystem so the eye can process each cluster
- * without jumping types: CPU/FPU raw values, then memory raw values, then
- * the PC-XT ratio block. The per-row "dim" flag is gone — render_kv_row
- * now reads confidence directly from the result_t and appends an explicit
- * " (low conf.)" text marker to any CONF_LOW value. The data owns its
- * confidence; the UI just surfaces it. k-whet and x-PC-XT-fpu inherit
- * the marker automatically because bench_whetstone emits at CONF_LOW. */
-static const display_row_t bench_rows[] = {
-    /* CPU + FPU raw values */
-    { "bench.cpu.int_iters_per_sec", "cpu int/s"   },
-    { "bench.cpu.dhrystones",        "dhrystones"  },
-    { "bench.fpu.ops_per_sec",       "fpu ops/s"   },
-    { "bench.fpu.k_whetstones",      "k-whet"      },
-    /* Memory raw values */
-    { "bench.memory.write_kbps",     "mem write"   },
-    { "bench.memory.read_kbps",      "mem read"    },
-    { "bench.memory.copy_kbps",      "mem copy"    },
-    /* PC-XT ratios */
-    { "bench.cpu_xt_factor",         "x PC-XT cpu" },
-    { "bench.mem_xt_factor",         "x PC-XT mem" },
-    { "bench.fpu_xt_factor",         "x PC-XT fpu" }
-};
-#define BENCH_ROWS_COUNT (sizeof(bench_rows) / sizeof(bench_rows[0]))
-
-static void render_benchmark_pane(const result_table_t *t)
-{
-    unsigned int i;
-    int r = 3;
-
-    /* Pane header at row 2, right half */
-    vram_putc(2, 41, CP437_SHADE_DARK, ATTR_CYAN);
-    vram_putc(2, 42, ' ', ATTR_CYAN);
-    vram_puts(2, 43, "BENCHMARKS", ATTR_BOLD);
-    vram_putc(2, 54, ' ', ATTR_CYAN);
-
-    for (i = 0; i < BENCH_ROWS_COUNT && r <= 14; i++) {
-        const result_t *row = find_key(t, bench_rows[i].key);
-        if (!row) continue;
-        render_kv_row(r, 41, 38, bench_rows[i].label, row);
-        r++;
-    }
-}
-
-/* Vertical divider at col 40 between detection and benchmark panes. */
-static void render_vertical_divider(void)
-{
-    int r;
-    for (r = 2; r <= 14; r++) {
-        vram_putc(r, 40, CP437_DBL_VERT, ATTR_NORMAL);
-    }
-}
-
-/* ----------------------------------------------------------------------- */
-/* Public: summary = title + detection pane + benchmark pane                */
-/* ----------------------------------------------------------------------- */
-
-void ui_render_summary(const result_table_t *t, const opts_t *o)
-{
-    (void)o;
-
-    /* Clear the UI region (rows 0-24) so scrolled stdout from earlier
-     * detect/diag/bench output doesn't bleed through empty cells. */
-    vram_fill(0, 24, ' ', ATTR_NORMAL);
-
-    render_title(t);
-    render_vertical_divider();
-    render_detection_pane(t);
-    render_benchmark_pane(t);
-
-    /* Row 15 separator between top half and consistency panel */
-    vram_hline_double(15, 0, VRAM_COLS - 1, ATTR_NORMAL);
-}
-
-/* ----------------------------------------------------------------------- */
-/* Consistency-verdict pane (rows 16-24, full width)                        */
-/* ----------------------------------------------------------------------- */
-
-/* Classify a verdict into a color attribute + 4-char tag. */
-static unsigned char verdict_attr(verdict_t v)
-{
-    switch (v) {
-        case VERDICT_PASS: return 0x0A;   /* bright green */
-        case VERDICT_WARN: return 0x0E;   /* bright yellow */
-        case VERDICT_FAIL: return 0x0C;   /* bright red */
-        default:           return 0x07;   /* gray */
-    }
-}
-
-static const char *verdict_tag(verdict_t v)
-{
-    switch (v) {
-        case VERDICT_PASS: return "PASS";
-        case VERDICT_WARN: return "WARN";
-        case VERDICT_FAIL: return "FAIL";
-        default:           return "????";
-    }
-}
-
-/* Map a prefix-stripped verdict key to a human-readable display label.
- * Acronyms get full caps; plain words get sentence case. Falls back to
- * the stripped key verbatim for any unmapped future rule — new rules
- * render correctly even before their display label lands here. Label
- * column is 20 chars wide (cols 9-28); every entry here fits. */
 typedef struct {
     const char *stripped_key;
     const char *display;
@@ -505,106 +335,161 @@ static const char *verdict_display_label(const char *stripped_key)
     return stripped_key;
 }
 
-/* Render one verdict row:  <TAG> display_label    explanation...   (diag)
- *                          [TAG] display_label    explanation...   (rule)
- * Angle brackets mark diagnostic heads (measured behavior). Square
- * brackets mark consistency rules (inferred relationships). The visual
- * distinction is zero-cost: no row budget consumed, and the discrimination
- * falls out of the existing prefix check used for label stripping. */
-static void render_verdict_row(int row, const result_t *r)
+static unsigned char verdict_attr(verdict_t v)
 {
-    /* Strip the sub-tree prefix so the label column shows the
-     * distinguishing tail, not the redundant category. The same prefix
-     * check also drives the bracket style: diagnose.* → <TAG>,
-     * consistency.* → [TAG]. Any future verdict-source prefix would need
-     * its own bracket convention. */
+    switch (v) {
+        case VERDICT_PASS: return 0x0A;  /* bright green */
+        case VERDICT_WARN: return 0x0E;  /* bright yellow */
+        case VERDICT_FAIL: return 0x0C;  /* bright red */
+        default:           return 0x07;
+    }
+}
+
+static const char *verdict_tag(verdict_t v)
+{
+    switch (v) {
+        case VERDICT_PASS: return "PASS";
+        case VERDICT_WARN: return "WARN";
+        case VERDICT_FAIL: return "FAIL";
+        default:           return "????";
+    }
+}
+
+/* Strip prefix, pick bracket style. Returns open/close bracket chars via
+ * out parameters; returns the stripped key string. */
+static const char *verdict_strip_key(const char *key,
+                                     unsigned char *open_br,
+                                     unsigned char *close_br)
+{
+    if (strncmp(key, "consistency.", 12) == 0) {
+        *open_br  = '[';
+        *close_br = ']';
+        return key + 12;
+    }
+    if (strncmp(key, "diagnose.", 9) == 0) {
+        *open_br  = '<';
+        *close_br = '>';
+        return key + 9;
+    }
+    *open_br  = '[';
+    *close_br = ']';
+    return key;
+}
+
+/* Strip the "pass (" / "WARN: " / "FAIL: " / "pass " prefix from the
+ * narration text so it doesn't duplicate the tag column. Returns a
+ * pointer into the original string. Also sets *strip_trailing_paren to 1
+ * if we matched the "pass (" form so the caller can drop the closing ')'. */
+static const char *narration_strip_prefix(const char *v, int *strip_trailing)
+{
+    *strip_trailing = 0;
+    if (strncmp(v, "pass (", 6) == 0) { *strip_trailing = 1; return v + 6; }
+    if (strncmp(v, "WARN: ", 6) == 0) return v + 6;
+    if (strncmp(v, "FAIL: ", 6) == 0) return v + 6;
+    if (strncmp(v, "WARN (", 6) == 0) { *strip_trailing = 1; return v + 6; }
+    if (strncmp(v, "pass ",  5) == 0) return v + 5;
+    return v;
+}
+
+static void render_verdict(int screen_row, const result_t *r)
+{
+    const char *val = value_str(r);
     const char *stripped;
     const char *label;
-    const char *val = value_str(r);
+    const char *narr;
+    int strip_trailing = 0;
     unsigned char va = verdict_attr(r->verdict);
-    const char *tag = verdict_tag(r->verdict);
     unsigned char open_br, close_br;
+    const char *tag = verdict_tag(r->verdict);
+    int i;
 
-    if (strncmp(r->key, "consistency.", 12) == 0) {
-        stripped = r->key + 12;
-        open_br  = '[';
-        close_br = ']';
-    } else if (strncmp(r->key, "diagnose.", 9) == 0) {
-        stripped = r->key + 9;
-        open_br  = '<';
-        close_br = '>';
-    } else {
-        stripped = r->key;
-        open_br  = '[';
-        close_br = ']';
-    }
-    label = verdict_display_label(stripped);
+    stripped = verdict_strip_key(r->key, &open_br, &close_br);
+    label    = verdict_display_label(stripped);
 
-    /* "<TAG>" or "[TAG]" at col 2-7 */
-    vram_putc(row, 2, open_br,  ATTR_NORMAL);
-    vram_putc(row, 3, (unsigned char)tag[0], va);
-    vram_putc(row, 4, (unsigned char)tag[1], va);
-    vram_putc(row, 5, (unsigned char)tag[2], va);
-    vram_putc(row, 6, (unsigned char)tag[3], va);
-    vram_putc(row, 7, close_br, ATTR_NORMAL);
+    /* Bracket + tag */
+    vram_putc(screen_row, VERDICT_TAG_COL,     open_br,  ATTR_NORMAL);
+    vram_putc(screen_row, VERDICT_TAG_COL + 1, (unsigned char)tag[0], va);
+    vram_putc(screen_row, VERDICT_TAG_COL + 2, (unsigned char)tag[1], va);
+    vram_putc(screen_row, VERDICT_TAG_COL + 3, (unsigned char)tag[2], va);
+    vram_putc(screen_row, VERDICT_TAG_COL + 4, (unsigned char)tag[3], va);
+    vram_putc(screen_row, VERDICT_TAG_COL + 5, close_br, ATTR_NORMAL);
 
-    /* display label at col 9-28 (20 wide, bold) */
+    /* Display label (bold, max 20 chars) */
     {
-        int c = 9;
-        int i;
+        int c = VERDICT_LABEL_COL;
         int klen = (int)strlen(label);
-        if (klen > 20) klen = 20;
+        if (klen > VERDICT_LABEL_WIDTH) klen = VERDICT_LABEL_WIDTH;
         for (i = 0; i < klen; i++) {
-            vram_putc(row, c++, (unsigned char)label[i], ATTR_BOLD);
+            vram_putc(screen_row, c++, (unsigned char)label[i], ATTR_BOLD);
         }
     }
 
-    /* explanation (condensed — strip leading "pass (" / "WARN: " / "FAIL:
-     * " tokens since the tag already conveys verdict). Starts col 30,
-     * runs to col 78. */
+    /* Narration — now runs to cols up through 77 (VERDICT_NARR_MAX chars).
+     * Truncation indicator still supported as a safety net, but at the new
+     * width few narrations will reach it. */
+    narr = narration_strip_prefix(val, &strip_trailing);
     {
-        const char *v = val;
-        /* Skip any well-known leading verdict tokens to avoid duplication
-         * with the [TAG] column. Matches on "pass (", "WARN: ", "FAIL: ",
-         * "WARN ", "FAIL ", case-insensitive variations. */
-        if (strncmp(v, "pass (", 6) == 0) {
-            v += 6;
-            /* also trim trailing ')' to match */
-        } else if (strncmp(v, "WARN: ", 6) == 0) v += 6;
-        else if (strncmp(v, "FAIL: ", 6) == 0) v += 6;
-        else if (strncmp(v, "WARN (", 6) == 0) v += 6;
-        else if (strncmp(v, "pass ",  5) == 0) v += 5;
-
-        {
-            int c = 30;
-            int maxcol = 78;
-            /* Reserve the last cell (col 78) for a truncation indicator
-             * IF we run out of payload. Write payload chars up to col 77,
-             * then if still-more-payload, place indicator at col 78. Fixes
-             * S3 of the UI review (the old logic overwrote a real payload
-             * char AND used 0xAE = « instead of 0xAF = »). */
-            while (*v && c < maxcol) {
-                /* skip trailing ')' on the "pass (...)" variant */
-                if (*v == ')' && v[1] == '\0') break;
-                vram_putc(row, c++, (unsigned char)*v++, va);
-            }
-            if (*v && *v != ')') {
-                /* Payload remaining — mark truncation at col 78 with the
-                 * right-pointing double-guillemet (CP437 0xAF = »). */
-                vram_putc(row, maxcol, (unsigned char)0xAF, ATTR_DIM);
-            }
+        int c = VERDICT_NARR_COL;
+        int maxcol = VERDICT_NARR_COL + VERDICT_NARR_MAX;
+        while (*narr && c < maxcol) {
+            if (strip_trailing && *narr == ')' && narr[1] == '\0') break;
+            vram_putc(screen_row, c++, (unsigned char)*narr++, va);
+        }
+        if (*narr && !(strip_trailing && *narr == ')' && narr[1] == '\0')) {
+            vram_putc(screen_row, maxcol, (unsigned char)0xAF, ATTR_DIM);
         }
     }
 }
 
-/* True if this result row contributes a meaningful verdict to the pane.
- * Includes: consistency.* (the dedicated rule engine) AND diagnose.cache.status
- * + diagnose.dma.summary (the two v0.3 diagnostics whose summary carries a
- * real PASS/WARN/FAIL verdict, the rest of diagnose.* is either already
- * aggregated under those two or shows up as detail rows that don't need
- * their own line). S5 of the UI review — without this, the v0.3 diag_cache
- * and diag_dma results are screenshot-invisible despite being the
- * headlining new v0.3 features. */
+/* ----------------------------------------------------------------------- */
+/* Display-row tables                                                       */
+/* ----------------------------------------------------------------------- */
+
+typedef struct {
+    const char *key;
+    const char *label;
+} display_row_t;
+
+/* DETECTION. Labels unchanged from v0.4.1; the 14-wide label column in
+ * this layout means all labels fit with comfortable room. */
+static const display_row_t detect_rows[] = {
+    { "environment.emulator",      "Emulator" },
+    { "cpu.detected",              "CPU" },
+    { "cpu.family_model_stepping", "  F/M/Step" },
+    { "fpu.friendly",              "FPU" },
+    { "memory.conventional_kb",    "Conv memory" },
+    { "memory.extended_kb",        "Ext memory" },
+    { "cache.present",             "Cache" },
+    { "bus.class",                 "Bus" },
+    { "video.adapter",             "Video" },
+    { "video.chipset",             "  Chipset" },
+    { "audio.detected",            "Audio" },
+    { "bios.family",               "BIOS" },
+    { "bios.date",                 "  Date" }
+};
+#define DETECT_ROWS_COUNT (sizeof(detect_rows) / sizeof(detect_rows[0]))
+
+/* BENCHMARKS. Grouped by subsystem: CPU/FPU raw values first, then
+ * memory raw values, then the PC-XT ratio block. CONF_LOW rows get the
+ * " (low conf.)" marker automatically via render_kv. */
+static const display_row_t bench_rows[] = {
+    /* CPU + FPU raw values */
+    { "bench.cpu.int_iters_per_sec", "CPU int/s"   },
+    { "bench.cpu.dhrystones",        "Dhrystones"  },
+    { "bench.fpu.ops_per_sec",       "FPU ops/s"   },
+    { "bench.fpu.k_whetstones",      "K-Whet"      },
+    /* Memory raw values */
+    { "bench.memory.write_kbps",     "Mem write"   },
+    { "bench.memory.read_kbps",      "Mem read"    },
+    { "bench.memory.copy_kbps",      "Mem copy"    },
+    /* PC-XT ratios */
+    { "bench.cpu_xt_factor",         "x PC-XT CPU" },
+    { "bench.mem_xt_factor",         "x PC-XT mem" },
+    { "bench.fpu_xt_factor",         "x PC-XT FPU" }
+};
+#define BENCH_ROWS_COUNT (sizeof(bench_rows) / sizeof(bench_rows[0]))
+
+/* True if this result row contributes a meaningful verdict to the pane. */
 static int is_verdict_row(const result_t *r)
 {
     if (r->verdict == VERDICT_UNKNOWN) return 0;
@@ -614,37 +499,345 @@ static int is_verdict_row(const result_t *r)
     return 0;
 }
 
-void ui_render_consistency_alerts(const result_table_t *t)
+/* ----------------------------------------------------------------------- */
+/* Virtual row model                                                        */
+/* ----------------------------------------------------------------------- */
+
+typedef enum {
+    VROW_BLANK = 0,
+    VROW_HEAD,       /* head-art row, maybe with section title */
+    VROW_HLINE,      /* horizontal rule below a section head */
+    VROW_KV,         /* label + result_t */
+    VROW_VERDICT     /* verdict row */
+} vrow_type_t;
+
+typedef struct {
+    vrow_type_t type;
+    union {
+        struct {
+            unsigned char head_row;  /* 0..3 */
+            const char *title;       /* non-NULL on the title row only */
+        } head;
+        struct {
+            const char *label;
+            const result_t *r;
+        } kv;
+        struct {
+            const result_t *r;
+        } verdict;
+    } u;
+} vrow_t;
+
+#define MAX_VROWS 80
+static vrow_t vrows[MAX_VROWS];
+static int    vrow_count;
+
+static void vrow_push(vrow_t v)
+{
+    if (vrow_count < MAX_VROWS) vrows[vrow_count++] = v;
+}
+
+static void vrow_blank(void)
+{
+    vrow_t v;
+    v.type = VROW_BLANK;
+    vrow_push(v);
+}
+
+static void vrow_head(int head_row, const char *title)
+{
+    vrow_t v;
+    v.type = VROW_HEAD;
+    v.u.head.head_row = (unsigned char)head_row;
+    v.u.head.title    = title;
+    vrow_push(v);
+}
+
+static void vrow_hline(void)
+{
+    vrow_t v;
+    v.type = VROW_HLINE;
+    vrow_push(v);
+}
+
+static void vrow_kv(const char *label, const result_t *r)
+{
+    vrow_t v;
+    v.type = VROW_KV;
+    v.u.kv.label = label;
+    v.u.kv.r     = r;
+    vrow_push(v);
+}
+
+static void vrow_verdict(const result_t *r)
+{
+    vrow_t v;
+    v.type = VROW_VERDICT;
+    v.u.verdict.r = r;
+    vrow_push(v);
+}
+
+/* Build one section: head art (4 rows, title on row 1) + hline + rows. */
+static void build_section_head(const char *title)
+{
+    vrow_head(0, (const char *)0);
+    vrow_head(1, title);
+    vrow_head(2, (const char *)0);
+    vrow_head(3, (const char *)0);
+    vrow_hline();
+}
+
+static void build_section_detection(const result_table_t *t)
 {
     unsigned int i;
-    int r = 17;
-    int n_verdicts = 0;
+    build_section_head("DETECTION");
+    for (i = 0; i < DETECT_ROWS_COUNT; i++) {
+        const result_t *r = find_key(t, detect_rows[i].key);
+        if (r) vrow_kv(detect_rows[i].label, r);
+    }
+}
 
-    /* Pane header at row 16 — renamed to "SYSTEM VERDICTS" to reflect
-     * that diagnose-head cache + DMA verdicts now appear alongside the
-     * consistency-rule verdicts. */
-    vram_putc(16, 1, CP437_SHADE_DARK, ATTR_CYAN);
-    vram_putc(16, 2, ' ', ATTR_CYAN);
-    vram_puts(16, 3, "SYSTEM VERDICTS", ATTR_BOLD);
-    vram_putc(16, 19, ' ', ATTR_CYAN);
+static void build_section_benchmarks(const result_table_t *t)
+{
+    unsigned int i;
+    build_section_head("BENCHMARKS");
+    for (i = 0; i < BENCH_ROWS_COUNT; i++) {
+        const result_t *r = find_key(t, bench_rows[i].key);
+        if (r) vrow_kv(bench_rows[i].label, r);
+    }
+}
 
-    /* Render each qualifying row — consistency.* and the two diagnose.*
-     * summaries with explicit verdicts. */
-    for (i = 0; i < t->count && r <= 24; i++) {
-        const result_t *row = &t->results[i];
-        if (!is_verdict_row(row)) continue;
-        render_verdict_row(r, row);
-        r++;
-        n_verdicts++;
+static void build_section_verdicts(const result_table_t *t)
+{
+    unsigned int i;
+    build_section_head("SYSTEM VERDICTS");
+    for (i = 0; i < t->count; i++) {
+        const result_t *r = &t->results[i];
+        if (is_verdict_row(r)) vrow_verdict(r);
+    }
+}
+
+static void build_all_vrows(const result_table_t *t)
+{
+    vrow_count = 0;
+    build_section_detection(t);
+    vrow_blank();
+    build_section_benchmarks(t);
+    vrow_blank();
+    build_section_verdicts(t);
+}
+
+/* ----------------------------------------------------------------------- */
+/* Viewport rendering                                                       */
+/* ----------------------------------------------------------------------- */
+
+static void render_vrow_to_screen(int screen_row, const vrow_t *v)
+{
+    unsigned char body_attr, eye_attr;
+    if (ui_is_mono()) {
+        body_attr = ATTR_BOLD;
+        eye_attr  = ATTR_BOLD;
+    } else {
+        body_attr = ATTR_CYAN;
+        eye_attr  = ATTR_YELLOW;
     }
 
-    if (n_verdicts == 0) {
-        vram_puts(17, 2, "(no verdicts applicable to this run)", ATTR_DIM);
+    switch (v->type) {
+    case VROW_BLANK:
+        break;  /* already cleared */
+    case VROW_HEAD:
+        render_head_row(screen_row, v->u.head.head_row, body_attr, eye_attr);
+        if (v->u.head.title) {
+            vram_puts(screen_row, TITLE_COL, v->u.head.title, ATTR_BOLD);
+        }
+        break;
+    case VROW_HLINE:
+        vram_hline_double(screen_row, HEAD_LEFT_COL,
+                          VRAM_COLS - 2, ATTR_NORMAL);
+        break;
+    case VROW_KV:
+        if (v->u.kv.r) render_kv(screen_row, v->u.kv.label, v->u.kv.r);
+        break;
+    case VROW_VERDICT:
+        if (v->u.verdict.r) render_verdict(screen_row, v->u.verdict.r);
+        break;
     }
+}
 
-    /* Position cursor at row 24 col 0 so when CERBERUS exits to DOS the
-     * prompt lands below the UI region. Rows 0-23 remain intact for
-     * screenshot capture. Row 24 will be overwritten by the DOS prompt
-     * but the rest of the frame stays visible. */
-    vram_cursor(24, 0);
+static void render_viewport(int scroll_top)
+{
+    int i;
+    vram_fill(0, VIEWPORT_ROWS - 1, ' ', ATTR_NORMAL);
+    for (i = 0; i < VIEWPORT_ROWS; i++) {
+        int vidx = scroll_top + i;
+        if (vidx >= vrow_count) break;
+        render_vrow_to_screen(i, &vrows[vidx]);
+    }
+}
+
+/* Status bar shows scroll position + nav hints. Rendered in reverse-video
+ * so it stands apart from the content area above. */
+static void render_status_bar(int scroll_top, int fits_in_one_page)
+{
+    static char buf[VRAM_COLS + 1];
+    int end_row = scroll_top + VIEWPORT_ROWS;
+    int c;
+
+    if (end_row > vrow_count) end_row = vrow_count;
+    for (c = 0; c < VRAM_COLS; c++) {
+        vram_putc(VIEWPORT_ROWS, c, ' ', ATTR_INVERSE);
+    }
+    if (fits_in_one_page) {
+        sprintf(buf, " CERBERUS %s  "
+                     "%d rows  |  Any key to exit ",
+                CERBERUS_VERSION, vrow_count);
+    } else {
+        sprintf(buf, " CERBERUS %s  "
+                     "rows %d-%d of %d  |  "
+                     "Up/Dn PgUp/PgDn Home/End  Q:exit ",
+                CERBERUS_VERSION, scroll_top + 1, end_row, vrow_count);
+    }
+    vram_puts(VIEWPORT_ROWS, 0, buf, ATTR_INVERSE);
+}
+
+/* ----------------------------------------------------------------------- */
+/* Keyboard navigation                                                      */
+/* ----------------------------------------------------------------------- */
+
+typedef enum {
+    NAV_UP, NAV_DOWN, NAV_PGUP, NAV_PGDN, NAV_HOME, NAV_END,
+    NAV_EXIT, NAV_OTHER
+} nav_key_t;
+
+static nav_key_t read_nav_key(void)
+{
+    union REGS r;
+    r.h.ah = 0x00;  /* blocking read */
+    int86(0x16, &r, &r);
+    if (r.h.al == 0) {
+        /* extended key, AH is scan code */
+        switch (r.h.ah) {
+        case 0x48: return NAV_UP;
+        case 0x50: return NAV_DOWN;
+        case 0x49: return NAV_PGUP;
+        case 0x51: return NAV_PGDN;
+        case 0x47: return NAV_HOME;
+        case 0x4F: return NAV_END;
+        }
+        return NAV_OTHER;
+    }
+    switch (r.h.al) {
+    case 'q': case 'Q': case 0x1B:
+        return NAV_EXIT;
+    }
+    return NAV_OTHER;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Public entry points                                                      */
+/* ----------------------------------------------------------------------- */
+
+void ui_render_summary(const result_table_t *t, const opts_t *o)
+{
+    int scroll_top = 0;
+    int max_scroll;
+    int fits;
+    (void)o;
+
+    build_all_vrows(t);
+
+    fits = (vrow_count <= VIEWPORT_ROWS);
+    max_scroll = fits ? 0 : vrow_count - VIEWPORT_ROWS;
+
+    for (;;) {
+        render_viewport(scroll_top);
+        render_status_bar(scroll_top, fits);
+        if (fits) {
+            /* wait for any key, exit */
+            union REGS r;
+            r.h.ah = 0x00;
+            int86(0x16, &r, &r);
+            break;
+        }
+        switch (read_nav_key()) {
+        case NAV_UP:
+            if (scroll_top > 0) scroll_top--;
+            break;
+        case NAV_DOWN:
+            if (scroll_top < max_scroll) scroll_top++;
+            break;
+        case NAV_PGUP:
+            scroll_top -= VIEWPORT_ROWS;
+            if (scroll_top < 0) scroll_top = 0;
+            break;
+        case NAV_PGDN:
+            scroll_top += VIEWPORT_ROWS;
+            if (scroll_top > max_scroll) scroll_top = max_scroll;
+            break;
+        case NAV_HOME:
+            scroll_top = 0;
+            break;
+        case NAV_END:
+            scroll_top = max_scroll;
+            break;
+        case NAV_EXIT:
+            vram_cursor(VIEWPORT_ROWS, 0);
+            return;
+        case NAV_OTHER:
+            break;
+        }
+    }
+    vram_cursor(VIEWPORT_ROWS, 0);
+}
+
+/* The consistency alerts are now rendered inline as the third section of
+ * ui_render_summary. This entry point is preserved as a no-op for ABI
+ * compatibility with anything that calls both functions in sequence. */
+void ui_render_consistency_alerts(const result_table_t *t)
+{
+    (void)t;
+}
+
+/* /NOUI batch mode: print the virtual rows as plain text to stdout without
+ * touching VRAM. Same content as the interactive renderer; same visual
+ * contract (section titles, k/v pairs, verdict brackets) in ASCII. */
+void ui_render_batch(const result_table_t *t)
+{
+    int i;
+    build_all_vrows(t);
+
+    for (i = 0; i < vrow_count; i++) {
+        const vrow_t *v = &vrows[i];
+        switch (v->type) {
+        case VROW_BLANK:
+            printf("\n");
+            break;
+        case VROW_HEAD:
+            if (v->u.head.title) printf("\n=== %s ===\n", v->u.head.title);
+            break;
+        case VROW_HLINE:
+            break;  /* visual-only separator suppressed in batch */
+        case VROW_KV:
+            if (v->u.kv.r) {
+                const char *val = value_str(v->u.kv.r);
+                printf("  %-14s %s%s\n",
+                       v->u.kv.label, val,
+                       v->u.kv.r->confidence == CONF_LOW ? " (low conf.)" : "");
+            }
+            break;
+        case VROW_VERDICT:
+            if (v->u.verdict.r) {
+                const result_t *r = v->u.verdict.r;
+                unsigned char ob, cb;
+                const char *stripped = verdict_strip_key(r->key, &ob, &cb);
+                const char *label    = verdict_display_label(stripped);
+                int strip_trailing = 0;
+                const char *narr = narration_strip_prefix(value_str(r),
+                                                          &strip_trailing);
+                printf("  %c%s%c %-20s %s\n",
+                       ob, verdict_tag(r->verdict), cb, label, narr);
+            }
+            break;
+        }
+    }
 }

@@ -3,19 +3,24 @@
 
 #include "../cerberus.h"
 
-/* Render a post-detection summary view with confidence meters.
- *
- * v0.2 minimum: formatted text output (no full-screen box draw — that's
- * follow-up polish). Shows the key canonical signature fields from the
- * result_table plus confidence indicators. Called from main() after
- * report_write_ini + unknown_finalize.
+/* Render the post-run summary in the v0.5.0 scrollable three-heads UI.
+ * Builds a virtual row table covering Detection, Benchmarks, and System
+ * Verdicts sections (each headed by a Cerberus dog head in CP437 block
+ * art) and enters a BIOS INT 16h navigation loop. Exits on Q or Esc.
+ * Called from main() after report_write_ini + unknown_finalize.
  */
 void ui_render_summary(const result_table_t *t, const opts_t *o);
 
-/* Render consistency-flag alert boxes for every rule that failed or
- * warned. The signature visual moment — "HARDWARE CLAIMS X, MEASURES Y"
- * as a CP437 double-line-framed panel. Silent if every rule passed.
- * Called from main() after ui_render_summary. */
+/* v0.4.x compatibility stub. The consistency verdicts are rendered
+ * inline as the third section of ui_render_summary in v0.5.0; this
+ * function is a no-op, preserved so external callers or plug-ins that
+ * invoke both in sequence continue to link. */
 void ui_render_consistency_alerts(const result_table_t *t);
+
+/* /NOUI batch mode: print the same content as ui_render_summary but
+ * as plain text to stdout, no VRAM writes, no interactive scroll.
+ * Preserves the escape hatch for real-iron UI-render hangs (issue #3)
+ * while still surfacing the run results. */
+void ui_render_batch(const result_table_t *t);
 
 #endif

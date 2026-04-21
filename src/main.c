@@ -174,9 +174,13 @@ int main(int argc, char *argv[])
      * we just want the UNK preserved for the same resilience. */
     unknown_finalize();
 
-    if (!opts.no_ui) {
+    /* UI dispatch:
+     *   /NOUI  → batch text to stdout, no interactive scroll
+     *   normal → interactive scrollable three-heads summary */
+    if (opts.no_ui) {
+        ui_render_batch(&table);
+    } else {
         ui_render_summary(&table, &opts);
-        ui_render_consistency_alerts(&table);
     }
 
     if (opts.do_upload) {
