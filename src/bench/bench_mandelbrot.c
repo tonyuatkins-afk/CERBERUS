@@ -33,6 +33,7 @@
 #include <conio.h>
 #include "bench.h"
 #include "../core/display.h"
+#include "../core/journey.h"
 
 #define MB_WIDTH    320
 #define MB_HEIGHT   200
@@ -122,10 +123,15 @@ void bench_mandelbrot_demo(const opts_t *o)
     int px, py;
     unsigned char color;
 
-    if (o && o->no_ui) return;
+    if (journey_should_skip(o)) return;
 
     adapter = display_adapter();
     if (adapter != ADAPTER_VGA_COLOR && adapter != ADAPTER_MCGA) return;
+
+    /* v0.6.0 T8: no dedicated title card here — the FPU Benchmark
+     * title card fires at the start of bench_whetstone, which then
+     * runs the Whetstone measurement and dispatches to this Mandelbrot
+     * visual. One section, one card. */
 
     dx = (MB_X_MAX - MB_X_MIN) / (double)MB_WIDTH;
     dy = (MB_Y_MAX - MB_Y_MIN) / (double)MB_HEIGHT;

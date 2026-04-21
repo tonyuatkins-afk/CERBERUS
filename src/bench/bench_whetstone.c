@@ -29,6 +29,7 @@
 #include "bench.h"
 #include "../core/timing.h"
 #include "../core/report.h"
+#include "../core/journey.h"
 
 /* ------------------------------------------------------------------- */
 /* Asm-kernel interface                                                 */
@@ -100,6 +101,18 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
         report_add_str(t, "bench.fpu.whetstone_status", "skipped_no_fpu",
                        CONF_HIGH, VERDICT_UNKNOWN);
         return;
+    }
+
+    /* v0.6.0 T8: title card for the FPU Benchmark section. Covers both
+     * the timed Whetstone measurement (below) and the Mandelbrot visual
+     * that fires at the end. */
+    if (journey_title_card(o, HEAD_CENTER,
+                           "FPU BENCHMARK",
+                           "Measuring floating-point throughput with "
+                           "Whetstone. Then your FPU renders a "
+                           "Mandelbrot fractal in real time.") == 1) {
+        /* skip-all latched; still emit the measurement + row, skip
+         * visuals only. Mandelbrot will no-op. */
     }
 
     /* Warmup */

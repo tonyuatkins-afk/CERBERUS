@@ -63,6 +63,7 @@
 #include "../core/timing.h"
 #include "../core/report.h"
 #include "../core/display.h"
+#include "../core/journey.h"
 
 #define BENCH_VIDEO_TEXT_BYTES   4096U
 #define BENCH_VIDEO_TEXT_ITERS   5000UL
@@ -320,7 +321,14 @@ static int bench_video_mode13h(result_table_t *t)
 void bench_video(result_table_t *t, const opts_t *o)
 {
     int any_zero = 0;
-    (void)o;
+    /* v0.6.0 T8: title card framing for the Video Bandwidth section.
+     * The pattern fill IS the visual — the measurement and the
+     * demonstration are the same code path. */
+    (void)journey_title_card(o, HEAD_CENTER,
+                             "VIDEO BANDWIDTH",
+                             "Measuring how fast your CPU can push "
+                             "pixels to your video card's frame buffer. "
+                             "The pattern you see IS the measurement.");
     /* Warn the user before obliterating their display: the text-mode
      * bench writes ~20 MB through live VRAM (visible garble for ~1 sec)
      * and the mode 13h bench clears the screen via INT 10h mode switch.
