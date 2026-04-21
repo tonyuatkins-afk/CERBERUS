@@ -2,6 +2,110 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [v0.7.0-rc1], 2026-04-20 evening — Part A of Community Upload
+
+**Status**: Release candidate. Tag is `v0.7.0-rc1`, NOT `v0.7.0`. Per
+the v0.7.0 brief, the full `v0.7.0` tag is reserved until Part B
+(server + results browser in a separate repo) is deployed and an
+end-to-end round-trip has been validated on real hardware. This
+release is the DOS client side complete + documented + waiting.
+
+Part A ships the full upload-client infrastructure: network transport
+detection, INI format freeze with stable API contract, command-line
+flags, prompt UI, HTTP POST via HTGET shell-out, and UPLOAD STATUS
+section in the scrollable summary.
+
+### T0 — INI format freeze + server contract
+
+`[cerberus]` section gains `ini_format=1` — the server-parser API
+switch. Additive INI changes (new keys, new sections) stay at
+`ini_format=1`; breaking changes would bump. Documented in
+`docs/ini-format.md`.
+
+Upload contract specified in `docs/ini-upload-contract.md`: endpoint
+URL, request format, response format, which INI fields the server
+parses, error handling. Written BEFORE Part B so the server session
+inherits it as a requirements spec instead of a blank page.
+
+### T1 — Network transport detection
+
+New module `src/detect/network.{c,h}`. Probes at startup:
+
+  1. NetISA via INT 63h (reserved for v0.8.0 TLS; stub detector)
+  2. Packet driver via INT 60h-7Fh scan for "PKT DRVR" signature
+     at handler offset +3
+  3. mTCP via `MTCP_CFG` env var
+  4. WATTCP via `WATTCP` / `WATTCP_CFG` env var
+  5. `none` — offline
+
+Emits `[network] transport=<value>`. All probes are non-destructive
+IVT reads + env lookups; safe on 8088 and every adapter.
+
+### T2 — Upload prompt
+
+After detection + journey + summary build, the upload orchestrator
+checks network state. If online and not `/NOUPLOAD` / `/UPLOAD`,
+prompts `"Upload results to barelybooting.com? (Y/n)"`. Default Y;
+Enter / Y proceeds; N / Esc skips.
+
+### T3 — HTTP POST via HTGET shell-out
+
+v0.7.0 uses mTCP's `HTGET` as the HTTP client (spec-driven choice
+from the brief). Command:
+
+```
+HTGET -P CERBERUS.INI -m text/plain http://barelybooting.com/api/v1/submit > UPLOAD.TMP
+```
+
+Parses response from `UPLOAD.TMP`: line 1 = submission ID, line 2 = URL.
+Clean failure modes on connection refused, DNS miss, non-200, timeout.
+If `HTGET.EXE` is absent from PATH, prints install instructions and
+skips with status=`no_client` — never crashes.
+
+The exact HTGET flag syntax may need field-verification during the
+first real deploy; it's encapsulated in one `#define HTGET_CMD_FMT`
+line for easy adjustment. Raw TCP over packet driver (no mTCP)
+remains deferred to v0.8.0+ per the brief.
+
+### T4 — Command-line flags
+
+  `/NOUPLOAD`     never prompt, never upload
+  `/UPLOAD`       upload without prompting (auto-yes)
+  `/NICK:<name>`  nickname (alnum + space + hyphen, max 32, sanitized)
+  `/NOTE:<text>`  note (printable ASCII, max 128)
+
+Help text + synopsis updated.
+
+### T5 — UPLOAD STATUS summary section
+
+New fourth section in the scrollable summary, after SYSTEM VERDICTS.
+Uses HEAD_CENTER (forward-facing, "sending data outward" fits the
+direction metaphor; avoids proliferating head variants).
+
+Rows shown (each skips if empty):
+  Network:    packet driver / mtcp / wattcp / offline
+  Status:     uploaded / skipped / offline / failed / no_client
+  Submission: 8-char hex id (populated after 200 response)
+  URL:        public view URL (same)
+  Nickname:   if `/NICK` set
+  Notes:      if `/NOTE` set
+
+### Build state
+
+- CERBERUS.EXE: 163,922 bytes (target <185KB ✓)
+- DGROUP: 59,008 bytes (past Tony's 56K soft target but well under
+  DOS 64KB limit — acceptable per v0.6.1 "exceed is OK" sign-off)
+- Host tests: 7 suites, 201 OK, 0 failures
+- Version string: `0.7.0-rc1`
+- Tag: `v0.7.0-rc1` (not v0.7.0)
+
+### Held back
+
+- **Tag `v0.7.0`** reserved until Part B server exists and an
+  end-to-end POST round-trip is validated on BEK-V409.
+- **Part B server** is a separate project / repo / Claude session.
+  Contract is defined in `docs/ini-upload-contract.md`.
+
 ## [v0.6.2], 2026-04-20 evening
 
 Cleanup + SB DSP direct-mode PCM audio path.

@@ -147,6 +147,7 @@ void report_hardware_signature(const result_table_t *t, char out_hex[9])
 /* Preferred section order — everything else sorts alphabetically after these. */
 static const char *const section_order[] = {
     "cerberus",
+    "network",       /* v0.7.0 T1: transport detection result */
     "environment",
     "cpu",
     "fpu",
@@ -158,7 +159,8 @@ static const char *const section_order[] = {
     "bios",
     "diagnose",
     "bench",
-    "consistency"
+    "consistency",
+    "upload"         /* v0.7.0: nickname + note + status after POST */
 };
 #define SECTION_ORDER_COUNT (sizeof(section_order) / sizeof(section_order[0]))
 
@@ -262,6 +264,9 @@ static void emit_cerberus_section(const result_table_t *t, const opts_t *o,
     buf_writef("version=%s\n", CERBERUS_VERSION);
     buf_writef("schema_version=%s\n", CERBERUS_SCHEMA_VERSION);
     buf_writef("signature_schema=%s\n", CERBERUS_SIGNATURE_SCHEMA);
+    /* v0.7.0: ini_format is the API contract with the upload server.
+     * Bump only on breaking changes (additive changes stay at 1). */
+    buf_writef("ini_format=%s\n", CERBERUS_INI_FORMAT);
     buf_writef("mode=%s\n",
                o->mode == MODE_CALIBRATED ? "calibrated" : "quick");
     buf_writef("runs=%u\n", (unsigned int)o->runs);

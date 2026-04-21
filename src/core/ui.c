@@ -585,6 +585,37 @@ static void build_section_verdicts(const result_table_t *t)
     }
 }
 
+/* v0.7.0: UPLOAD STATUS section. Uses HEAD_CENTER (forward-facing,
+ * "sending data outward" fits the direction metaphor). Each row is a
+ * plain k/v pointing at a network.* or upload.* result. */
+static const display_row_t upload_status_rows[] = {
+    { "network.transport",      "Network"     },
+    { "upload.status",          "Status"      },
+    { "upload.submission_id",   "Submission"  },
+    { "upload.url",             "URL"         },
+    { "upload.nickname",        "Nickname"    },
+    { "upload.notes",           "Notes"       }
+};
+#define UPLOAD_STATUS_ROWS_COUNT \
+    (sizeof(upload_status_rows) / sizeof(upload_status_rows[0]))
+
+static void build_section_upload(const result_table_t *t)
+{
+    unsigned int i;
+    build_section_head(HEAD_CENTER, "UPLOAD STATUS");
+    for (i = 0; i < UPLOAD_STATUS_ROWS_COUNT; i++) {
+        const result_t *r = find_key(t, upload_status_rows[i].key);
+        /* Skip rows with absent / empty values so the pane doesn't
+         * clutter on offline runs (no Submission / URL if we didn't
+         * upload). Always-present rows (Network, Status) still render
+         * since detect_network always emits transport and upload
+         * always sets status. */
+        if (!r) continue;
+        if (r->type == V_STR && (!r->v.s || r->v.s[0] == '\0')) continue;
+        vrow_kv(upload_status_rows[i].label, r);
+    }
+}
+
 static void build_all_vrows(const result_table_t *t)
 {
     vrow_count = 0;
@@ -593,6 +624,8 @@ static void build_all_vrows(const result_table_t *t)
     build_section_benchmarks(t);
     vrow_blank();
     build_section_verdicts(t);
+    vrow_blank();
+    build_section_upload(t);
 }
 
 /* ----------------------------------------------------------------------- */

@@ -1,9 +1,15 @@
 #ifndef CERBERUS_H
 #define CERBERUS_H
 
-#define CERBERUS_VERSION          "0.6.2"
+#define CERBERUS_VERSION          "0.7.0-rc1"
 #define CERBERUS_SCHEMA_VERSION   "1.0"
 #define CERBERUS_SIGNATURE_SCHEMA "1"
+/* ini_format: integer, increments on INI breaking changes (key removal,
+ * renaming, value-format change). Additive changes (new keys, new
+ * sections) do NOT bump this. The server parser uses ini_format to
+ * decide how to read a submission; it MUST be prepared for additive
+ * changes within a format generation. v0.7.0: ini_format=1. */
+#define CERBERUS_INI_FORMAT       "1"
 
 typedef enum { MODE_QUICK = 0, MODE_CALIBRATED = 1 } run_mode_t;
 
@@ -67,7 +73,15 @@ typedef struct {
                                 * run; summary still renders interactively.
                                 * For batch users who want timings
                                 * without the journey. v0.6.0. */
+    unsigned char no_upload;   /* /NOUPLOAD: never prompt, never upload.
+                                * v0.7.0. */
+    /* do_upload was the pre-v0.7.0 "upload?" flag; now reused as
+     * /UPLOAD auto-yes (skip the prompt, upload immediately). */
     char          out_path[64];
+    /* v0.7.0 upload metadata from /NICK and /NOTE flags. Both empty
+     * strings by default (anonymous submission). */
+    char          nickname[33];
+    char          note[129];
 } opts_t;
 
 #define EXIT_OK          0

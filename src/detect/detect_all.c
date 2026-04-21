@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "detect.h"
+#include "network.h"
 #include "../core/crumb.h"
 
 /* Each subsystem is wrapped in a crumb enter/exit pair so that if a
@@ -31,4 +32,7 @@ void detect_all(result_table_t *t, const opts_t *o)
     WRAP_DETECT("video", detect_video(t));
     WRAP_DETECT("audio", detect_audio(t));
     WRAP_DETECT("bios",  detect_bios(t));
+    /* v0.7.0: transport detection for upload path. Safe on 8088 — pure
+     * IVT reads + env lookups. */
+    WRAP_DETECT("network", detect_network(t));
 }

@@ -23,7 +23,8 @@ static void print_help(void)
     puts("CERBERUS " CERBERUS_VERSION " - Retro PC System Intelligence");
     puts("");
     puts("Usage: CERBERUS [/Q] [/C[:n]] [/ONLY:<h>] [/SKIP:<h>] [/O:file]");
-    puts("                [/U] [/NOCYRIX] [/NOINTRO] [/QUICK] [/NOUI] [/?]");
+    puts("                [/U] [/NOCYRIX] [/NOINTRO] [/QUICK] [/NOUI]");
+    puts("                [/NOUPLOAD] [/UPLOAD] [/NICK:<name>] [/NOTE:<text>] [/?]");
     puts("  /Q              Quick mode (default)");
     puts("  /C[:n]          Calibrated mode, n runs (default 7)");
     puts("  /ONLY:DET|DIAG|BENCH   Run only that head");
@@ -35,6 +36,10 @@ static void print_help(void)
     puts("  /NOINTRO        Skip VGA splash");
     puts("  /NOUI           Skip summary + consistency UI render (INI still written)");
     puts("  /QUICK          Skip visual demonstrations (title cards + visuals); run tests + summary");
+    puts("  /NOUPLOAD       Never prompt to upload, never upload");
+    puts("  /UPLOAD         Upload without prompting (auto-yes)");
+    puts("  /NICK:<name>    Nickname for upload (alnum+space+hyphen, max 32)");
+    puts("  /NOTE:<text>    Note for upload (max 128 chars)");
     puts("  /?              This help");
 }
 
@@ -58,7 +63,10 @@ static int parse_args(int argc, char *argv[], opts_t *o)
     o->no_intro = 0;
     o->no_ui    = 0;
     o->do_quick = 0;
+    o->no_upload = 0;
     strcpy(o->out_path, "CERBERUS.INI");
+    o->nickname[0] = '\0';
+    o->note[0]     = '\0';
 
     for (i = 1; i < argc; i++) {
         char *a = argv[i];
@@ -96,6 +104,38 @@ static int parse_args(int argc, char *argv[], opts_t *o)
         else if (!strcmp(a, "/NOINTRO")) { o->no_intro = 1; }
         else if (!strcmp(a, "/NOUI"))    { o->no_ui = 1; }
         else if (!strcmp(a, "/QUICK"))   { o->do_quick = 1; }
+        else if (!strcmp(a, "/NOUPLOAD")) { o->no_upload = 1; }
+        else if (!strcmp(a, "/UPLOAD"))  { o->do_upload = 1; }
+        else if (str_starts_with(a, "/NICK:")) {
+            /* Nickname: max 32 chars, sanitize to alnum + space + hyphen. */
+            const char *src = a + 6;
+            int dst = 0;
+            while (*src && dst < (int)sizeof(o->nickname) - 1) {
+                char c = *src++;
+                if ((c >= '0' && c <= '9') ||
+                    (c >= 'A' && c <= 'Z') ||
+                    (c >= 'a' && c <= 'z') ||
+                    c == ' ' || c == '-' || c == '_') {
+                    o->nickname[dst++] = c;
+                }
+                /* silently drop other chars */
+            }
+            o->nickname[dst] = '\0';
+        }
+        else if (str_starts_with(a, "/NOTE:")) {
+            /* Note: max 128 chars, strip control chars. Quotes on the
+             * command line are shell-eaten; Watcom gives us the content
+             * without quotes. */
+            const char *src = a + 6;
+            int dst = 0;
+            while (*src && dst < (int)sizeof(o->note) - 1) {
+                unsigned char c = (unsigned char)*src++;
+                if (c >= 0x20 && c < 0x7F) {
+                    o->note[dst++] = (char)c;
+                }
+            }
+            o->note[dst] = '\0';
+        }
         else {
             fprintf(stderr, "unknown option: %s\n", a);
             return -1;
@@ -177,7 +217,21 @@ int main(int argc, char *argv[])
     consist_check(&table);
     thermal_check(&table);
 
+    /* v0.7.0: populate [upload] metadata from /NICK /NOTE before initial
+     * INI write so nickname + notes land in the file on first pass. */
+    upload_populate_metadata(&table, &opts);
+
     report_write_ini(&table, &opts, opts.out_path);
+
+    /* v0.7.0: attempt upload after INI is on disk. upload_execute
+     * decides internally based on network transport + /NOUPLOAD /UPLOAD
+     * + user prompt. Updates [upload] status / submission_id / url in
+     * the table and re-writes the INI on success. Never crashes on
+     * failure; graceful degrade to "results saved locally." */
+    upload_rc = upload_execute(&table, &opts, opts.out_path);
+    /* upload_rc is not fatal — UPLOAD_OFFLINE / _SKIPPED / _NETWORK
+     * are all expected outcomes on various host configurations. */
+    (void)upload_rc;
 
     /* Finalize the unknown-hardware dump BEFORE any UI rendering so the
      * CERBERUS.UNK file lands on disk even if the UI path hangs (observed
@@ -196,10 +250,11 @@ int main(int argc, char *argv[])
         ui_render_summary(&table, &opts);
     }
 
-    if (opts.do_upload) {
-        upload_rc = upload_ini(opts.out_path);
-        if (upload_rc != UPLOAD_OK) exit_code = EXIT_UPLOAD_FAIL;
-    }
+    /* v0.7.0: the legacy /U → upload_ini path has been replaced by
+     * upload_execute() which runs earlier (before the UI summary) so
+     * the upload status can appear in the scrollable summary's
+     * UPLOAD STATUS row. Kept this block empty as a landmark; remove
+     * in a v0.8.0 cleanup. */
 
     /* Flush stdio so any buffered UI output makes it to the console
      * before the exit-cleanup stage starts. Cheap insurance for the
