@@ -194,6 +194,39 @@ openly. Ordered by CERBERUS-issue relevance:
   anchor was era convention, not a tool-specific decision.
   CERBERUS's absolute-numbers approach sidesteps the need.
 
+## Phase 3 addendum, 2026-04-20 evening
+
+### QA-Plus v3.12 (Diagsoft, Inc., 1987-1989)
+
+- [`qa-plus-lessons.md`](qa-plus-lessons.md) — Commercial
+  service-technician diagnostic studied as the last significant
+  DOS-era competitor in the detect / diag / bench space. No
+  unpacking needed (all four binaries are raw MZ / COM).
+  Version confirmed as 3.12 from binary strings; the shipped
+  READ.ME only documents changes through 3.11, and the 3.12
+  binaries dated 1989-07-11 appear to be an undocumented
+  point release. Attribution correction: QAPLUS1.COM credits
+  "code licensed from Chesapeake Data Systems, Inc.", so not
+  all algorithms in that binary are DiagSoft originals.
+  Architectural finding: QA-Plus ships as **four cooperating
+  binaries** (QAPLUS.EXE control panel, QAPLUS1.COM destructive
+  diagnostic, QARAM.EXE chip-level RAM map, HDPREP1.COM
+  low-level format) because the RAM test must relocate DOS
+  and the diagnostic itself out of low 128 KB; MZ EXEs can't
+  do that, so the destructive diag is a relocatable COM.
+  Consistency cross-checks: embedded ad-hoc in each test, not
+  abstracted — CERBERUS's dedicated `consist.c` rule engine
+  is cleaner, no new rule to port. Diagnostic-methodology
+  gaps worth a v0.5+ pass: checkerboard / inv-checkerboard
+  memory patterns (adjacent-cell coupling), 8259A interrupt
+  controller functional test, "possible causes" mapping per
+  failing verdict. Address-to-chip physical translator
+  (QARAM pattern) deferred to v0.6+. Anti-patterns flagged:
+  bundled destructive format tool (HDPREP had a silent
+  interleave-corruption bug), OEM dealer-info hooks, licensed
+  third-party code without traceability, forced-reboot test
+  modes.
+
 ## Not produced this pass
 
 The corpus still holds three tools untouched that would be
