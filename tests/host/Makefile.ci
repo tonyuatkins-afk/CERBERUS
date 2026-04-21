@@ -1,0 +1,67 @@
+# GNU Makefile for CI / portable builds. The companion Makefile
+# (OpenWatcom wmake) stays authoritative for local Windows dev where
+# Watcom is already installed. This file lets any host with a C
+# compiler (Ubuntu + gcc in GitHub Actions, for instance) run the
+# host-side assertion suite.
+#
+# Usage:
+#   make -f Makefile.ci        # build all test binaries
+#   make -f Makefile.ci run    # build + run, failing on any non-zero exit
+#   make -f Makefile.ci clean
+
+CC      ?= cc
+CFLAGS  ?= -O0 -g -Wall -DCERBERUS_HOST_TEST -I../../src
+# -fno-strict-aliasing because the tests intentionally type-pun
+# through result_t.v.u/s/fixed union members; strict aliasing would
+# license the optimizer to reorder these loads.
+CFLAGS  += -fno-strict-aliasing
+
+TESTS = test_timing test_consist test_thermal test_diag_fpu \
+        test_diag_cache test_diag_dma test_bench_cache
+
+all: $(TESTS)
+
+test_timing: test_timing.c ../../src/core/timing.c \
+             ../../src/core/report.c ../../src/core/sha1.c
+	$(CC) $(CFLAGS) -o $@ test_timing.c
+
+test_consist: test_consist.c ../../src/core/consist.c \
+              ../../src/core/report.c ../../src/core/sha1.c
+	$(CC) $(CFLAGS) -o $@ test_consist.c
+
+test_thermal: test_thermal.c ../../src/core/thermal.c \
+              ../../src/core/report.c ../../src/core/sha1.c
+	$(CC) $(CFLAGS) -o $@ test_thermal.c
+
+test_diag_fpu: test_diag_fpu.c ../../src/diag/diag_fpu.c \
+               ../../src/core/report.c ../../src/core/sha1.c
+	$(CC) $(CFLAGS) -o $@ test_diag_fpu.c
+
+test_diag_cache: test_diag_cache.c ../../src/diag/diag_cache.c \
+                 ../../src/core/cache_buffers.c \
+                 ../../src/core/report.c ../../src/core/sha1.c
+	$(CC) $(CFLAGS) -o $@ test_diag_cache.c
+
+test_diag_dma: test_diag_dma.c ../../src/diag/diag_dma.c \
+               ../../src/core/report.c ../../src/core/sha1.c
+	$(CC) $(CFLAGS) -o $@ test_diag_dma.c
+
+test_bench_cache: test_bench_cache.c ../../src/bench/bench_cache.c \
+                  ../../src/core/cache_buffers.c \
+                  ../../src/core/report.c ../../src/core/sha1.c
+	$(CC) $(CFLAGS) -o $@ test_bench_cache.c
+
+# Run each binary in sequence. The first non-zero exit fails the target,
+# so CI gets a precise per-suite failure signal (not "all 7 ran" with
+# one silent failure hidden in the middle).
+run: $(TESTS)
+	@set -e; for t in $(TESTS); do \
+	  echo "=== ./$$t ==="; \
+	  ./$$t || exit $$?; \
+	done
+	@echo "=== all host tests passed ==="
+
+clean:
+	rm -f $(TESTS) *.o
+
+.PHONY: all run clean

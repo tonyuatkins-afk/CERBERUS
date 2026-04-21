@@ -1,0 +1,47 @@
+name: CI
+
+# Runs the host-side assertion suite on every push and PR.
+#
+# What this does NOT do:
+#   - Build CERBERUS.EXE. That requires OpenWatcom, which is Windows-
+#     only and awkward to install in CI. Watcom builds remain a local
+#     dev-box step.
+#   - Run CERBERUS in an emulator. DOSBox-X's 8087-only FPU can't
+#     execute v0.7.0's x87 kernel (tracked in issue #7).
+#
+# What this DOES do:
+#   - Compile the host-side unit tests with gcc using Makefile.ci
+#   - Run every test binary and fail the build on any assertion failure
+#
+# The 201-ish host assertions cover: pure-math timing helpers,
+# consistency-rule verdicts + narration, thermal Mann-Kendall, FPU
+# diag math, cache diag, DMA diag, bench_cache math, and SHA-1 +
+# report-writer behavior.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-tests:
+    name: host-side assertions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: gcc version
+        run: gcc --version
+
+      - name: Build host tests
+        working-directory: tests/host
+        run: make -f Makefile.ci all
+
+      - name: Run host tests
+        working-directory: tests/host
+        run: make -f Makefile.ci run
