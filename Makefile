@@ -82,6 +82,7 @@ OBJS = src\main.obj                                                  &
        src\bench\bench_cache.obj src\bench\bench_video.obj           &
        src\bench\bench_dhrystone.obj src\bench\bench_whetstone.obj   &
        src\bench\bench_whet_fpu.obj                                  &
+       src\bench\bench_mandelbrot.obj                                &
        src\upload\upload.obj
 
 all: $(TARGET) .SYMBOLIC
@@ -247,6 +248,11 @@ src\bench\bench_whetstone.obj: src\bench\bench_whetstone.c src\bench\bench.h src
 # suppression contortions that forced bench_whetstone.c to -od before.
 src\bench\bench_whet_fpu.obj: src\bench\bench_whet_fpu.asm
 	$(ASM) $(ASFLAGS) -o src\bench\bench_whet_fpu.obj src\bench\bench_whet_fpu.asm
+
+# Mandelbrot FPU visual demo (T4b). Compiled at -ox for speed; x87
+# math is the whole point, so -fpi inline is critical.
+src\bench\bench_mandelbrot.obj: src\bench\bench_mandelbrot.c src\bench\bench.h src\core\display.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_mandelbrot.c
 
 src\upload\upload.obj: src\upload\upload.c src\upload\upload.h
 	$(CC) $(CFLAGS) -fo=$^@ src\upload\upload.c

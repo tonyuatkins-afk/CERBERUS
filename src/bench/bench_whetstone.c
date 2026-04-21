@@ -189,4 +189,10 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
                        "inconclusive_elapsed_zero",
                        CONF_LOW, VERDICT_WARN);
     }
+
+    /* Visual coda: Mandelbrot in VGA mode 13h. Not timed, not
+     * measured — a post-run proof-of-life for the FPU. Gates on
+     * VGA-capable adapter and /NOUI inside the demo; FPU presence
+     * is implied by reaching this point (the early-return above). */
+    bench_mandelbrot_demo(o);
 }

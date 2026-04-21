@@ -46,4 +46,11 @@ unsigned long bench_cache_kb_per_sec(unsigned long bytes,
  * then restore it from a FAR save buffer. */
 void bench_video(result_table_t *t, const opts_t *o);
 
+/* v0.5.0 Mandelbrot FPU visual demo — T4b. Not a benchmark in the
+ * measured-value sense; renders a Mandelbrot set to VGA mode 13h as
+ * a post-run visual coda when an FPU is present and the adapter is
+ * VGA-capable. Skipped under /NOUI and on non-VGA adapters. Called
+ * from bench_whetstone() after its numeric emit completes. */
+void bench_mandelbrot_demo(const opts_t *o);
+
 #endif
