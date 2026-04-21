@@ -103,7 +103,7 @@ static void rule_486dx_implies_integrated_fpu(result_table_t *t)
                        CONF_HIGH, VERDICT_PASS);
     } else {
         report_add_str(t, "consistency.486dx_fpu",
-                       "FAIL: CPU reports 486DX-class but FPU is not integrated",
+                       "FAIL: 486DX-class CPU but FPU not integrated",
                        CONF_HIGH, VERDICT_FAIL);
     }
 }
@@ -198,8 +198,10 @@ static void rule_extmem_implies_286(result_table_t *t)
     if (!cv) return;
     if (strcmp(cv, "8086") == 0 || strcmp(cv, "8088") == 0 ||
         strcmp(cv, "v20")  == 0 || strcmp(cv, "v30")  == 0) {
-        sprintf(msg_rule6_fail, "FAIL: extended memory %luKB reported on %s",
-                ext_kb, cv);
+        (void)cv;  /* CPU class shown on DETECTION pane; omit from narration for width budget */
+        sprintf(msg_rule6_fail,
+                "FAIL: ext memory %luKB reported but CPU is pre-286",
+                ext_kb);
         report_add_str(t, "consistency.extmem_cpu", msg_rule6_fail,
                        CONF_HIGH, VERDICT_FAIL);
     } else {
@@ -335,8 +337,10 @@ static void rule_timing_independence(result_table_t *t)
                        CONF_HIGH, VERDICT_PASS);
     } else {
         unsigned long pct = delta * 100UL / bios_us;
-        sprintf(msg_rule4a_warn, "WARN: PIT %luus BIOS %luus diverge %lu%% (timing.c suspect)",
-                pit_us, bios_us, pct);
+        (void)pit_us; (void)bios_us;  /* raw us values emitted to INI as timing.cross_check.* */
+        sprintf(msg_rule4a_warn,
+                "WARN: PIT vs BIOS diverge %lu%% (timing.c suspect)",
+                pct);
         report_add_str(t, "consistency.timing_independence", msg_rule4a_warn,
                        CONF_HIGH, VERDICT_WARN);
     }
@@ -405,32 +409,32 @@ static void rule_cpu_ipc_bench(result_table_t *t)
     if (iters == 0 || lo == 0 || hi == 0 || lo > hi) return;
 
     if (iters >= lo && iters <= hi) {
+        (void)iters; (void)lo; (void)hi;  /* raw values on BENCHMARKS pane + INI */
         sprintf(msg_rule4b_pass,
-                "pass (bench %lu/sec within expected %lu-%lu for this CPU)",
-                iters, lo, hi);
+                "pass (bench within expected range for this CPU)");
         report_add_str(t, "consistency.cpu_ipc_bench", msg_rule4b_pass,
                        CONF_HIGH, VERDICT_PASS);
     } else if (iters < lo) {
         r_cache = find_key(t, "diagnose.cache.status");
+        /* Raw iters/lo values live on BENCHMARKS pane + INI; narration here
+         * is the *interpretation* split three ways by the cache diag signal. */
+        (void)iters; (void)lo;
         if (r_cache && r_cache->v.s && strstr(r_cache->v.s, "cache_working")) {
             sprintf(msg_rule4b_warn,
-                    "WARN: bench %lu/sec below expected %lu (cache diag PASS - TSR stealing cycles or thermal throttle)",
-                    iters, lo);
+                    "WARN: bench below range; cache OK, check TSR/thermal");
         } else if (r_cache && r_cache->v.s && strstr(r_cache->v.s, "no_cache_effect")) {
             sprintf(msg_rule4b_warn,
-                    "WARN: bench %lu/sec below expected %lu (cache diag FAIL - cache disabled in BIOS or absent)",
-                    iters, lo);
+                    "WARN: bench low; cache disabled (BIOS?) or absent");
         } else {
             sprintf(msg_rule4b_warn,
-                    "WARN: bench %lu/sec below expected %lu (throttle, cache disabled, or TSR stealing cycles)",
-                    iters, lo);
+                    "WARN: bench below range (throttle/cache/TSR?)");
         }
         report_add_str(t, "consistency.cpu_ipc_bench", msg_rule4b_warn,
                        CONF_HIGH, VERDICT_WARN);
     } else {
+        (void)iters; (void)hi;
         sprintf(msg_rule4b_warn,
-                "WARN: bench %lu/sec above expected %lu (overclock or CPU misidentified)",
-                iters, hi);
+                "WARN: bench above range (overclock or misid?)");
         report_add_str(t, "consistency.cpu_ipc_bench", msg_rule4b_warn,
                        CONF_HIGH, VERDICT_WARN);
     }
@@ -483,8 +487,7 @@ static void rule_audio_mixer_chip(result_table_t *t)
     /* DB is uncertain but probe saw a mixer — prompt human to seed DB. */
     if (strcmp(ev, "unknown") == 0) {
         sprintf(msg_rule7_warn,
-                "WARN: audio DB mixer_chip=unknown for this card; probe observed '%s' (contribute to hw_db/audio.csv)",
-                ov);
+                "WARN: DB mixer unknown, probe saw '%s'", ov);
         report_add_str(t, "consistency.audio_mixer_chip", msg_rule7_warn,
                        CONF_MEDIUM, VERDICT_WARN);
         return;
@@ -505,15 +508,13 @@ static void rule_audio_mixer_chip(result_table_t *t)
          * contradicting the classifier's documented contract. Emit WARN
          * at MEDIUM confidence to mirror the unknown-DB WARN branch. */
         sprintf(msg_rule7_warn_unknown,
-                "WARN: audio DB expects mixer '%s' but probe observed 'unknown' (mixer-probe inconclusive, human triage needed)",
-                ev);
+                "WARN: DB expects '%s', probe inconclusive", ev);
         report_add_str(t, "consistency.audio_mixer_chip",
                        msg_rule7_warn_unknown,
                        CONF_MEDIUM, VERDICT_WARN);
     } else {
         sprintf(msg_rule7_fail,
-                "FAIL: audio DB expects mixer '%s' but probe observed '%s'",
-                ev, ov);
+                "FAIL: DB expects mixer '%s', probe saw '%s'", ev, ov);
         report_add_str(t, "consistency.audio_mixer_chip", msg_rule7_fail,
                        CONF_HIGH, VERDICT_FAIL);
     }
@@ -584,7 +585,7 @@ static void rule_whetstone_fpu_consistency(result_table_t *t)
     if (fpu_present && whet_ran) {
         if (kwhet && kwhet->type == V_U32 && kwhet->v.u == 0UL) {
             report_add_str(t, "consistency.whetstone_fpu",
-                           "WARN: FPU reported present and Whetstone ran, but k_whetstones=0",
+                           "WARN: FPU present and Whetstone ran, k_whet=0",
                            CONF_MEDIUM, VERDICT_WARN);
         } else {
             report_add_str(t, "consistency.whetstone_fpu",
@@ -608,8 +609,7 @@ static void rule_whetstone_fpu_consistency(result_table_t *t)
         /* else: unknown skip token — fall through to no-op */
     } else {
         sprintf(msg_rule10_fail,
-                "FAIL: detect says fpu=%s but Whetstone status=%s",
-                fpu_tag, st);
+                "FAIL: fpu=%s but Whetstone=%s", fpu_tag, st);
         report_add_str(t, "consistency.whetstone_fpu", msg_rule10_fail,
                        CONF_HIGH, VERDICT_FAIL);
     }
@@ -676,7 +676,7 @@ static void rule_dma_class_coherence(result_table_t *t)
                        CONF_HIGH, VERDICT_PASS);
     } else if (strcmp(c5, "pass") == 0) {
         report_add_str(t, "consistency.dma_class_coherence",
-                       "WARN: XT-class CPU but DMA slave channel responsive - detection contradiction",
+                       "WARN: XT-class CPU with DMA slave active (impossible)",
                        CONF_HIGH, VERDICT_WARN);
     }
     /* else: fail / unknown token — silent no-op, surface via
@@ -684,6 +684,52 @@ static void rule_dma_class_coherence(result_table_t *t)
 }
 
 /* ----------------------------------------------------------------------- */
+/* Narration-width audit. After all rules emit, walk the table and verify
+ * each consistency.* narration fits the SYSTEM VERDICTS pane's 48-col
+ * window once the UI has stripped the leading "pass ("/"WARN: "/"FAIL: "
+ * prefix. A narration over budget would truncate on-screen with a «»
+ * continuation marker while the tool exits, losing the tail to the user
+ * (the defect this audit defends against). Writes to stderr so the
+ * warning lands in the captured run log but does not corrupt the TUI. */
+/* ----------------------------------------------------------------------- */
+
+#define UI_NARRATION_MAX 48
+
+static int narration_visible_len(const char *msg)
+{
+    const char *s = msg;
+    int n;
+    if (!s) return 0;
+    if      (strncmp(s, "pass (", 6) == 0) s += 6;
+    else if (strncmp(s, "WARN: ", 6) == 0) s += 6;
+    else if (strncmp(s, "FAIL: ", 6) == 0) s += 6;
+    else if (strncmp(s, "WARN (", 6) == 0) s += 6;
+    else if (strncmp(s, "pass ",  5) == 0) s += 5;
+    n = (int)strlen(s);
+    /* UI strips trailing ')' on the "pass (...)" variant */
+    if (n > 0 && s[n - 1] == ')' && msg[0] == 'p') n--;
+    return n;
+}
+
+static void audit_narration_widths(const result_table_t *t)
+{
+    unsigned int i;
+    for (i = 0; i < t->count; i++) {
+        const char *key = t->results[i].key;
+        const char *msg;
+        int visible;
+        if (strncmp(key, "consistency.", 12) != 0) continue;
+        if (t->results[i].type != V_STR) continue;  /* defensive */
+        msg = t->results[i].v.s;
+        if (!msg) continue;
+        visible = narration_visible_len(msg);
+        if (visible > UI_NARRATION_MAX) {
+            fprintf(stderr,
+                    "consist: %s narration %d cols on screen (budget %d): %s\n",
+                    key, visible, UI_NARRATION_MAX, msg);
+        }
+    }
+}
 
 void consist_check(result_table_t *t)
 {
@@ -698,6 +744,7 @@ void consist_check(result_table_t *t)
     rule_audio_mixer_chip(t);
     rule_whetstone_fpu_consistency(t);
     rule_dma_class_coherence(t);
+    audit_narration_widths(t);
     /*
      * Rules landing as downstream phases complete:
      *

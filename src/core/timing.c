@@ -284,8 +284,7 @@ void timing_emit_self_check(result_table_t *t,
          * handles UI visibility, so we intentionally do NOT emit
          * a consistency row here in the "ok" branch. */
         report_add_str(t, "consistency.timing_self_check",
-                       "WARN: PIT/BIOS dual measurement unreliable "
-                       "- timing cross-check skipped",
+                       "WARN: PIT/BIOS cross-check skipped (measurement bad)",
                        CONF_LOW, VERDICT_WARN);
         return;
     }

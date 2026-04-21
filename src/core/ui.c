@@ -294,20 +294,28 @@ typedef struct {
     const char *label;
 } display_row_t;
 
+/* Display labels are human-readable; INI keys stay unchanged for machine
+ * parsing. Acronyms get full caps (CPU, FPU, BIOS, DMA); plain nouns get
+ * sentence case. Sub-property rows keep a two-space indent to show the
+ * parent-child visual relationship. F/M/Step is the universal CPUID
+ * leaf-01h shorthand and preserves the indent — the full phrase
+ * "Family/Model/Step" (17 chars) does not fit the 12-wide label column.
+ * environment.emulator renders as "Emulator" so the value "none" reads
+ * as "no emulator detected" instead of the ambiguous "env: none". */
 static const display_row_t detect_rows[] = {
-    { "environment.emulator",      "env" },
-    { "cpu.detected",              "cpu" },
-    { "cpu.family_model_stepping", "  fam/mdl/stp" },
-    { "fpu.friendly",              "fpu" },
-    { "memory.conventional_kb",    "mem conv" },
-    { "memory.extended_kb",        "mem ext" },
-    { "cache.present",             "cache" },
-    { "bus.class",                 "bus" },
-    { "video.adapter",             "video" },
-    { "video.chipset",             "  chipset" },
-    { "audio.detected",            "audio" },
-    { "bios.family",               "bios" },
-    { "bios.date",                 "  date" }
+    { "environment.emulator",      "Emulator" },
+    { "cpu.detected",              "CPU" },
+    { "cpu.family_model_stepping", "  F/M/Step" },
+    { "fpu.friendly",              "FPU" },
+    { "memory.conventional_kb",    "Conv memory" },
+    { "memory.extended_kb",        "Ext memory" },
+    { "cache.present",             "Cache" },
+    { "bus.class",                 "Bus" },
+    { "video.adapter",             "Video" },
+    { "video.chipset",             "  Chipset" },
+    { "audio.detected",            "Audio" },
+    { "bios.family",               "BIOS" },
+    { "bios.date",                 "  Date" }
 };
 #define DETECT_ROWS_COUNT (sizeof(detect_rows) / sizeof(detect_rows[0]))
 
@@ -334,24 +342,32 @@ static void render_detection_pane(const result_table_t *t)
 /* Benchmark pane (right 40 cols)                                           */
 /* ----------------------------------------------------------------------- */
 
-static const display_row_t bench_rows[] = {
-    { "bench.cpu.int_iters_per_sec", "cpu int/s" },
-    { "bench.cpu.dhrystones",        "dhrystones" },
-    { "bench.fpu.ops_per_sec",       "fpu ops/s" },
-    { "bench.memory.write_kbps",     "mem write" },
-    { "bench.memory.read_kbps",      "mem read" },
-    { "bench.memory.copy_kbps",      "mem copy" },
-    { "bench.cpu_xt_factor",         "x PC-XT cpu" },
-    { "bench.mem_xt_factor",         "x PC-XT mem" }
+/* Bench rows are grouped by subsystem so the eye can process each cluster
+ * without jumping types: CPU/FPU raw values, then memory raw values, then
+ * the PC-XT ratio block. k-whet and its ratio stay marked as dim/LOW
+ * because Whetstone is still a known-low-confidence measurement (issue #4). */
+typedef struct {
+    const char *key;
+    const char *label;
+    int dim;              /* 1 = render value in CONF_LOW dim style */
+} bench_row_t;
+
+static const bench_row_t bench_rows[] = {
+    /* CPU + FPU raw values */
+    { "bench.cpu.int_iters_per_sec", "cpu int/s",     0 },
+    { "bench.cpu.dhrystones",        "dhrystones",    0 },
+    { "bench.fpu.ops_per_sec",       "fpu ops/s",     0 },
+    { "bench.fpu.k_whetstones",      "k-whet (LOW)",  1 },
+    /* Memory raw values */
+    { "bench.memory.write_kbps",     "mem write",     0 },
+    { "bench.memory.read_kbps",      "mem read",      0 },
+    { "bench.memory.copy_kbps",      "mem copy",      0 },
+    /* PC-XT ratios */
+    { "bench.cpu_xt_factor",         "x PC-XT cpu",   0 },
+    { "bench.mem_xt_factor",         "x PC-XT mem",   0 },
+    { "bench.fpu_xt_factor",         "x PC-XT fpu",   1 }
 };
 #define BENCH_ROWS_COUNT (sizeof(bench_rows) / sizeof(bench_rows[0]))
-
-/* Separate keys for rows that should render in DIM (CONF_LOW) style. */
-static const display_row_t bench_rows_dim[] = {
-    { "bench.fpu.k_whetstones", "k-whet (LOW)" },
-    { "bench.fpu_xt_factor",    "x PC-XT fpu" }
-};
-#define BENCH_ROWS_DIM_COUNT (sizeof(bench_rows_dim) / sizeof(bench_rows_dim[0]))
 
 static void render_benchmark_pane(const result_table_t *t)
 {
@@ -367,13 +383,11 @@ static void render_benchmark_pane(const result_table_t *t)
     for (i = 0; i < BENCH_ROWS_COUNT && r <= 14; i++) {
         const result_t *row = find_key(t, bench_rows[i].key);
         if (!row) continue;
-        render_kv_row(r, 41, 38, bench_rows[i].label, row);
-        r++;
-    }
-    for (i = 0; i < BENCH_ROWS_DIM_COUNT && r <= 14; i++) {
-        const result_t *row = find_key(t, bench_rows_dim[i].key);
-        if (!row) continue;
-        render_kv_row_dim_value(r, 41, 38, bench_rows_dim[i].label, row);
+        if (bench_rows[i].dim) {
+            render_kv_row_dim_value(r, 41, 38, bench_rows[i].label, row);
+        } else {
+            render_kv_row(r, 41, 38, bench_rows[i].label, row);
+        }
         r++;
     }
 }
@@ -433,44 +447,98 @@ static const char *verdict_tag(verdict_t v)
     }
 }
 
-/* Render one verdict row:  [TAG] rule_name    explanation...
- * The TAG bracket and explanation are full-color; the rule name in bold.
- */
+/* Map a prefix-stripped verdict key to a human-readable display label.
+ * Acronyms get full caps; plain words get sentence case. Falls back to
+ * the stripped key verbatim for any unmapped future rule — new rules
+ * render correctly even before their display label lands here. Label
+ * column is 20 chars wide (cols 9-28); every entry here fits. */
+typedef struct {
+    const char *stripped_key;
+    const char *display;
+} verdict_label_t;
+
+static const verdict_label_t verdict_labels[] = {
+    /* diagnose heads */
+    { "cache.status",        "Cache status" },
+    { "dma.summary",         "DMA summary" },
+    /* consistency rules */
+    { "timing_self_check",   "Timing self-check" },
+    { "timing_independence", "Timing independence" },
+    { "486dx_fpu",           "486DX implies FPU" },
+    { "486sx_fpu",           "486SX no FPU" },
+    { "386sx_bus",           "386SX implies ISA-16" },
+    { "8086_bus",            "8086 on ISA-8" },
+    { "fpu_diag_bench",      "FPU diag+bench" },
+    { "extmem_cpu",          "Ext mem vs CPU" },
+    { "cpu_ipc_bench",       "CPU IPC bench" },
+    { "audio_mixer_chip",    "Audio mixer chip" },
+    { "whetstone_fpu",       "Whetstone FPU" },
+    { "dma_class_coherence", "DMA class coherence" }
+};
+#define VERDICT_LABELS_COUNT (sizeof(verdict_labels) / sizeof(verdict_labels[0]))
+
+static const char *verdict_display_label(const char *stripped_key)
+{
+    unsigned int i;
+    for (i = 0; i < VERDICT_LABELS_COUNT; i++) {
+        if (strcmp(verdict_labels[i].stripped_key, stripped_key) == 0) {
+            return verdict_labels[i].display;
+        }
+    }
+    return stripped_key;
+}
+
+/* Render one verdict row:  <TAG> display_label    explanation...   (diag)
+ *                          [TAG] display_label    explanation...   (rule)
+ * Angle brackets mark diagnostic heads (measured behavior). Square
+ * brackets mark consistency rules (inferred relationships). The visual
+ * distinction is zero-cost: no row budget consumed, and the discrimination
+ * falls out of the existing prefix check used for label stripping. */
 static void render_verdict_row(int row, const result_t *r)
 {
-    /* Strip the sub-tree prefix so the rule-name column shows the
-     * distinguishing tail, not the redundant category. Both tails the
-     * pane renders today are handled; any future verdict-source prefix
-     * would need its own branch. */
-    const char *key;
+    /* Strip the sub-tree prefix so the label column shows the
+     * distinguishing tail, not the redundant category. The same prefix
+     * check also drives the bracket style: diagnose.* → <TAG>,
+     * consistency.* → [TAG]. Any future verdict-source prefix would need
+     * its own bracket convention. */
+    const char *stripped;
+    const char *label;
     const char *val = value_str(r);
     unsigned char va = verdict_attr(r->verdict);
     const char *tag = verdict_tag(r->verdict);
+    unsigned char open_br, close_br;
 
     if (strncmp(r->key, "consistency.", 12) == 0) {
-        key = r->key + 12;
+        stripped = r->key + 12;
+        open_br  = '[';
+        close_br = ']';
     } else if (strncmp(r->key, "diagnose.", 9) == 0) {
-        key = r->key + 9;
+        stripped = r->key + 9;
+        open_br  = '<';
+        close_br = '>';
     } else {
-        key = r->key;
+        stripped = r->key;
+        open_br  = '[';
+        close_br = ']';
     }
+    label = verdict_display_label(stripped);
 
-    /* "[TAG]" at col 2-7 */
-    vram_putc(row, 2, '[',    ATTR_NORMAL);
+    /* "<TAG>" or "[TAG]" at col 2-7 */
+    vram_putc(row, 2, open_br,  ATTR_NORMAL);
     vram_putc(row, 3, (unsigned char)tag[0], va);
     vram_putc(row, 4, (unsigned char)tag[1], va);
     vram_putc(row, 5, (unsigned char)tag[2], va);
     vram_putc(row, 6, (unsigned char)tag[3], va);
-    vram_putc(row, 7, ']',    ATTR_NORMAL);
+    vram_putc(row, 7, close_br, ATTR_NORMAL);
 
-    /* rule name at col 9-28 (20 wide, bold) */
+    /* display label at col 9-28 (20 wide, bold) */
     {
         int c = 9;
         int i;
-        int klen = (int)strlen(key);
+        int klen = (int)strlen(label);
         if (klen > 20) klen = 20;
         for (i = 0; i < klen; i++) {
-            vram_putc(row, c++, (unsigned char)key[i], ATTR_BOLD);
+            vram_putc(row, c++, (unsigned char)label[i], ATTR_BOLD);
         }
     }
 

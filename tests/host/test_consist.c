@@ -412,10 +412,10 @@ int main(void)
           "Scenario KK: bench under, cache working → rule 4b WARN");
     {
         const result_t *r = k(&t, "consistency.cpu_ipc_bench");
-        CHECK(r && r->v.s && strstr(r->v.s, "TSR stealing") != NULL,
+        CHECK(r && r->v.s && strstr(r->v.s, "TSR/thermal") != NULL,
               "Scenario KK: narration names TSR/thermal (cache exonerated)");
-        CHECK(r && r->v.s && strstr(r->v.s, "cache diag PASS") != NULL,
-              "Scenario KK: narration cites cache diag PASS");
+        CHECK(r && r->v.s && strstr(r->v.s, "cache OK") != NULL,
+              "Scenario KK: narration cites cache OK (exoneration signal)");
     }
 
     /* Scenario LL: bench under expected AND diagnose.cache.status reports
@@ -436,7 +436,7 @@ int main(void)
           "Scenario LL: bench under, cache dead → rule 4b WARN");
     {
         const result_t *r = k(&t, "consistency.cpu_ipc_bench");
-        CHECK(r && r->v.s && strstr(r->v.s, "cache disabled in BIOS or absent") != NULL,
+        CHECK(r && r->v.s && strstr(r->v.s, "cache disabled (BIOS?) or absent") != NULL,
               "Scenario LL: narration names cache-BIOS-disabled (TSR exonerated)");
     }
 
@@ -457,7 +457,7 @@ int main(void)
         CHECK(v_of(r) == VERDICT_WARN,
               "Scenario MM: bench under, no cache status → rule 4b WARN");
         CHECK(r && r->v.s && strstr(r->v.s,
-              "(throttle, cache disabled, or TSR stealing cycles)") != NULL,
+              "(throttle/cache/TSR?)") != NULL,
               "Scenario MM: narration falls back to ambiguous three-cause form");
     }
 
@@ -480,7 +480,7 @@ int main(void)
         CHECK(v_of(r) == VERDICT_WARN,
               "Scenario NN: bench above → rule 4b WARN (overclock)");
         CHECK(r && r->v.s && strstr(r->v.s,
-              "overclock or CPU misidentified") != NULL,
+              "overclock or misid") != NULL,
               "Scenario NN: narration uses over-range message (cache status ignored)");
     }
 
