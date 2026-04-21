@@ -2,6 +2,79 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [v0.6.2], 2026-04-20 evening
+
+Cleanup + SB DSP direct-mode PCM audio path.
+
+### T1 — Shared TUI helpers (src/core/tui_util.{c,h})
+
+Six visual modules (journey, bit_parade, lissajous, metronome,
+audio_scale, cache_waterfall, latency_map) each carried a private
+~60-line copy of the same VRAM-helper block: adapter-aware
+vram_base, is_mono, putc, puts, fill, hline, ticks, keyboard
+polling. All consolidated into one shared tui_util module.
+
+Each visual module now calls tui_putc / tui_puts / tui_fill /
+tui_ticks / tui_is_mono / tui_kbhit / tui_read_key / tui_drain_keys
+instead of its private prefix. EXE shrunk ~1 KB from code
+deduplication.
+
+### T2 — DGROUP reclaim DEFERRED
+
+Tried Watcom `-zc` in v0.6.1 (doesn't move unnamed string literals,
+only const-qualified declarations). wlink CLASS redirection via
+ORDER statements needs per-file `#pragma data_seg` directives to
+mark which data goes where — touches every .c file for a marginal
+savings given DGROUP is currently 57,472 bytes (6,864 bytes under
+the DOS 64KB limit). Not worth the churn. Future work if DGROUP
+ever constrains.
+
+### T3 — SB DSP direct-mode PCM audio path (T7c from v0.6.0 brief)
+
+audio_scale.c now probes a third audio path ahead of OPL2:
+
+  Probe order
+    1. SB DSP direct PCM — BLASTER env parsed for base port; DSP
+       reset sequence at base+6 tested for the 0xAA ACK. If present,
+       plays the scale as square-wave PCM samples via DSP command
+       0x10 per sample (direct-output mode).
+    2. OPL2 FM — fallback. Same as v0.6.1.
+    3. PC speaker — universal fallback.
+
+Scope decision: DSP direct mode instead of full DMA-buffered
+playback. Direct mode is genuine PCM (the SB DSP outputs the actual
+sample byte on each 0x10 write) but runs at a lower effective sample
+rate (~2-4 kHz via Watcom busy-wait). The "is my SB card producing
+PCM samples at all" question gets a direct yes/no answer; fidelity
+is squarer than DMA-streamed audio but clearly distinct from OPL
+FM. Full DMA playback (8237 channel + buffer + IRQ) stays filed as
+a future v0.7+ candidate if the audio-verification story needs the
+quality upgrade.
+
+Square-wave generation: per-note half-period in samples precomputed
+from target frequency at an assumed 3 kHz effective rate (~150 ms
+per note × 8 notes ≈ 1.2 s total playback).
+
+Title card + on-screen heading change to match the active path —
+users see "Audio Scale — SB DSP Direct PCM" when SB wins the probe,
+"Audio Scale — OPL2 FM Synth" when OPL wins, "Audio Scale — PC
+Speaker" on fallback.
+
+### Build state
+
+- CERBERUS.EXE: 156,700 bytes (target <180KB ✓)
+- DGROUP: 57,472 / 56,000 soft target (6,864 bytes under DOS 64KB)
+- Host tests: 7 suites, 201 OK, 0 failures
+
+### Known follow-ups
+
+- Issue #4 Whetstone calibration — still pending real-hardware
+  multi-cold-boot validation.
+- Issue #6 VLB bandwidth — still pending.
+- SB16 full DMA audio path (8237 auto-init + IRQ) remains a v0.7+
+  candidate. DSP direct is functionally sufficient for the
+  journey's "does audio work" question.
+
 ## [v0.6.1], 2026-04-20 evening
 
 Visual-journey completeness pass. Closes the gaps flagged in the

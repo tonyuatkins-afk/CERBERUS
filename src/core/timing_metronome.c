@@ -21,55 +21,17 @@
 #include <conio.h>
 #include "timing.h"
 #include "../core/display.h"
+#include "tui_util.h"
 #include "../core/journey.h"
 
 #define MT_COLS 80
 #define MT_ROWS 25
 
-static unsigned char __far *mt_vram(void)
-{
-    adapter_t a = display_adapter();
-    if (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-        a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO) {
-        return (unsigned char __far *)MK_FP(0xB000, 0x0000);
-    }
-    return (unsigned char __far *)MK_FP(0xB800, 0x0000);
-}
 
-static int mt_is_mono(void)
-{
-    adapter_t a = display_adapter();
-    return (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-            a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO);
-}
 
-static void mt_putc(int row, int col, unsigned char ch, unsigned char attr)
-{
-    unsigned char __far *v = mt_vram();
-    unsigned int off = (unsigned int)((row * MT_COLS + col) * 2);
-    v[off] = ch; v[off + 1] = attr;
-}
 
-static void mt_puts(int row, int col, const char *s, unsigned char attr)
-{
-    while (*s && col < MT_COLS) { mt_putc(row, col++, (unsigned char)*s++, attr); }
-}
 
-static void mt_fill(int r0, int r1, unsigned char ch, unsigned char attr)
-{
-    int r, c;
-    for (r = r0; r <= r1; r++)
-        for (c = 0; c < MT_COLS; c++) mt_putc(r, c, ch, attr);
-}
 
-static unsigned long mt_ticks(void)
-{
-    unsigned int __far *low  = (unsigned int __far *)MK_FP(0x0040, 0x006C);
-    unsigned int __far *high = (unsigned int __far *)MK_FP(0x0040, 0x006E);
-    unsigned int h1, h2, l;
-    do { h1 = *high; l = *low; h2 = *high; } while (h1 != h2);
-    return ((unsigned long)h1 << 16) | l;
-}
 
 /* PC speaker via port 61h. Enable the speaker (bit 1 = speaker data,
  * bit 0 = gate to PIT C2). With PIT C2 programmed to a square wave,
@@ -112,39 +74,39 @@ void timing_metronome_visual(const opts_t *o)
                            "Interval Timer should tick at a steady "
                            "18.2 Hz. Listen for stutters.") == 1) return;
 
-    if (mt_is_mono()) {
+    if (tui_is_mono()) {
         dot_attr = ATTR_BOLD; bg_attr = ATTR_NORMAL; title_attr = ATTR_BOLD;
     } else {
         dot_attr = ATTR_YELLOW; bg_attr = ATTR_NORMAL; title_attr = ATTR_BOLD;
     }
 
-    mt_fill(0, MT_ROWS - 1, ' ', ATTR_NORMAL);
-    mt_puts(6, (MT_COLS - 30) / 2, "PIT Metronome — 18.2 Hz beat", title_attr);
+    tui_fill(0, MT_ROWS - 1, ' ', ATTR_NORMAL);
+    tui_puts(6, (MT_COLS - 30) / 2, "PIT Metronome — 18.2 Hz beat", title_attr);
 
     /* Track: draw horizontal line markers at LEFT_EDGE and RIGHT_EDGE */
-    mt_putc(ROW_BOUNCE, LEFT_EDGE - 2,  '|', bg_attr);
-    mt_putc(ROW_BOUNCE, RIGHT_EDGE + 2, '|', bg_attr);
+    tui_putc(ROW_BOUNCE, LEFT_EDGE - 2,  '|', bg_attr);
+    tui_putc(ROW_BOUNCE, RIGHT_EDGE + 2, '|', bg_attr);
 
     dot_col = LEFT_EDGE;
-    start = mt_ticks();
+    start = tui_ticks();
     last_tick = start;
     /* Draw initial dot */
-    mt_putc(ROW_BOUNCE, dot_col, 0x07, dot_attr);   /* CP437 bullet */
+    tui_putc(ROW_BOUNCE, dot_col, 0x07, dot_attr);   /* CP437 bullet */
     mt_click();
 
     while (tick_count < DURATION_TICKS) {
-        unsigned long now = mt_ticks();
+        unsigned long now = tui_ticks();
         if (now != last_tick) {
             /* One or more ticks elapsed. Advance the dot per elapsed tick. */
             unsigned long n = now - last_tick;
             last_tick = now;
             while (n > 0) {
                 /* Erase current dot position */
-                mt_putc(ROW_BOUNCE, dot_col, '-', bg_attr);
+                tui_putc(ROW_BOUNCE, dot_col, '-', bg_attr);
                 dot_col += direction;
                 if (dot_col >= RIGHT_EDGE) { dot_col = RIGHT_EDGE; direction = -1; }
                 if (dot_col <= LEFT_EDGE)  { dot_col = LEFT_EDGE;  direction =  1; }
-                mt_putc(ROW_BOUNCE, dot_col, 0x07, dot_attr);
+                tui_putc(ROW_BOUNCE, dot_col, 0x07, dot_attr);
                 mt_click();
                 tick_count++;
                 n--;
@@ -157,7 +119,7 @@ void timing_metronome_visual(const opts_t *o)
             if (s) break;
         }
     }
-    elapsed = mt_ticks() - start;
+    elapsed = tui_ticks() - start;
     (void)elapsed;
 
     journey_result_flash(o, "Timer: PIT ticking at 18.2 Hz");

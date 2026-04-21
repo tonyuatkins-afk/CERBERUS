@@ -28,6 +28,7 @@
 #include <malloc.h>
 #include "bench.h"
 #include "../core/display.h"
+#include "../core/tui_util.h"
 #include "../core/journey.h"
 
 #define CW_COLS 80
@@ -50,50 +51,11 @@ static const char *const cw_block_label[CW_BANDS] = {
 /* Per-band measured rate in KB/s. */
 static unsigned long cw_rates[CW_BANDS];
 
-static unsigned char __far *cw_vram(void)
-{
-    adapter_t a = display_adapter();
-    if (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-        a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO) {
-        return (unsigned char __far *)MK_FP(0xB000, 0x0000);
-    }
-    return (unsigned char __far *)MK_FP(0xB800, 0x0000);
-}
 
-static int cw_is_mono(void)
-{
-    adapter_t a = display_adapter();
-    return (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-            a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO);
-}
 
-static void cw_putc(int row, int col, unsigned char ch, unsigned char attr)
-{
-    unsigned char __far *v = cw_vram();
-    unsigned int off = (unsigned int)((row * CW_COLS + col) * 2);
-    v[off] = ch; v[off + 1] = attr;
-}
 
-static void cw_puts(int row, int col, const char *s, unsigned char attr)
-{
-    while (*s && col < CW_COLS) { cw_putc(row, col++, (unsigned char)*s++, attr); }
-}
 
-static void cw_fill(int r0, int r1, unsigned char ch, unsigned char attr)
-{
-    int r, c;
-    for (r = r0; r <= r1; r++)
-        for (c = 0; c < CW_COLS; c++) cw_putc(r, c, ch, attr);
-}
 
-static unsigned long cw_ticks(void)
-{
-    unsigned int __far *low  = (unsigned int __far *)MK_FP(0x0040, 0x006C);
-    unsigned int __far *high = (unsigned int __far *)MK_FP(0x0040, 0x006E);
-    unsigned int h1, h2, l;
-    do { h1 = *high; l = *low; h2 = *high; } while (h1 != h2);
-    return ((unsigned long)h1 << 16) | l;
-}
 
 /* Measure write bandwidth in KB/s for a given block size. Writes a
  * constant byte to `buf` in chunks of `block` bytes, looping until at
@@ -101,10 +63,10 @@ static unsigned long cw_ticks(void)
 static unsigned long cw_measure(unsigned char __far *buf, unsigned long buf_size,
                                 unsigned long block, unsigned long min_ticks)
 {
-    unsigned long start = cw_ticks();
+    unsigned long start = tui_ticks();
     unsigned long bytes = 0;
     unsigned long elapsed;
-    while ((cw_ticks() - start) < min_ticks) {
+    while ((tui_ticks() - start) < min_ticks) {
         /* Sweep the buffer with block-sized writes. */
         unsigned long off = 0;
         while (off + block <= buf_size) {
@@ -115,7 +77,7 @@ static unsigned long cw_measure(unsigned char __far *buf, unsigned long buf_size
             bytes += block;
         }
     }
-    elapsed = cw_ticks() - start;
+    elapsed = tui_ticks() - start;
     if (elapsed == 0) return 0;
     /* bytes / (elapsed * 55ms) → KB/s = (bytes / (elapsed * 55)) * 1000 / 1024 */
     /* Simplify: KB/s ≈ bytes / (elapsed * 56) */
@@ -168,25 +130,25 @@ void bench_cache_waterfall_visual(const opts_t *o)
         return;
     }
 
-    if (cw_is_mono()) {
+    if (tui_is_mono()) {
         title_attr = ATTR_BOLD; label_attr = ATTR_NORMAL; frame_attr = ATTR_NORMAL;
     } else {
         title_attr = ATTR_BOLD; label_attr = ATTR_NORMAL; frame_attr = ATTR_CYAN;
     }
 
-    cw_fill(0, CW_ROWS - 1, ' ', ATTR_NORMAL);
-    cw_puts(3, (CW_COLS - 26) / 2,
+    tui_fill(0, CW_ROWS - 1, ' ', ATTR_NORMAL);
+    tui_puts(3, (CW_COLS - 26) / 2,
             "Memory Cache Waterfall", title_attr);
 
     /* Draw labels and frame brackets for all 9 bands */
     for (i = 0; i < CW_BANDS; i++) {
         int row = CW_BAR_ROW0 + i;
-        cw_puts(row, 3, cw_block_label[i], label_attr);
-        cw_putc(row, CW_BAR_COL - 1, '[', frame_attr);
-        cw_putc(row, CW_BAR_COL + CW_BAR_LEN, ']', frame_attr);
+        tui_puts(row, 3, cw_block_label[i], label_attr);
+        tui_putc(row, CW_BAR_COL - 1, '[', frame_attr);
+        tui_putc(row, CW_BAR_COL + CW_BAR_LEN, ']', frame_attr);
     }
 
-    cw_puts(16, 3, "Measuring ...", label_attr);
+    tui_puts(16, 3, "Measuring ...", label_attr);
 
     /* Phase 1: measure each band */
     max_rate = 1;
@@ -205,7 +167,7 @@ void bench_cache_waterfall_visual(const opts_t *o)
     }
 
     /* Clear "Measuring..." */
-    cw_puts(16, 3, "                    ", ATTR_NORMAL);
+    tui_puts(16, 3, "                    ", ATTR_NORMAL);
 
     /* Phase 2: animate each band's fill. All bands advance in parallel,
      * but fast bands advance more chars per frame than slow bands.
@@ -226,7 +188,7 @@ void bench_cache_waterfall_visual(const opts_t *o)
                 int new_progress;
                 int c;
                 unsigned char attr = cw_band_attr(cw_rates[i], max_rate,
-                                                  cw_is_mono());
+                                                  tui_is_mono());
                 target = (int)((unsigned long)CW_BAR_LEN *
                                cw_rates[i] / max_rate);
                 if (target > CW_BAR_LEN) target = CW_BAR_LEN;
@@ -235,15 +197,15 @@ void bench_cache_waterfall_visual(const opts_t *o)
                     (int)((unsigned long)target / 20UL + 1UL);
                 if (new_progress > target) new_progress = target;
                 for (c = progress[i]; c < new_progress; c++) {
-                    cw_putc(CW_BAR_ROW0 + i, CW_BAR_COL + c, 0xDB, attr);
+                    tui_putc(CW_BAR_ROW0 + i, CW_BAR_COL + c, 0xDB, attr);
                 }
                 progress[i] = new_progress;
                 if (new_progress < target) done = 0;
             }
 
             /* Frame delay ~1 tick */
-            tick_deadline = cw_ticks() + 1UL;
-            while (cw_ticks() < tick_deadline) {
+            tick_deadline = tui_ticks() + 1UL;
+            while (tui_ticks() < tick_deadline) {
                 if (journey_poll_skip()) { done = 1; break; }
             }
         }
@@ -252,7 +214,7 @@ void bench_cache_waterfall_visual(const opts_t *o)
         for (i = 0; i < CW_BANDS; i++) {
             char buf_str[20];
             sprintf(buf_str, "%8lu KB/s", cw_rates[i]);
-            cw_puts(CW_BAR_ROW0 + i, CW_BAR_COL + CW_BAR_LEN + 2,
+            tui_puts(CW_BAR_ROW0 + i, CW_BAR_COL + CW_BAR_LEN + 2,
                     buf_str, label_attr);
         }
     }

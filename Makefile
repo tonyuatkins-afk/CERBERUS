@@ -62,7 +62,7 @@ OBJS = src\main.obj                                                  &
        src\core\crumb.obj     src\core\ui.obj                        &
        src\core\intro.obj     src\core\head_art.obj                  &
        src\core\journey.obj   src\core\timing_metronome.obj          &
-       src\core\audio_scale.obj                                      &
+       src\core\audio_scale.obj src\core\tui_util.obj                &
        src\core\cache_buffers.obj                                    &
        src\detect\detect_all.obj                                     &
        src\detect\env.obj     src\detect\unknown.obj                 &
@@ -130,8 +130,11 @@ src\core\intro.obj: src\core\intro.c src\core\intro.h src\core\display.h src\cor
 src\core\head_art.obj: src\core\head_art.c src\core\head_art.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\head_art.c
 
-src\core\journey.obj: src\core\journey.c src\core\journey.h src\core\head_art.h src\core\display.h src\cerberus.h
+src\core\journey.obj: src\core\journey.c src\core\journey.h src\core\head_art.h src\core\display.h src\core\tui_util.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\journey.c
+
+src\core\tui_util.obj: src\core\tui_util.c src\core\tui_util.h src\core\display.h
+	$(CC) $(CFLAGS) -fo=$^@ src\core\tui_util.c
 
 src\core\timing_metronome.obj: src\core\timing_metronome.c src\core\timing.h src\core\journey.h src\core\display.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\timing_metronome.c

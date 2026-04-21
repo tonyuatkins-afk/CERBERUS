@@ -1,30 +1,34 @@
 /*
- * Audio Hardware Scale — v0.6.0 T7, extended v0.6.1 T7b.
+ * Audio Hardware Scale — v0.6.0 T7, extended v0.6.1 T7b, v0.6.2 T7c.
  *
  * Plays an 8-note C major scale with a text-mode visual frequency-bar
- * accompaniment. Two output layers:
+ * accompaniment. Three output layers, probed in order:
  *
- *   OPL2 FM synthesis  — preferred when AdLib/Sound Blaster detected
- *                        at port 0x388. Smooth sine-wave tones.
- *   PC speaker         — universal fallback. Square-wave via PIT C2.
+ *   SB DSP direct-mode PCM — preferred when BLASTER env is set and
+ *                             the DSP at base+6 resets cleanly. Square-
+ *                             wave samples pushed via DSP command 0x10.
+ *                             Genuine PCM, not FM synthesis.
+ *   OPL2 FM synthesis      — used when no SB-DSP responds but port
+ *                             0x388 has an AdLib chip. Clean sine voice.
+ *   PC speaker             — universal fallback. Square-wave via PIT C2.
  *
- * Runtime detection: brief OPL2 timer-status probe at 0x388 before
- * playback starts. If probe succeeds, OPL2 wins; otherwise speaker.
- * Confirms end-to-end audio: if you hear 8 ascending notes, your
- * audio path (either OPL or speaker) works.
- *
- * v0.6.2 deferred: SB16 PCM DMA playback. OPL2 FM covers
- * AdLib + SB1 + SB Pro + SB16 in v0.6.1; PCM DMA adds complexity
- * (8237 channel setup, DSP init, buffer management) for marginal
- * audible benefit over OPL on a short scale.
+ * Scope note: v0.6.2 uses DSP direct mode (command 0x10 per sample)
+ * rather than DMA-buffered playback. DSP direct gives us genuine PCM
+ * output without the 8237 / IRQ complexity of a full DMA driver; it
+ * does run at a lower effective sample rate (~2-4 kHz via Watcom busy-
+ * wait on a 486). Fidelity is squarer than DMA-streamed PCM but clearly
+ * distinct from OPL's FM — the "is your SB card actually producing
+ * PCM samples" question gets a direct yes/no answer.
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <dos.h>
 #include <conio.h>
 #include "audio_scale.h"
 #include "display.h"
+#include "tui_util.h"
 #include "journey.h"
 
 #define AS_COLS 80
@@ -58,57 +62,25 @@ static const unsigned int opl_fnum[8] = {
 #define OPL_ADDR 0x388
 #define OPL_DATA 0x389
 
+/* Sound Blaster DSP — base port parsed from BLASTER env at runtime. */
+static unsigned int sb_base = 0;
+#define SB_RESET(base)  ((base) + 0x06)
+#define SB_READ(base)   ((base) + 0x0A)
+#define SB_WRITE(base)  ((base) + 0x0C)
+#define SB_DATA_AVAIL(base) ((base) + 0x0E)
+
 static const char *const note_label[8] = {
     "C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"
 };
 
-static unsigned char __far *as_vram(void)
-{
-    adapter_t a = display_adapter();
-    if (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-        a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO) {
-        return (unsigned char __far *)MK_FP(0xB000, 0x0000);
-    }
-    return (unsigned char __far *)MK_FP(0xB800, 0x0000);
-}
 
-static int as_is_mono(void)
-{
-    adapter_t a = display_adapter();
-    return (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-            a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO);
-}
 
-static void as_putc(int row, int col, unsigned char ch, unsigned char attr)
-{
-    unsigned char __far *v = as_vram();
-    unsigned int off = (unsigned int)((row * AS_COLS + col) * 2);
-    v[off] = ch; v[off + 1] = attr;
-}
 
-static void as_puts(int row, int col, const char *s, unsigned char attr)
-{
-    while (*s && col < AS_COLS) { as_putc(row, col++, (unsigned char)*s++, attr); }
-}
 
-static void as_fill(int r0, int r1, unsigned char ch, unsigned char attr)
-{
-    int r, c;
-    for (r = r0; r <= r1; r++)
-        for (c = 0; c < AS_COLS; c++) as_putc(r, c, ch, attr);
-}
 
-static unsigned long as_ticks(void)
-{
-    unsigned int __far *low  = (unsigned int __far *)MK_FP(0x0040, 0x006C);
-    unsigned int __far *high = (unsigned int __far *)MK_FP(0x0040, 0x006E);
-    unsigned int h1, h2, l;
-    do { h1 = *high; l = *low; h2 = *high; } while (h1 != h2);
-    return ((unsigned long)h1 << 16) | l;
-}
 
 /* ----------------------------------------------------------------------- */
-/* OPL2 FM path                                                             */
+/* SB DSP direct-mode PCM path                                              */
 /* ----------------------------------------------------------------------- */
 
 /* Short bus-settle delay via port 0x80 reads (ISA-stable microsecond-ish). */
@@ -117,6 +89,118 @@ static void as_delay_us(unsigned long us)
     unsigned long i;
     for (i = 0; i < us; i++) (void)inp(0x80);
 }
+
+/* Parse BLASTER env. Format: "A220 I5 D1 H5 T4" — we only need A<hex>.
+ * Returns base port (0 on miss). */
+static unsigned int as_parse_blaster_base(void)
+{
+    const char *env = getenv("BLASTER");
+    unsigned int base = 0;
+    if (!env) return 0;
+    while (*env) {
+        if (*env == 'A' || *env == 'a') {
+            unsigned int v = 0;
+            env++;
+            while (*env && *env != ' ') {
+                unsigned char c = (unsigned char)*env;
+                unsigned int d;
+                if (c >= '0' && c <= '9') d = c - '0';
+                else if (c >= 'A' && c <= 'F') d = 10 + c - 'A';
+                else if (c >= 'a' && c <= 'f') d = 10 + c - 'a';
+                else break;
+                v = (v << 4) | d;
+                env++;
+            }
+            base = v;
+            break;
+        }
+        env++;
+    }
+    return base;
+}
+
+/* DSP reset sequence. Returns 1 on clean reset (0xAA byte), 0 otherwise. */
+static int as_sb_dsp_reset(unsigned int base)
+{
+    int tries;
+    outp(SB_RESET(base), 1);
+    as_delay_us(10);
+    outp(SB_RESET(base), 0);
+    /* Poll data-avail bit 7 at base+0xE for up to ~100 us. */
+    for (tries = 0; tries < 200; tries++) {
+        if (inp(SB_DATA_AVAIL(base)) & 0x80) {
+            unsigned char got = (unsigned char)inp(SB_READ(base));
+            return (got == 0xAA) ? 1 : 0;
+        }
+        as_delay_us(1);
+    }
+    return 0;
+}
+
+/* Probe. Parses BLASTER, resets DSP, returns 1 on success. */
+static int as_sb_probe(void)
+{
+    sb_base = as_parse_blaster_base();
+    if (sb_base == 0) return 0;
+    return as_sb_dsp_reset(sb_base);
+}
+
+/* Write a DSP command or data byte. Poll write-ready bit 7 at base+C. */
+static void as_sb_write(unsigned char b)
+{
+    int guard;
+    for (guard = 0; guard < 4000; guard++) {
+        if ((inp(SB_WRITE(sb_base)) & 0x80) == 0) break;
+    }
+    outp(SB_WRITE(sb_base), (int)b);
+}
+
+static void as_sb_speaker_on(void)  { as_sb_write(0xD1); }
+static void as_sb_speaker_off(void) { as_sb_write(0xD3); }
+
+/* Play a square-wave note for `duration_samples` at the given half-period
+ * count (samples-per-half-cycle). Uses DSP command 0x10 per sample. */
+static void as_sb_play_note(unsigned int half_period, unsigned long samples,
+                            volatile int *abort_flag)
+{
+    unsigned long i;
+    unsigned char level = 0xFF;
+    unsigned int phase = 0;
+    for (i = 0; i < samples; i++) {
+        as_sb_write(0x10);           /* DSP direct output command */
+        as_sb_write(level);          /* 8-bit unsigned sample */
+        phase++;
+        if (phase >= half_period) { phase = 0; level = (unsigned char)~level; }
+        /* Skip poll every 64 samples */
+        if ((i & 63) == 0 && abort_flag && *abort_flag) return;
+    }
+}
+
+/* Sample-rate estimate per DSP write: Watcom busy-wait + two outp's on
+ * a 486 DX-2 runs ~2-4 kHz. For note frequencies we choose half_period
+ * in samples such that (sample_rate / freq / 2) ≈ half_period. Using
+ * nominal 3000 Hz sample rate:
+ *   C4 262 Hz → 3000 / 262 / 2 ≈ 5.7  → 6
+ *   D4 294   → 5
+ *   ...
+ * Values are rough — user will hear distinct ascending pitches which
+ * is the whole point of the journey demo. */
+static const unsigned int sb_half_period[8] = {
+    6,   /* C4 ~ 262 */
+    5,   /* D4 ~ 294 */
+    5,   /* E4 ~ 330 */
+    4,   /* F4 ~ 349 */
+    4,   /* G4 ~ 392 */
+    3,   /* A4 ~ 440 */
+    3,   /* B4 ~ 494 */
+    3    /* C5 ~ 523 */
+};
+/* ~150 ms of samples per note at 3 kHz → 450 samples. */
+#define SB_SAMPLES_PER_NOTE 450UL
+
+/* ----------------------------------------------------------------------- */
+/* OPL2 FM path                                                             */
+/* ----------------------------------------------------------------------- */
 
 static void as_opl_write(unsigned char reg, unsigned char val)
 {
@@ -219,8 +303,8 @@ static void as_draw_bar(int col, int bar_top, int height, unsigned char attr)
 {
     int r;
     for (r = 0; r < height; r++) {
-        as_putc(bar_top + r, col,     0xDB, attr);
-        as_putc(bar_top + r, col + 1, 0xDB, attr);
+        tui_putc(bar_top + r, col,     0xDB, attr);
+        tui_putc(bar_top + r, col + 1, 0xDB, attr);
     }
 }
 
@@ -228,18 +312,26 @@ void audio_scale_visual(const opts_t *o)
 {
     unsigned char label_attr, bar_attr, title_attr;
     int i;
-    int using_opl;
+    int using_sb = 0;
+    int using_opl = 0;
+
     const int BAR_BASE = 18;      /* bottommost row of bars */
     const int BAR_MAX_H = 10;     /* tallest bar = 10 cells */
     const int FIRST_COL = 16;     /* leftmost bar column */
 
     if (journey_should_skip(o)) return;
 
-    using_opl = as_opl_probe();
+    /* Probe order: SB DSP direct → OPL2 FM → PC speaker fallback. */
+    using_sb = as_sb_probe();
+    if (!using_sb) using_opl = as_opl_probe();
 
     {
         const char *desc;
-        if (using_opl) {
+        if (using_sb) {
+            desc = "Playing a test scale as PCM samples through your "
+                   "Sound Blaster DSP. If you hear 8 ascending square-"
+                   "wave notes, your SB PCM path works.";
+        } else if (using_opl) {
             desc = "Playing a test scale through AdLib/Sound Blaster "
                    "OPL2 FM. If you hear 8 ascending notes, your audio "
                    "path works end-to-end.";
@@ -252,22 +344,27 @@ void audio_scale_visual(const opts_t *o)
             return;
     }
 
-    if (as_is_mono()) {
+    if (tui_is_mono()) {
         title_attr = ATTR_BOLD; label_attr = ATTR_NORMAL; bar_attr = ATTR_BOLD;
     } else {
         title_attr = ATTR_BOLD; label_attr = ATTR_NORMAL; bar_attr = ATTR_YELLOW;
     }
 
-    as_fill(0, AS_ROWS - 1, ' ', ATTR_NORMAL);
-    as_puts(3, (AS_COLS - 26) / 2,
-            using_opl ? "Audio Scale — OPL2 FM Synth"
-                      : "Audio Scale — PC Speaker", title_attr);
+    tui_fill(0, AS_ROWS - 1, ' ', ATTR_NORMAL);
+    {
+        const char *heading;
+        if (using_sb)      heading = "Audio Scale — SB DSP Direct PCM";
+        else if (using_opl) heading = "Audio Scale — OPL2 FM Synth";
+        else                heading = "Audio Scale — PC Speaker";
+        tui_puts(3, (AS_COLS - (int)strlen(heading)) / 2, heading, title_attr);
+    }
 
     if (using_opl) as_opl_program();
+    if (using_sb)  as_sb_speaker_on();
 
     /* Pre-draw labels */
     for (i = 0; i < 8; i++) {
-        as_puts(BAR_BASE + 2, FIRST_COL + i * 7, note_label[i], label_attr);
+        tui_puts(BAR_BASE + 2, FIRST_COL + i * 7, note_label[i], label_attr);
     }
 
     for (i = 0; i < 8; i++) {
@@ -275,28 +372,45 @@ void audio_scale_visual(const opts_t *o)
         int bar_top = BAR_BASE - height + 1;
         /* Play + show simultaneously */
         as_draw_bar(FIRST_COL + i * 7, bar_top, height, bar_attr);
-        if (using_opl) {
+        if (using_sb) {
+            /* DSP direct mode — SB_SAMPLES_PER_NOTE samples at the chosen
+             * half-period. The playback loop itself holds the note duration;
+             * no separate tick wait needed. journey_poll_skip is checked
+             * inside as_sb_play_note via abort flag. */
+            int abort_flag = 0;
+            as_sb_play_note(sb_half_period[i], SB_SAMPLES_PER_NOTE,
+                            &abort_flag);
+            if (journey_poll_skip()) {
+                as_sb_speaker_off();
+                return;
+            }
+        } else if (using_opl) {
             as_opl_note_on(opl_fnum[i]);
-        } else {
-            as_speaker_on(note_freq[i]);
-        }
-        /* Hold ~250 ms = 5 BIOS ticks */
-        {
-            unsigned long end = as_ticks() + 5UL;
-            while (as_ticks() < end) {
-                if (journey_poll_skip()) {
-                    if (using_opl) as_opl_note_off(); else as_speaker_off();
-                    return;
+            {
+                unsigned long end = tui_ticks() + 5UL;
+                while (tui_ticks() < end) {
+                    if (journey_poll_skip()) { as_opl_note_off(); return; }
                 }
             }
+            as_opl_note_off();
+        } else {
+            as_speaker_on(note_freq[i]);
+            {
+                unsigned long end = tui_ticks() + 5UL;
+                while (tui_ticks() < end) {
+                    if (journey_poll_skip()) { as_speaker_off(); return; }
+                }
+            }
+            as_speaker_off();
         }
-        if (using_opl) as_opl_note_off(); else as_speaker_off();
     }
+
+    if (using_sb) as_sb_speaker_off();
 
     /* Leave the final state on screen briefly, then any-key to continue */
     {
-        unsigned long end = as_ticks() + 18UL;   /* ~1 s */
-        while (as_ticks() < end) {
+        unsigned long end = tui_ticks() + 18UL;   /* ~1 s */
+        while (tui_ticks() < end) {
             if (kbhit()) {
                 union REGS r;
                 r.h.ah = 0x00;

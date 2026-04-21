@@ -22,57 +22,17 @@
 #include <dos.h>
 #include "diag.h"
 #include "../core/display.h"
+#include "../core/tui_util.h"
 #include "../core/journey.h"
 
 #define BP_COLS 80
 #define BP_ROWS 25
 
-static unsigned char __far *bp_vram(void)
-{
-    adapter_t a = display_adapter();
-    if (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-        a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO) {
-        return (unsigned char __far *)MK_FP(0xB000, 0x0000);
-    }
-    return (unsigned char __far *)MK_FP(0xB800, 0x0000);
-}
 
-static int bp_is_mono(void)
-{
-    adapter_t a = display_adapter();
-    return (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-            a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO);
-}
 
-static void bp_putc(int row, int col, unsigned char ch, unsigned char attr)
-{
-    unsigned char __far *v = bp_vram();
-    unsigned int off = (unsigned int)((row * BP_COLS + col) * 2);
-    v[off] = ch; v[off + 1] = attr;
-}
 
-static void bp_puts(int row, int col, const char *s, unsigned char attr)
-{
-    while (*s && col < BP_COLS) {
-        bp_putc(row, col++, (unsigned char)*s++, attr);
-    }
-}
 
-static void bp_fill(int r0, int r1, unsigned char ch, unsigned char attr)
-{
-    int r, c;
-    for (r = r0; r <= r1; r++)
-        for (c = 0; c < BP_COLS; c++) bp_putc(r, c, ch, attr);
-}
 
-static unsigned long bp_ticks(void)
-{
-    unsigned int __far *low  = (unsigned int __far *)MK_FP(0x0040, 0x006C);
-    unsigned int __far *high = (unsigned int __far *)MK_FP(0x0040, 0x006E);
-    unsigned int h1, h2, l;
-    do { h1 = *high; l = *low; h2 = *high; } while (h1 != h2);
-    return ((unsigned long)h1 << 16) | l;
-}
 
 /* 16-bit ALU ops. Each takes (current register, operand) and returns the
  * result. Watcom compiles these to native instructions (ROL/ROR require
@@ -133,8 +93,8 @@ static void bp_render_bits(int row, int col, unsigned int reg,
         int bit = (reg >> (15 - i)) & 1;
         unsigned char glyph = bit ? 0xDB : 0xB0;
         unsigned char attr  = bit ? bit_on_attr : bit_off_attr;
-        bp_putc(row, col + i * 2,     glyph, attr);
-        bp_putc(row, col + i * 2 + 1, glyph, attr);
+        tui_putc(row, col + i * 2,     glyph, attr);
+        tui_putc(row, col + i * 2 + 1, glyph, attr);
     }
 }
 
@@ -156,7 +116,7 @@ void diag_bit_parade(const opts_t *o)
         return;  /* skip-all latched */
     }
 
-    if (bp_is_mono()) {
+    if (tui_is_mono()) {
         title_attr   = ATTR_BOLD;
         bit_on_attr  = ATTR_BOLD;
         bit_off_attr = ATTR_NORMAL;
@@ -168,8 +128,8 @@ void diag_bit_parade(const opts_t *o)
         label_attr   = ATTR_NORMAL;
     }
 
-    bp_fill(0, BP_ROWS - 1, ' ', ATTR_NORMAL);
-    bp_puts(3, (BP_COLS - 21) / 2, "CPU ALU — Bit Parade", title_attr);
+    tui_fill(0, BP_ROWS - 1, ' ', ATTR_NORMAL);
+    tui_puts(3, (BP_COLS - 21) / 2, "CPU ALU — Bit Parade", title_attr);
     {
         /* Header row: bit numbers 15..0, 2 cells apart */
         char header[48];
@@ -179,15 +139,15 @@ void diag_bit_parade(const opts_t *o)
         for (i = 15; i >= 0; i--) {
             p += sprintf(header + p, "%2d", i);
         }
-        bp_puts(8, (BP_COLS - p) / 2 - 6, "Bit: ", label_attr);
-        bp_puts(8, (BP_COLS - p) / 2, header, label_attr);
+        tui_puts(8, (BP_COLS - p) / 2 - 6, "Bit: ", label_attr);
+        tui_puts(8, (BP_COLS - p) / 2, header, label_attr);
     }
 
-    start = bp_ticks();
+    start = tui_ticks();
     deadline = start + 54UL;   /* ~3 s at 18.2 Hz */
 
     /* 16-bit register value display column (centered, 32 cells = 16*2) */
-    while (bp_ticks() < deadline) {
+    while (tui_ticks() < deadline) {
         unsigned int before = reg;
         alu_op_t cur = ops[op_idx];
         reg = cur.fn(reg, cur.operand);
@@ -200,9 +160,9 @@ void diag_bit_parade(const opts_t *o)
         {
             char line[40];
             sprintf(line, "Op: %-10s  iter: %lu", cur.label, iters);
-            bp_puts(13, (BP_COLS - 38) / 2, "                                      ",
+            tui_puts(13, (BP_COLS - 38) / 2, "                                      ",
                     ATTR_NORMAL);  /* clear */
-            bp_puts(13, (BP_COLS - (int)strlen(line)) / 2, line, label_attr);
+            tui_puts(13, (BP_COLS - (int)strlen(line)) / 2, line, label_attr);
         }
 
         iters++;

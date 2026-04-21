@@ -25,6 +25,7 @@
 #include <malloc.h>
 #include "diag.h"
 #include "../core/display.h"
+#include "../core/tui_util.h"
 #include "../core/journey.h"
 
 #define LM_COLS 80
@@ -34,50 +35,11 @@
 #define LM_STRIP_COL 8       /* left edge of heat strip */
 #define LM_STRIP_ROW 10
 
-static unsigned char __far *lm_vram(void)
-{
-    adapter_t a = display_adapter();
-    if (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-        a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO) {
-        return (unsigned char __far *)MK_FP(0xB000, 0x0000);
-    }
-    return (unsigned char __far *)MK_FP(0xB800, 0x0000);
-}
 
-static int lm_is_mono(void)
-{
-    adapter_t a = display_adapter();
-    return (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-            a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO);
-}
 
-static void lm_putc(int row, int col, unsigned char ch, unsigned char attr)
-{
-    unsigned char __far *v = lm_vram();
-    unsigned int off = (unsigned int)((row * LM_COLS + col) * 2);
-    v[off] = ch; v[off + 1] = attr;
-}
 
-static void lm_puts(int row, int col, const char *s, unsigned char attr)
-{
-    while (*s && col < LM_COLS) { lm_putc(row, col++, (unsigned char)*s++, attr); }
-}
 
-static void lm_fill(int r0, int r1, unsigned char ch, unsigned char attr)
-{
-    int r, c;
-    for (r = r0; r <= r1; r++)
-        for (c = 0; c < LM_COLS; c++) lm_putc(r, c, ch, attr);
-}
 
-static unsigned long lm_ticks(void)
-{
-    unsigned int __far *low  = (unsigned int __far *)MK_FP(0x0040, 0x006C);
-    unsigned int __far *high = (unsigned int __far *)MK_FP(0x0040, 0x006E);
-    unsigned int h1, h2, l;
-    do { h1 = *high; l = *low; h2 = *high; } while (h1 != h2);
-    return ((unsigned long)h1 << 16) | l;
-}
 
 /* Time a tight read-sweep at the given cell's offset. Each cell covers
  * (LM_BUF_SIZE / LM_CELLS) = 512 bytes. We do enough reads to land
@@ -88,7 +50,7 @@ static unsigned long lm_measure_cell(unsigned char __far *buf,
                                      unsigned long window_bytes,
                                      unsigned long iterations)
 {
-    unsigned long start = lm_ticks();
+    unsigned long start = tui_ticks();
     unsigned long elapsed;
     unsigned long i;
     unsigned char sink = 0;
@@ -99,7 +61,7 @@ static unsigned long lm_measure_cell(unsigned char __far *buf,
             sink ^= p[j];
         }
     }
-    elapsed = lm_ticks() - start;
+    elapsed = tui_ticks() - start;
     /* Side-effect on sink to prevent DCE. */
     ((volatile unsigned char *)&sink)[0] = sink;
     return elapsed;
@@ -169,18 +131,18 @@ void diag_latency_map(const opts_t *o)
         for (i2 = 0; i2 < LM_BUF_SIZE; i2++) buf[i2] = (unsigned char)i2;
     }
 
-    if (lm_is_mono()) {
+    if (tui_is_mono()) {
         title_attr = ATTR_BOLD; label_attr = ATTR_NORMAL;
     } else {
         title_attr = ATTR_BOLD; label_attr = ATTR_NORMAL;
     }
 
-    lm_fill(0, LM_ROWS - 1, ' ', ATTR_NORMAL);
-    lm_puts(3, (LM_COLS - 24) / 2, "Cache Latency Heat Map", title_attr);
-    lm_puts(7,  LM_STRIP_COL,     "0 KB", label_attr);
-    lm_puts(7,  LM_STRIP_COL + LM_CELLS / 2 - 3, "16 KB", label_attr);
-    lm_puts(7,  LM_STRIP_COL + LM_CELLS - 5, "32 KB", label_attr);
-    lm_puts(14, LM_STRIP_COL,
+    tui_fill(0, LM_ROWS - 1, ' ', ATTR_NORMAL);
+    tui_puts(3, (LM_COLS - 24) / 2, "Cache Latency Heat Map", title_attr);
+    tui_puts(7,  LM_STRIP_COL,     "0 KB", label_attr);
+    tui_puts(7,  LM_STRIP_COL + LM_CELLS / 2 - 3, "16 KB", label_attr);
+    tui_puts(7,  LM_STRIP_COL + LM_CELLS - 5, "32 KB", label_attr);
+    tui_puts(14, LM_STRIP_COL,
             "<  green: cache-speed        yellow: intermediate        red: main memory  >",
             label_attr);
 
@@ -197,22 +159,22 @@ void diag_latency_map(const opts_t *o)
         if (samples[i] < sample_min) sample_min = samples[i];
         if (samples[i] > sample_max) sample_max = samples[i];
         /* Draw a provisional cell so user sees progress */
-        lm_putc(LM_STRIP_ROW, LM_STRIP_COL + i, 0xB1, ATTR_DIM);
+        tui_putc(LM_STRIP_ROW, LM_STRIP_COL + i, 0xB1, ATTR_DIM);
         if (journey_poll_skip()) { _ffree(buf); return; }
     }
 
     /* Render final colored strip */
     for (i = 0; i < LM_CELLS; i++) {
         int heat = lm_heat_level(samples[i], sample_min, sample_max);
-        unsigned char attr = lm_heat_attr(heat, lm_is_mono());
-        lm_putc(LM_STRIP_ROW, LM_STRIP_COL + i, 0xDB, attr);
-        lm_putc(LM_STRIP_ROW + 1, LM_STRIP_COL + i, 0xDB, attr);
+        unsigned char attr = lm_heat_attr(heat, tui_is_mono());
+        tui_putc(LM_STRIP_ROW, LM_STRIP_COL + i, 0xDB, attr);
+        tui_putc(LM_STRIP_ROW + 1, LM_STRIP_COL + i, 0xDB, attr);
     }
 
     /* Brief hold */
     {
-        unsigned long end = lm_ticks() + 36UL;   /* ~2 s */
-        while (lm_ticks() < end) {
+        unsigned long end = tui_ticks() + 36UL;   /* ~2 s */
+        while (tui_ticks() < end) {
             if (kbhit()) {
                 union REGS r;
                 r.h.ah = 0x00;
