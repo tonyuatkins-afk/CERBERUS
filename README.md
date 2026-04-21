@@ -1,6 +1,6 @@
 # CERBERUS
 
-DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; v0.7.0-rc1 is 163,922 bytes. Targets an 8088 with 256KB and an MDA card as the floor and scales up through a 486 with VGA.
+DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; v0.7.0-rc2 is 164,050 bytes. Targets an 8088 with 256KB and an MDA card as the floor and scales up through a 486 with VGA.
 
 Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelybooting-server](https://github.com/tonyuatkins-afk/barelybooting-server) is the companion web app that ingests uploaded CERBERUS.INI runs at `barelybooting.com/cerberus/`.
 
@@ -8,7 +8,7 @@ Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelyboot
 
 ## Status
 
-**`v0.7.0-rc1` tagged 2026-04-20.** Release-candidate for the community-upload feature. Eleven tags across the arc: `v0.1.1-scaffold` → `v0.2-rc1` → `v0.3-rc1` → `v0.4-rc1` → **`v0.4.0`** → **`v0.5.0`** → **`v0.6.0`** → `v0.6.1` → `v0.6.2` → **`v0.7.0-rc1`**. The full `v0.7.0` tag is held until the companion server is deployed and an end-to-end upload round-trip validates on real hardware (see [`docs/ini-upload-contract.md`](docs/ini-upload-contract.md)).
+**`v0.7.0-rc2` tagged 2026-04-20.** Release-candidate for the community-upload feature, quality-gated. Twelve tags across the arc: `v0.1.1-scaffold` → `v0.2-rc1` → `v0.3-rc1` → `v0.4-rc1` → **`v0.4.0`** → **`v0.5.0`** → **`v0.6.0`** → `v0.6.1` → `v0.6.2` → `v0.7.0-rc1` → **`v0.7.0-rc2`**. The companion server hit [`v0.1.0`](https://github.com/tonyuatkins-afk/barelybooting-server/releases/tag/v0.1.0) on 2026-04-21, production-ready (Docker + Cloudflare Tunnel, red-teamed). The full `v0.7.0` CERBERUS tag is held until the server goes live and an end-to-end upload round-trip validates on real hardware (see [`docs/ini-upload-contract.md`](docs/ini-upload-contract.md)).
 
 **What's in each milestone:**
 - **v0.4.0** (2026-04-19) — All six subsystems (detect, diagnose, benchmark, consistency engine, thermal tracker, UI) real-hardware-validated on BEK-V409.
@@ -17,6 +17,7 @@ Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelyboot
 - **v0.6.1** — Memory Cache Waterfall; Cache Latency Heat Map; OPL2 FM audio scale; result flashes wired.
 - **v0.6.2** — Shared TUI helpers module; SB DSP direct-mode PCM audio (third audio path).
 - **v0.7.0-rc1** — Community Upload (Part A): network transport detection, `[upload]` INI section, `/NOUPLOAD`/`/UPLOAD`/`/NICK`/`/NOTE` flags, HTGET shell-out for POST, UPLOAD STATUS summary section, INI format frozen at `ini_format=1`, server API contract documented at [`docs/ini-upload-contract.md`](docs/ini-upload-contract.md).
+- **v0.7.0-rc2** — Quality-gate sweep: atomic BIOS-tick read in `intro.c`, `UPLOAD.TMP` cleanup on fopen failure, INI dedup via `report_update_str()` for post-upload status emit, `audit_narration_widths()` spot-check.
 
 BEK-V409 (Intel i486DX-2-66, AMI BIOS 11/11/92, S3 Trio64, Vibra 16S, 63 MB XMS) is the validation workstation. 386 and 8088 validation are the next-platforms work. Hardware identification has 128 seed entries across 5 databases; your chip may not be present. `CERBERUS.UNK` captures get submitted as GitHub issues and added to the CSVs.
 
