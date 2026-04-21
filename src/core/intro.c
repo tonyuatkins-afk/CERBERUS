@@ -157,8 +157,20 @@ static void recolor_all(unsigned char attr)
 
 static unsigned long read_ticks(void)
 {
-    unsigned long __far *t = (unsigned long __far *)MK_FP(0x0040, 0x006C);
-    return *t;
+    /* Atomic read. A single 32-bit deref compiles to two 16-bit loads
+     * on 8088 — INT 8 can fire between them and increment the high
+     * word, corrupting the returned value mid-read. Retry until the
+     * high word matches across two reads. Same pattern as timing.c
+     * and tui_util.c. v0.7.0-rc2 quality-gate fix. */
+    unsigned int __far *hi = (unsigned int __far *)MK_FP(0x0040, 0x006E);
+    unsigned int __far *lo = (unsigned int __far *)MK_FP(0x0040, 0x006C);
+    unsigned int h1, h2, l;
+    do {
+        h1 = *hi;
+        l  = *lo;
+        h2 = *hi;
+    } while (h1 != h2);
+    return ((unsigned long)h1 << 16) | l;
 }
 
 /* Wait up to n ticks (n * ~54.9 ms), early-return 1 if a key was

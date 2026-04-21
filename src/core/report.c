@@ -81,6 +81,26 @@ int report_set_verdict(result_table_t *t, const char *key, verdict_t v)
     return 0;
 }
 
+void report_update_str(result_table_t *t, const char *key, const char *value,
+                       confidence_t conf, verdict_t verdict)
+{
+    unsigned int i;
+    for (i = 0; i < t->count; i++) {
+        if (strcmp(t->results[i].key, key) == 0) {
+            /* Update in place. Type may have been anything before; we
+             * coerce to V_STR since the caller is writing a string. */
+            t->results[i].type       = V_STR;
+            t->results[i].v.s        = value;
+            t->results[i].display    = value;
+            t->results[i].confidence = conf;
+            t->results[i].verdict    = verdict;
+            return;
+        }
+    }
+    /* Key not yet present — fall through to append. */
+    report_add_str(t, key, value, conf, verdict);
+}
+
 /* ----------------------------------------------------------------------- */
 /* Hardware-identity signature (frozen canonical subset)                    */
 /* ----------------------------------------------------------------------- */

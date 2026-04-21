@@ -2,6 +2,73 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [v0.7.0-rc2], 2026-04-20 — end-to-end quality gate fixes
+
+Release candidate 2 lands fixes surfaced by a systematic end-to-end
+quality-gate audit of the v0.5.0 → v0.7.0-rc1 arc. No functional
+changes from rc1; correctness + doc fixes only. Tag `v0.7.0` still
+held until Part B server validation.
+
+### Fixes
+
+1. **`intro.c read_ticks()` atomic-read pattern.** `read_ticks()`
+   was doing a single 32-bit pointer deref against the BIOS tick
+   counter at 0040:006C. On 8088 that compiles to two 16-bit loads,
+   and INT 8 can fire between them, corrupting the high word.
+   Animation-only impact (the intro's `wait_ticks_or_key` was
+   consuming the value) but pre-existing bug surfaced by the audit.
+   Fixed to use the same atomic h1/l/h2 retry pattern that
+   `timing.c` and `tui_util.c` already use.
+
+2. **`upload.c htget_post()` UPLOAD.TMP cleanup on fopen failure.**
+   Every failure branch of `htget_post` called `remove(UPLOAD_TMP_PATH)`
+   except one: if HTGET wrote UPLOAD.TMP successfully but the
+   subsequent `fopen()` failed (I/O error, permission denial, TSR
+   interference), the stale file was left on disk and would be
+   mis-read on the NEXT upload attempt. Added `remove()` to that
+   branch.
+
+3. **`[upload]` section INI duplicate-key emission.** The flow
+   `report_write_ini() → upload_execute() → report_write_ini()` was
+   appending new `upload.status` / `upload.submission_id` /
+   `upload.url` rows on the second pass without deduplicating
+   against the empty versions added on the first. Last-value-wins
+   parsing tolerated this, but the INI file looked ugly with
+   duplicated `upload.nickname=` lines. New helper
+   `report_update_str()` updates in place (mirrors the existing
+   `report_set_verdict` pattern). `upload.c:set_status` and
+   `set_submission` switched to it.
+
+4. **`[upload] status` enum documented.** `ini-format.md` now lists
+   all six values the client actually emits (`uploaded`, `offline`,
+   `skipped`, `no_client`, `failed`, `bad_response`) with
+   when-emitted semantics. Contract in `ini-upload-contract.md`
+   updated to match and explicitly requires server tolerance of
+   the full enum.
+
+5. **`[upload] url` documented.** Was emitted by the client on
+   successful upload but absent from `ini-format.md` — server's
+   permissive parser accepted it, but spec/code drift. Added to
+   the format reference.
+
+### Deferred to v0.7.1+
+
+- `ui.c` and `intro.c` retain private VRAM helper copies predating
+  the v0.6.2 `tui_util` extraction. Cleanup-only, no behavior
+  delta; filed as refactor.
+- `bench_cache.c:105` stale "TODO (v0.5)" comment; should move to
+  issue tracker.
+
+### Build state
+
+- CERBERUS.EXE: 164,050 bytes (+128 vs rc1; report_update_str + comments)
+- MD5: 4042491e8334d904c561bb0942ec092a
+- DGROUP: 59,168 / 64,000 DOS limit (soft 56K target exceeded,
+  accepted)
+- Host tests: 7 suites, 201 OK, 0 failures
+- Zero warnings on clean rebuild
+- Version string: `0.7.0-rc2`
+
 ## [v0.7.0-rc1], 2026-04-20 evening — Part A of Community Upload
 
 **Status**: Release candidate. Tag is `v0.7.0-rc1`, NOT `v0.7.0`. Per

@@ -204,12 +204,25 @@ v0.7.0. User metadata + upload outcome.
 |-----|------|--------|---------|
 | `nickname` | string (max 32) | `/NICK` flag | User-provided nickname. Empty if not set. |
 | `notes` | string (max 128) | `/NOTE` flag | User-provided note. Empty if not set. |
-| `status` | enum | client | `uploaded`, `failed`, `skipped`, `offline`. |
-| `submission_id` | 8-char hex | server response | Populated after successful POST. |
+| `status` | enum | client | See status values below. |
+| `submission_id` | 8-char hex | server response | Populated on `uploaded` only. Absent / empty on every other status. |
+| `url` | string | server response | Public view URL. Populated on `uploaded` only. Absent / empty otherwise. |
+
+**`status` values** (exhaustive; client may emit any one of these):
+
+| Value | When | Terminal? |
+|---|---|---|
+| `uploaded` | 200 received, 2-line response parsed, `submission_id` + `url` populated | Yes |
+| `offline` | `network.transport=none` — no network detected, no POST attempted | Yes |
+| `skipped` | User declined the Y/n prompt, or `/NOUPLOAD` was passed | Yes |
+| `no_client` | Network detected but `HTGET.EXE` not on PATH (install mTCP) | Yes |
+| `failed` | HTGET invoked, non-zero exit (connection refused / DNS miss / timeout) | Yes |
+| `bad_response` | HTGET returned 0, but the body wasn't the contract-specified 2 lines | Yes |
 
 The `[upload]` section is always emitted (even when all fields are
 empty / `offline`) so the server parser can treat its absence as a
-client-error signal.
+client-error signal. The server parser MUST tolerate the full enum
+above; unrecognized values should be logged but not rejected.
 
 ## Trailer: `run_signature=<hex>`
 

@@ -107,18 +107,25 @@ nickname=tony
 notes=BEK-V409 with fresh BIOS
 status=uploaded
 submission_id=a1b2c3d4
+url=http://barelybooting.com/cerberus/run/a1b2c3d4
 ```
 
 - `nickname` and `notes` populated from `/NICK` and `/NOTE` flags.
   Both empty-string when not provided. Max lengths: nickname 32,
   notes 128. Client enforces.
-- `status` reflects upload outcome written by the CLIENT after POST:
-  `uploaded`, `failed`, `skipped` (user declined), `offline` (no
-  network). Server ignores this field on inbound (it describes the
-  client's own state).
+- `status` reflects upload outcome written by the CLIENT after POST.
+  Full enum: `uploaded`, `offline` (no network), `skipped` (user
+  declined / `/NOUPLOAD`), `no_client` (HTGET missing), `failed`
+  (HTGET non-zero exit), `bad_response` (HTGET 0 but body malformed).
+  Server parses for inbound logging only — the client's own state.
+  Server MUST tolerate any value in the enum; unrecognized values
+  should be logged, not rejected.
 - `submission_id` is populated by the CLIENT after a successful POST
-  with the value returned in response line 1. Server ignores on
-  inbound; useful if the user later re-examines the local INI.
+  with the value returned in response line 1. Absent on every other
+  status. Server ignores on inbound; useful if the user later
+  re-examines the local INI.
+- `url` is populated by the CLIENT after a successful POST with line
+  2 of the server response. Server ignores on inbound.
 
 ### [environment], [cpu], [fpu], [memory], [cache], [bus], [video], [audio], [bios], [diagnose], [bench], [consistency]
 

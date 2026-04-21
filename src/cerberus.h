@@ -1,7 +1,7 @@
 #ifndef CERBERUS_H
 #define CERBERUS_H
 
-#define CERBERUS_VERSION          "0.7.0-rc1"
+#define CERBERUS_VERSION          "0.7.0-rc2"
 #define CERBERUS_SCHEMA_VERSION   "1.0"
 #define CERBERUS_SIGNATURE_SCHEMA "1"
 /* ini_format: integer, increments on INI breaking changes (key removal,

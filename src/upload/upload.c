@@ -105,8 +105,13 @@ static void set_status(result_table_t *t, const char *status)
 {
     strncpy(upload_status_buf, status, sizeof(upload_status_buf) - 1);
     upload_status_buf[sizeof(upload_status_buf) - 1] = '\0';
-    report_add_str(t, "upload.status", upload_status_buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    /* v0.7.0-rc2: update_str instead of add_str. upload_execute() runs
+     * AFTER the first report_write_ini pass, so the [upload] section
+     * already has nickname/notes rows in the table — plain add_str here
+     * would have created duplicate upload.status rows across the two
+     * report_write_ini calls. update_str writes in place. */
+    report_update_str(t, "upload.status", upload_status_buf,
+                      CONF_HIGH, VERDICT_UNKNOWN);
 }
 
 static void set_submission(result_table_t *t,
@@ -115,13 +120,13 @@ static void set_submission(result_table_t *t,
     strncpy(upload_submission_id_buf, id,
             sizeof(upload_submission_id_buf) - 1);
     upload_submission_id_buf[sizeof(upload_submission_id_buf) - 1] = '\0';
-    report_add_str(t, "upload.submission_id", upload_submission_id_buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    report_update_str(t, "upload.submission_id", upload_submission_id_buf,
+                      CONF_HIGH, VERDICT_UNKNOWN);
 
     strncpy(upload_url_buf, url, sizeof(upload_url_buf) - 1);
     upload_url_buf[sizeof(upload_url_buf) - 1] = '\0';
-    report_add_str(t, "upload.url", upload_url_buf,
-                   CONF_HIGH, VERDICT_UNKNOWN);
+    report_update_str(t, "upload.url", upload_url_buf,
+                      CONF_HIGH, VERDICT_UNKNOWN);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -166,7 +171,15 @@ static int htget_post(const char *ini_path,
     }
 
     f = fopen(UPLOAD_TMP_PATH, "r");
-    if (!f) return UPLOAD_NETWORK;
+    if (!f) {
+        /* v0.7.0-rc2: HTGET may have succeeded-and-created UPLOAD.TMP
+         * but fopen then fails (I/O error, permission denial, or a
+         * TSR interfering). Every OTHER failure path below calls
+         * remove(); this one historically missed, leaving a stale
+         * file that the NEXT run's htget_post would mis-read. Clean up. */
+        remove(UPLOAD_TMP_PATH);
+        return UPLOAD_NETWORK;
+    }
 
     line1[0] = '\0';
     line2[0] = '\0';

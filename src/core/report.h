@@ -45,4 +45,13 @@ void report_hardware_signature(const result_table_t *t, char out_hex[9]);
  * pass/warn/fail verdicts to detect entries without adding new rows. */
 int report_set_verdict(result_table_t *t, const char *key, verdict_t v);
 
+/* Update an existing V_STR row in place, or append a new one if the key
+ * does not yet exist. Used by upload.c to overwrite upload.status /
+ * upload.submission_id / upload.url after the POST completes, without
+ * creating duplicate rows at the second report_write_ini pass.
+ * Caller retains lifetime responsibility for `value` (see note above).
+ * v0.7.0-rc2 quality-gate addition. */
+void report_update_str(result_table_t *t, const char *key, const char *value,
+                       confidence_t conf, verdict_t verdict);
+
 #endif
