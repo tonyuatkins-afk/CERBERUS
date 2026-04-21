@@ -161,6 +161,8 @@ int main(int argc, char *argv[])
         crumb_enter("timing.self_check");
         timing_self_check(&table);
         crumb_exit();
+        /* v0.6.0 T6: PIT metronome visual. */
+        timing_metronome_visual(&opts);
     }
 
     /* Consistency cross-check runs after all three heads so it sees

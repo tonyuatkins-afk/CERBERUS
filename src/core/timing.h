@@ -74,6 +74,11 @@ int           timing_dual_measure(unsigned int target_bios_ticks,
  * the CERBERUS_HOST_TEST guard in timing.c. */
 void          timing_self_check(result_table_t *t);
 
+/* v0.6.0 T6: PIT metronome visual — fires after timing_self_check.
+ * Text mode + PC speaker clicks on each 18.2 Hz tick for ~4 s.
+ * Skipped under /NOUI, /QUICK, or skip-all latch. */
+void          timing_metronome_visual(const opts_t *o);
+
 /* Pure emit helper (host-testable). Given a dual_measure return code
  * and the two us_t outputs, writes the appropriate rows into t:
  *   failure (rc != 0 or pit_us == 0 or bios_us == 0):
