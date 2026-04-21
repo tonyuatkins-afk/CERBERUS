@@ -2,6 +2,135 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [v0.6.0], 2026-04-20 evening
+
+The Visual Diagnostics Journey release. CERBERUS becomes an experience
+that shows hardware working, not just a tool that emits numbers. Six
+new visual demonstrations, a title-card framework that glues them into
+a structured run, a new tagline, directional head art that gives each
+section its own mythological guardian, and a /QUICK flag for users
+who want measurements without the visuals.
+
+### T0a — new tagline (`6c255e1`)
+
+"Three heads. One machine. Zero pretending." retires. Replaced by
+"Tough Times Demand Tough Tests" on the splash screen subtitle row
+and in the animation's BEHOLD-flash swap-back target.
+
+### T0b — chain removed from static title
+
+The chain/body/serpent-tail composition below the three heads is gone
+from the static resting state. It read as a progress widget and broke
+the wordmark → heads → tagline flow. The animation's chain rattle +
+shatter still run, and the post-shatter redraw explicitly clears the
+chain-area rows so nothing lingers.
+
+### T0c — directional head art
+
+New shared module `src/core/head_art.{c,h}` with three 9x4 variants:
+  HEAD_LEFT    — faces left, eye at col 6, snout + fang at col 1,
+                  ear bump top-right.
+  HEAD_CENTER  — faces forward, two eyes + two fangs, dominant.
+  HEAD_RIGHT   — mirror of LEFT, faces right.
+
+Accent kinds (BODY / EYE / FANG) let renderers color each feature
+independently for animation pulses. The intro splash uses all three
+variants left-to-right; the summary section headers guard their
+domains (Detection=LEFT scanning, Benchmarks=CENTER measuring,
+Verdicts=RIGHT judging). A new shared-neck row at DOG_TOP+4 sells
+"one creature with three heads" rather than three separate dogs.
+
+Intro eye-cascade animation adapts to the new 4-eye total (1 on left
+head, 2 on center, 1 on right); eye_head_map[] routes each cell to
+its head's heat attr.
+
+### T1 — journey framework (`6c255e1`)
+
+New module `src/core/journey.{c,h}`:
+  journey_init()             — reset skip-all latch per run
+  journey_should_skip(o)     — true under /NOUI, /QUICK, or skip-all
+  journey_title_card()       — full-screen card with directional head,
+                                ALL-CAPS title, 1-3 wrapped lines of
+                                description, "any key / S / Esc" hint.
+                                ~2.5s hold or keypress advance.
+  journey_result_flash()     — single-line banner on row 12, ~1s
+  journey_poll_skip()        — non-blocking keyboard poll during
+                                visuals: 0=continue, 1=skip this,
+                                2=skip all (Esc latches)
+
+New /QUICK command-line flag: skips visuals + title cards, runs
+measurements, renders interactive summary. For batch users who want
+timings without the journey.
+
+### T2 — CPU ALU Rolling Bit Parade (`a55a293`)
+
+Post-diag_cpu. 16-bit register rendered as CP437 block row (bright =
+1, light shade = 0). Real ALU ops executed in sequence: ROL, ROR,
+SHL, SHR, AND, OR, XOR, NOT, ADD, SUB. Each state displayed is the
+literal result of the literal instruction — no animation. Wall-clock
+bounded (~3 s); 8088 shows ops ticking past, 486 blurs. Text mode,
+all adapters.
+
+### T3 — FPU Lissajous Curve (`3e4d4f2`)
+
+Post-diag_fpu. VGA mode 13h. 1800 parametric points x=sin(3t+π/4),
+y=sin(2t), drawn one by one by the x87 native FSIN. Amber
+oscilloscope palette. A working FPU produces a smooth symmetric 3:2
+figure. Gated on VGA-capable + fpu.detected != "none".
+
+### T4 / T5 — DEFERRED to v0.6.1
+
+Cache Waterfall + Latency Heat Map visuals were in the brief but
+need more care around per-band measurement methodology than fit in
+this session. Ship v0.6.0 without them; add in a follow-up pass
+once the cache-measurement primitives have had a real-hardware
+calibration round.
+
+### T6 — PIT Metronome (`7b8405e`)
+
+Post-timing_self_check. A dot bounces between columns 4 and 75 at
+row 12, one column per 18.2 Hz BIOS tick. Each tick fires a PC
+speaker click via port 61h bit-1 toggle. Text mode, all adapters,
+universal hardware. Steady rhythm = PIT and BIOS agree; stutter =
+something between them is biased (same signal Rule 4a checks
+numerically).
+
+### T7 — Audio Hardware Scale (this commit)
+
+End-of-journey audio coda. 8-note C major scale (C4 through C5) via
+PIT Channel 2 gated through port 61h. Each note ~250 ms. Rising
+vertical bars accompany the notes. v0.6.0 ships PC-speaker only —
+OPL2 FM and SB16 PCM DMA are deferred to v0.6.1. PC speaker is
+universal hardware so this always fires (subject to skip flags).
+
+### T8 — title cards for existing visuals
+
+bench_whetstone gets an FPU BENCHMARK title card (covers both
+Whetstone measurement + the Mandelbrot visual that fires at its
+tail). bench_video gets a VIDEO BANDWIDTH card before its pattern
+fill (the pattern IS the measurement). bench_mandelbrot reuses the
+parent section's card — no double-card.
+
+### Build state
+
+- CERBERUS.EXE: 152,058 bytes (target <180KB)
+- DGROUP: 56,080 / 56,000 (80 bytes over soft target; 8,456 bytes
+  under the DOS 64KB limit)
+- Host tests: 7 suites, 201 OK, 0 failures
+- Version: 0.6.0
+
+### Known gaps
+
+- T4 Cache Waterfall — deferred to v0.6.1
+- T5 Latency Heat Map — deferred to v0.6.1
+- T7 OPL2 + SB16 audio paths — deferred to v0.6.1 (PC speaker ships)
+- journey_result_flash() is authored but currently unused; visuals
+  transition straight to the next title card. Adding the flashes is
+  a polish item for v0.6.1.
+- Issue #4 Whetstone calibration still pending real-hardware
+  validation (inherited from v0.5.0).
+- Issue #6 VLB bandwidth still open.
+
 ## [v0.5.0], 2026-04-20 evening
 
 v0.5.0 is a UI + FPU release. The three-pane fixed-width summary
