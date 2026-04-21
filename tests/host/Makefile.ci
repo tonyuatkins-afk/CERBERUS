@@ -15,6 +15,18 @@ CFLAGS  ?= -O0 -g -Wall -DCERBERUS_HOST_TEST -I../../src
 # through result_t.v.u/s/fixed union members; strict aliasing would
 # license the optimizer to reorder these loads.
 CFLAGS  += -fno-strict-aliasing
+# Watcom / 16-bit DOS compatibility shims. On the real target these
+# expand to the 16-bit segmented-pointer and far-memory operations;
+# on host builds a flat 32/64-bit pointer and plain memset/memcpy are
+# semantically equivalent for everything the host tests exercise.
+CFLAGS  += -D__far= -D_fmemset=memset -D_fmemcpy=memcpy
+# Silence two classes of warnings that are correct on 16-bit DOS
+# (where unsigned long is 4 bytes max) but trip on 64-bit Linux
+# (where unsigned long is 8 bytes, so %lu can print up to 20 digits):
+#   - format-overflow on sprintf into 16-byte buffers
+#   - maybe-uninitialized on union fields read before write
+# Neither affects what the tests are validating.
+CFLAGS  += -Wno-format-overflow -Wno-maybe-uninitialized
 
 TESTS = test_timing test_consist test_thermal test_diag_fpu \
         test_diag_cache test_diag_dma test_bench_cache
