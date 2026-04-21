@@ -41,6 +41,7 @@
 #include <dos.h>
 #include "ui.h"
 #include "display.h"
+#include "head_art.h"
 #include "../core/report.h"
 
 /* ----------------------------------------------------------------------- */
@@ -68,15 +69,7 @@
 #define VERDICT_NARR_COL    (VERDICT_LABEL_COL + VERDICT_LABEL_WIDTH + 1)
 #define VERDICT_NARR_MAX    (VRAM_COLS - VERDICT_NARR_COL - 2)
 
-/* Head-art glyphs. Kept local — the only ui.c consumers outside intro.c.
- * Codes match intro.c's G_* defines. */
-#define G_HEAD_BODY  0xB2  /* CP437 dark shade — skull body */
-#define G_HEAD_HDN   0xDC  /* lower half block — top arc */
-#define G_HEAD_HUP   0xDF  /* upper half block — jaw arc */
-#define G_HEAD_HLT   0xDD  /* right half block — anchors left edge */
-#define G_HEAD_HRT   0xDE  /* left half block — anchors right edge */
-#define G_HEAD_EYE   0x09  /* hollow bullet — eye */
-#define G_HEAD_FANG  0x1F  /* down-pointing triangle — fang */
+/* Head-art glyphs centralized in src/core/head_art.c since v0.6.0 T0c. */
 
 /* ----------------------------------------------------------------------- */
 /* VRAM helpers                                                             */
@@ -184,59 +177,29 @@ static const char *value_str(const result_t *r)
 /* Head rendering                                                           */
 /* ----------------------------------------------------------------------- */
 
-/* Draw one row (0..3) of a 9-col Cerberus head starting at HEAD_LEFT_COL
- * on the given screen row. body_attr = skull body color, eye_attr = eye
- * and fang highlight color. */
+/* Draw one row (0..3) of a directional Cerberus head starting at
+ * HEAD_LEFT_COL on the given screen row. variant picks LEFT/CENTER/
+ * RIGHT art from the shared head_art table. eye_attr drives eye color;
+ * fang_attr drives fang color (typically both the same "accent" hue at
+ * section-header scale — passed separately so the caller can hot-color
+ * one without the other during effects). */
 static void render_head_row(int screen_row, int head_row,
-                            unsigned char body_attr, unsigned char eye_attr)
+                            head_dir_t variant,
+                            unsigned char body_attr,
+                            unsigned char eye_attr,
+                            unsigned char fang_attr)
 {
-    int c = HEAD_LEFT_COL;
-    switch (head_row) {
-    case 0:  /* Top arc */
-        vram_putc(screen_row, c++, ' ',         body_attr);
-        vram_putc(screen_row, c++, G_HEAD_HDN,  body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_HDN,  body_attr);
-        vram_putc(screen_row, c++, ' ',         body_attr);
-        break;
-    case 1:  /* Skull shoulders */
-        vram_putc(screen_row, c++, G_HEAD_HRT,  body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_HLT,  body_attr);
-        break;
-    case 2:  /* Eye line */
-        vram_putc(screen_row, c++, G_HEAD_HRT,  body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_EYE,  eye_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_EYE,  eye_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_HLT,  body_attr);
-        break;
-    case 3:  /* Lower jaw with fangs */
-        vram_putc(screen_row, c++, ' ',         body_attr);
-        vram_putc(screen_row, c++, G_HEAD_HUP,  body_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_FANG, eye_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_FANG, eye_attr);
-        vram_putc(screen_row, c++, G_HEAD_BODY, body_attr);
-        vram_putc(screen_row, c++, G_HEAD_HUP,  body_attr);
-        vram_putc(screen_row, c++, ' ',         body_attr);
-        break;
-    default: break;
+    int c;
+    if (head_row < 0 || head_row >= HEAD_ROWS) return;
+    for (c = 0; c < HEAD_COLS; c++) {
+        head_cell_t cell = head_art[variant][head_row][c];
+        unsigned char attr;
+        switch (cell.kind) {
+            case HEAD_CELL_EYE:  attr = eye_attr;  break;
+            case HEAD_CELL_FANG: attr = fang_attr; break;
+            default:             attr = body_attr; break;
+        }
+        vram_putc(screen_row, HEAD_LEFT_COL + c, cell.glyph, attr);
     }
 }
 
@@ -516,6 +479,7 @@ typedef struct {
     union {
         struct {
             unsigned char head_row;  /* 0..3 */
+            unsigned char variant;   /* head_dir_t — LEFT/CENTER/RIGHT */
             const char *title;       /* non-NULL on the title row only */
         } head;
         struct {
@@ -544,11 +508,12 @@ static void vrow_blank(void)
     vrow_push(v);
 }
 
-static void vrow_head(int head_row, const char *title)
+static void vrow_head(int head_row, head_dir_t variant, const char *title)
 {
     vrow_t v;
     v.type = VROW_HEAD;
     v.u.head.head_row = (unsigned char)head_row;
+    v.u.head.variant  = (unsigned char)variant;
     v.u.head.title    = title;
     vrow_push(v);
 }
@@ -577,20 +542,23 @@ static void vrow_verdict(const result_t *r)
     vrow_push(v);
 }
 
-/* Build one section: head art (4 rows, title on row 1) + hline + rows. */
-static void build_section_head(const char *title)
+/* Build one section: head art (4 rows, title on row 1) + hline + rows.
+ * variant picks the directional head: LEFT guards Detection (scans
+ * the hardware landscape), CENTER guards Benchmarks (measures head-on),
+ * RIGHT guards Verdicts (judges outcomes). */
+static void build_section_head(head_dir_t variant, const char *title)
 {
-    vrow_head(0, (const char *)0);
-    vrow_head(1, title);
-    vrow_head(2, (const char *)0);
-    vrow_head(3, (const char *)0);
+    vrow_head(0, variant, (const char *)0);
+    vrow_head(1, variant, title);
+    vrow_head(2, variant, (const char *)0);
+    vrow_head(3, variant, (const char *)0);
     vrow_hline();
 }
 
 static void build_section_detection(const result_table_t *t)
 {
     unsigned int i;
-    build_section_head("DETECTION");
+    build_section_head(HEAD_LEFT, "DETECTION");
     for (i = 0; i < DETECT_ROWS_COUNT; i++) {
         const result_t *r = find_key(t, detect_rows[i].key);
         if (r) vrow_kv(detect_rows[i].label, r);
@@ -600,7 +568,7 @@ static void build_section_detection(const result_table_t *t)
 static void build_section_benchmarks(const result_table_t *t)
 {
     unsigned int i;
-    build_section_head("BENCHMARKS");
+    build_section_head(HEAD_CENTER, "BENCHMARKS");
     for (i = 0; i < BENCH_ROWS_COUNT; i++) {
         const result_t *r = find_key(t, bench_rows[i].key);
         if (r) vrow_kv(bench_rows[i].label, r);
@@ -610,7 +578,7 @@ static void build_section_benchmarks(const result_table_t *t)
 static void build_section_verdicts(const result_table_t *t)
 {
     unsigned int i;
-    build_section_head("SYSTEM VERDICTS");
+    build_section_head(HEAD_RIGHT, "SYSTEM VERDICTS");
     for (i = 0; i < t->count; i++) {
         const result_t *r = &t->results[i];
         if (is_verdict_row(r)) vrow_verdict(r);
@@ -646,7 +614,9 @@ static void render_vrow_to_screen(int screen_row, const vrow_t *v)
     case VROW_BLANK:
         break;  /* already cleared */
     case VROW_HEAD:
-        render_head_row(screen_row, v->u.head.head_row, body_attr, eye_attr);
+        render_head_row(screen_row, v->u.head.head_row,
+                        (head_dir_t)v->u.head.variant,
+                        body_attr, eye_attr, eye_attr);
         if (v->u.head.title) {
             vram_puts(screen_row, TITLE_COL, v->u.head.title, ATTR_BOLD);
         }

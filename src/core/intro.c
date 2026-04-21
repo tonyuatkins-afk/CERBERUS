@@ -46,6 +46,7 @@
 #include <string.h>
 #include "intro.h"
 #include "display.h"
+#include "head_art.h"
 #include "../cerberus.h"
 
 #define COLS 80
@@ -371,78 +372,49 @@ static void draw_wordmark(int top_row, unsigned char fill_glyph,
 #define DOG_LEFT_H2 35
 #define DOG_LEFT_H3 47
 
-/* Eye positions (row, col) per head: each head has two eyes, side
- * by side. Stored for animation: cycle their attribute byte in
- * sequence during the "eyes awaken" phase. */
+/* Eye positions (row, col) per head. v0.6.0 T0c: heads are now
+ * directional — left head (H1) has 1 eye, center head (H2) has 2,
+ * right head (H3) has 1 — so four eye cells total. eye_head_map
+ * lets apply_eye_phase translate each cell back to its head index
+ * for the attr cascade. */
 typedef struct {
     int row;
     int col;
 } cell_t;
 
-/* Six eyes total: head 1 left+right, head 2 left+right, head 3 left+right */
-static const cell_t eye_cells[6] = {
-    { DOG_TOP + 2, DOG_LEFT_H1 + 3 }, { DOG_TOP + 2, DOG_LEFT_H1 + 5 },
-    { DOG_TOP + 2, DOG_LEFT_H2 + 3 }, { DOG_TOP + 2, DOG_LEFT_H2 + 5 },
-    { DOG_TOP + 2, DOG_LEFT_H3 + 3 }, { DOG_TOP + 2, DOG_LEFT_H3 + 5 }
+#define EYE_CELL_COUNT 4
+
+static const cell_t eye_cells[EYE_CELL_COUNT] = {
+    { DOG_TOP + 2, DOG_LEFT_H1 + 6 },   /* H1 LEFT — single eye right side */
+    { DOG_TOP + 2, DOG_LEFT_H2 + 3 },   /* H2 CENTER — left eye */
+    { DOG_TOP + 2, DOG_LEFT_H2 + 5 },   /* H2 CENTER — right eye */
+    { DOG_TOP + 2, DOG_LEFT_H3 + 2 }    /* H3 RIGHT — single eye left side */
 };
 
-static void draw_head(int left, unsigned char body_glyph,
-                      unsigned char body_attr, unsigned char eye_attr)
+static const int eye_head_map[EYE_CELL_COUNT] = { 0, 1, 1, 2 };
+
+/* Draw one of the three directional heads at (DOG_TOP, left) using
+ * the shared head_art tables. variant picks LEFT/CENTER/RIGHT. The
+ * body glyph on the v0.5.0 path was a parameter; here it's folded
+ * into the art data. eye_attr drives the initial eye color (later
+ * cycled by the animation); fang_attr stays constant (bright). */
+static void draw_head(int left, head_dir_t variant,
+                      unsigned char body_attr, unsigned char eye_attr,
+                      unsigned char fang_attr)
 {
-    /* 9 cols x 4 rows skull silhouette.
-     *
-     *   ▄▀▀▀▀▀▄
-     *   ▌     ▐
-     *   ▌ O O ▐     <- eyes at col+3 and col+5
-     *   ▀▄___▄▀
-     */
-    /* Top arc (row 0): padded blocks making a rounded top */
-    put_cell(DOG_TOP + 0, left + 0, ' ',         body_attr);
-    put_cell(DOG_TOP + 0, left + 1, G_HALF_DN,   body_attr);
-    put_cell(DOG_TOP + 0, left + 2, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 0, left + 3, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 0, left + 4, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 0, left + 5, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 0, left + 6, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 0, left + 7, G_HALF_DN,   body_attr);
-    put_cell(DOG_TOP + 0, left + 8, ' ',         body_attr);
-
-    /* Row 1: skull shoulders */
-    put_cell(DOG_TOP + 1, left + 0, G_HALF_RT,   body_attr);
-    put_cell(DOG_TOP + 1, left + 1, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 1, left + 2, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 1, left + 3, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 1, left + 4, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 1, left + 5, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 1, left + 6, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 1, left + 7, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 1, left + 8, G_HALF_LT,   body_attr);
-
-    /* Row 2: eye line */
-    put_cell(DOG_TOP + 2, left + 0, G_HALF_RT,   body_attr);
-    put_cell(DOG_TOP + 2, left + 1, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 2, left + 2, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 2, left + 3, G_EYE_OPEN,  eye_attr);   /* eye L */
-    put_cell(DOG_TOP + 2, left + 4, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 2, left + 5, G_EYE_OPEN,  eye_attr);   /* eye R */
-    put_cell(DOG_TOP + 2, left + 6, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 2, left + 7, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 2, left + 8, G_HALF_LT,   body_attr);
-
-    /* Row 3: lower jaw, tapered, fangs poking down at eye columns. Fang
-     * glyph is CP437 0x1F (down-pointing triangle), rendered in a hot
-     * color so it reads even on dark body shade. */
-    put_cell(DOG_TOP + 3, left + 0, ' ',         body_attr);
-    put_cell(DOG_TOP + 3, left + 1, G_HALF_UP,   body_attr);
-    put_cell(DOG_TOP + 3, left + 2, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 3, left + 3, G_FANG,
-             (unsigned char)(is_mono() ? A_WHITE : A_WHITE));
-    put_cell(DOG_TOP + 3, left + 4, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 3, left + 5, G_FANG,
-             (unsigned char)(is_mono() ? A_WHITE : A_WHITE));
-    put_cell(DOG_TOP + 3, left + 6, body_glyph,  body_attr);
-    put_cell(DOG_TOP + 3, left + 7, G_HALF_UP,   body_attr);
-    put_cell(DOG_TOP + 3, left + 8, ' ',         body_attr);
+    int r, c;
+    for (r = 0; r < HEAD_ROWS; r++) {
+        for (c = 0; c < HEAD_COLS; c++) {
+            head_cell_t cell = head_art[variant][r][c];
+            unsigned char attr;
+            switch (cell.kind) {
+                case HEAD_CELL_EYE:  attr = eye_attr;  break;
+                case HEAD_CELL_FANG: attr = fang_attr; break;
+                default:             attr = body_attr; break;
+            }
+            put_cell(DOG_TOP + r, left + c, cell.glyph, attr);
+        }
+    }
 }
 
 /* Serpent-mane spines above each head. Pseudo-Apollodorus is explicit
@@ -465,67 +437,11 @@ static void draw_spines(unsigned char attr)
     }
 }
 
-/* Three-head collar / chain / body row below the heads. Row
- * DOG_TOP+4 has three necks converging, row +5 has the chained
- * body bar, row +6 has the serpent tail curling off to the right. */
-static void draw_body_and_chain(unsigned char body_attr,
-                                unsigned char chain_attr,
-                                unsigned char serpent_attr)
-{
-    int r = DOG_TOP + 4;
-    int i;
-
-    /* Three necks converging toward center. Left neck bends right,
-     * right neck bends left, center drops straight. Represented by
-     * slashes and verticals. */
-    put_cell(r, DOG_LEFT_H1 + 4, '\\', body_attr);
-    put_cell(r, DOG_LEFT_H2 + 4, '|',  body_attr);
-    put_cell(r, DOG_LEFT_H3 + 4, '/',  body_attr);
-
-    /* Collar / convergence row */
-    r++;
-    for (i = DOG_LEFT_H1; i <= DOG_LEFT_H3 + 8; i++) {
-        unsigned char g;
-        if (i == DOG_LEFT_H1)          g = G_BOX_TL;
-        else if (i == DOG_LEFT_H3 + 8) g = G_BOX_TR;
-        else                            g = G_BOX_H;
-        put_cell(r, i, g, chain_attr);
-    }
-
-    /* Body bar (row +6): block-shaded mass with chain glyphs at
-     * regular intervals. */
-    r++;
-    for (i = DOG_LEFT_H1; i <= DOG_LEFT_H3 + 8; i++) {
-        unsigned char g;
-        if (i == DOG_LEFT_H1)          g = G_BOX_V;
-        else if (i == DOG_LEFT_H3 + 8) g = G_BOX_V;
-        else if (((i - DOG_LEFT_H1) & 0x03) == 0) g = G_CHAIN;
-        else                            g = G_BLOCK_DK;
-        put_cell(r, i, g, (g == G_CHAIN) ? chain_attr : body_attr);
-    }
-
-    /* Bottom of body (row +7): closing box. */
-    r++;
-    for (i = DOG_LEFT_H1; i <= DOG_LEFT_H3 + 8; i++) {
-        unsigned char g;
-        if (i == DOG_LEFT_H1)          g = G_BOX_BL;
-        else if (i == DOG_LEFT_H3 + 8) g = G_BOX_BR;
-        else                            g = G_BOX_H;
-        put_cell(r, i, g, chain_attr);
-    }
-
-    /* Serpent tail curling off to the right of the body, one row
-     * below and to the right. */
-    {
-        int tail_row = r + 1;
-        int tail_col = DOG_LEFT_H3 + 10;
-        put_cell(tail_row, tail_col + 0, G_APPROX,  serpent_attr);
-        put_cell(tail_row, tail_col + 1, G_APPROX,  serpent_attr);
-        put_cell(tail_row, tail_col + 2, G_SER_UP,  serpent_attr);
-        put_cell(tail_row, tail_col + 3, G_SER_DN,  serpent_attr);
-        put_cell(tail_row, tail_col + 4, G_APPROX,  serpent_attr);
-    }
-}
+/* v0.6.0 T0b: draw_body_and_chain() removed. The static title's chain
+ * bar + body + serpent-tail composition was eating the visual space
+ * between heads and tagline and reading as a progress widget. Chain
+ * rattle + shatter still run in the animation (rattle_chain writes to
+ * row 16 directly). */
 
 /* ----------------------------------------------------------------------- */
 /* Full static frame (pre-animation)                                        */
@@ -583,15 +499,60 @@ static void draw_frame(unsigned char wordmark_attr,
     /* Serpent-mane spines above each head (row 9) */
     draw_spines(serpent_attr);
 
-    draw_head(DOG_LEFT_H1, G_BLOCK_DK, body_attr, initial_eye_attr);
-    draw_head(DOG_LEFT_H2, G_BLOCK_DK, body_attr, initial_eye_attr);
-    draw_head(DOG_LEFT_H3, G_BLOCK_DK, body_attr, initial_eye_attr);
-    draw_body_and_chain(body_attr, chain_attr, serpent_attr);
+    {
+        /* v0.6.0 T0c: directional heads — left-facing, center (dominant,
+         * forward), right-facing. Fangs stay bright white/accent even at
+         * rest; eyes begin dim (initial_eye_attr) and pulse through the
+         * animation. */
+        unsigned char fang_attr = (unsigned char)(is_mono() ? A_WHITE : A_WHITE);
+        draw_head(DOG_LEFT_H1, HEAD_LEFT,   body_attr, initial_eye_attr, fang_attr);
+        draw_head(DOG_LEFT_H2, HEAD_CENTER, body_attr, initial_eye_attr, fang_attr);
+        draw_head(DOG_LEFT_H3, HEAD_RIGHT,  body_attr, initial_eye_attr, fang_attr);
+    }
+
+    /* v0.6.0 T0b: clear rows 15-18 of the old chain/body/serpent-tail
+     * area on both initial draw and post-shatter redraw. The animation's
+     * chain rattle + shatter still writes directly to row 16 and runs
+     * its course; when draw_frame is called a second time after the
+     * shatter, we want those stale remnants gone.
+     *
+     * Row 14 (DOG_TOP+4) is the shared-neck row added below — clear 15
+     * and down so we don't erase the neck. */
+    {
+        int clr;
+        int clr_row;
+        for (clr_row = DOG_TOP + 5; clr_row <= DOG_TOP + 8; clr_row++) {
+            for (clr = DOG_LEFT_H1; clr <= DOG_LEFT_H3 + 8 + 5; clr++) {
+                put_cell(clr_row, clr, ' ', body_attr);
+            }
+        }
+        (void)chain_attr;
+        (void)serpent_attr;
+    }
+
+    /* v0.6.0 T0c: shared-neck row at DOG_TOP+4. A single row of
+     * upper-half blocks spans the three heads' combined width, selling
+     * "one creature with three heads" rather than "three separate dogs."
+     * Rendered AFTER the chain-area clear so it survives both the
+     * initial draw and the post-shatter redraw. */
+    {
+        int neck_row = DOG_TOP + 4;
+        int head_lefts[3];
+        int h;
+        head_lefts[0] = DOG_LEFT_H1;
+        head_lefts[1] = DOG_LEFT_H2;
+        head_lefts[2] = DOG_LEFT_H3;
+        for (h = 0; h < 3; h++) {
+            int c;
+            for (c = 0; c < HEAD_COLS; c++) {
+                put_cell(neck_row, head_lefts[h] + c, 0xDF, body_attr);
+            }
+        }
+    }
 
     /* Subtitle below the emblem, row 19. Shifted up one row from the
      * original layout to free row 22 for the hellfire ember flicker. */
-    draw_centered(19, "Three heads. One machine. Zero pretending.",
-                  text_attr);
+    draw_centered(19, "Tough Times Demand Tough Tests", text_attr);
 
     /* Version line row 20 */
     draw_centered(20, "CERBERUS " CERBERUS_VERSION
@@ -648,9 +609,14 @@ static void apply_eye_phase(int phase)
     attrs[0] = eye_attr_for(0, phase);
     attrs[1] = eye_attr_for(1, phase);
     attrs[2] = eye_attr_for(2, phase);
-    for (i = 0; i < 6; i++) {
+    /* v0.6.0 T0c: four eyes total (left head: 1, center: 2, right: 1).
+     * eye_head_map[i] selects the head-index attr for each eye cell.
+     * Cascade timing (phase budget in eye_attr_for) unchanged; visible
+     * eye count drops from 6 to 4 but the tempo and heating progression
+     * of each head still happens on the same phase schedule. */
+    for (i = 0; i < EYE_CELL_COUNT; i++) {
         put_cell(eye_cells[i].row, eye_cells[i].col,
-                 G_EYE_GLOW, attrs[i / 2]);
+                 G_EYE_GLOW, attrs[eye_head_map[i]]);
     }
 }
 
@@ -1288,9 +1254,7 @@ void intro_splash(const opts_t *o)
                     write_tagline("B E H O L D .",
                                   (unsigned char)(is_mono() ? A_WHITE : A_RED));
                 } else if (t == 7) {
-                    write_tagline(
-                        "Three heads. One machine. Zero pretending.",
-                        text_attr);
+                    write_tagline("Tough Times Demand Tough Tests", text_attr);
                 }
                 if (wait_ticks_or_key(1)) { early = 1; break; }
             }

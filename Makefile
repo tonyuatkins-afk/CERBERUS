@@ -60,7 +60,7 @@ OBJS = src\main.obj                                                  &
        src\core\report.obj    src\core\sha1.obj                      &
        src\core\consist.obj   src\core\thermal.obj                   &
        src\core\crumb.obj     src\core\ui.obj                        &
-       src\core\intro.obj                                            &
+       src\core\intro.obj     src\core\head_art.obj                  &
        src\core\cache_buffers.obj                                    &
        src\detect\detect_all.obj                                     &
        src\detect\env.obj     src\detect\unknown.obj                 &
@@ -115,11 +115,14 @@ src\core\thermal.obj: src\core\thermal.c src\core\thermal.h src\core\report.h sr
 src\core\crumb.obj: src\core\crumb.c src\core\crumb.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\crumb.c
 
-src\core\ui.obj: src\core\ui.c src\core\ui.h src\core\display.h src\cerberus.h
+src\core\ui.obj: src\core\ui.c src\core\ui.h src\core\display.h src\core\head_art.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\ui.c
 
-src\core\intro.obj: src\core\intro.c src\core\intro.h src\core\display.h src\cerberus.h
+src\core\intro.obj: src\core\intro.c src\core\intro.h src\core\display.h src\core\head_art.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\intro.c
+
+src\core\head_art.obj: src\core\head_art.c src\core\head_art.h
+	$(CC) $(CFLAGS) -fo=$^@ src\core\head_art.c
 
 src\core\cache_buffers.obj: src\core\cache_buffers.c src\core\cache_buffers.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\cache_buffers.c
