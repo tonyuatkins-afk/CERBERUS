@@ -7,6 +7,7 @@
 #include "core/crumb.h"
 #include "core/ui.h"
 #include "core/intro.h"
+#include "core/journey.h"
 #include "core/consist.h"
 #include "core/thermal.h"
 #include "core/timing.h"
@@ -21,7 +22,7 @@ static void print_help(void)
     puts("CERBERUS " CERBERUS_VERSION " - Retro PC System Intelligence");
     puts("");
     puts("Usage: CERBERUS [/Q] [/C[:n]] [/ONLY:<h>] [/SKIP:<h>] [/O:file]");
-    puts("                [/U] [/NOCYRIX] [/NOINTRO] [/?]");
+    puts("                [/U] [/NOCYRIX] [/NOINTRO] [/QUICK] [/NOUI] [/?]");
     puts("  /Q              Quick mode (default)");
     puts("  /C[:n]          Calibrated mode, n runs (default 7)");
     puts("  /ONLY:DET|DIAG|BENCH   Run only that head");
@@ -32,6 +33,7 @@ static void print_help(void)
     puts("  /NOCYRIX        Skip Cyrix DIR probe (port 22h safety)");
     puts("  /NOINTRO        Skip VGA splash");
     puts("  /NOUI           Skip summary + consistency UI render (INI still written)");
+    puts("  /QUICK          Skip visual demonstrations (title cards + visuals); run tests + summary");
     puts("  /?              This help");
 }
 
@@ -54,6 +56,7 @@ static int parse_args(int argc, char *argv[], opts_t *o)
     o->no_cyrix = 0;
     o->no_intro = 0;
     o->no_ui    = 0;
+    o->do_quick = 0;
     strcpy(o->out_path, "CERBERUS.INI");
 
     for (i = 1; i < argc; i++) {
@@ -91,6 +94,7 @@ static int parse_args(int argc, char *argv[], opts_t *o)
         else if (!strcmp(a, "/NOCYRIX")) { o->no_cyrix = 1; }
         else if (!strcmp(a, "/NOINTRO")) { o->no_intro = 1; }
         else if (!strcmp(a, "/NOUI"))    { o->no_ui = 1; }
+        else if (!strcmp(a, "/QUICK"))   { o->do_quick = 1; }
         else {
             fprintf(stderr, "unknown option: %s\n", a);
             return -1;
@@ -116,6 +120,7 @@ int main(int argc, char *argv[])
     crumb_init();
     unknown_init();
     display_init();
+    journey_init();
     crumb_check_previous();
 
     /* Boot splash runs before the text banner. Skipped under /NOUI,

@@ -62,6 +62,11 @@ typedef struct {
                                 * ui_render_consistency_alerts. Escape
                                 * hatch for real-iron UI-render hangs.
                                 * INI + UNK are still written. */
+    unsigned char do_quick;    /* /QUICK: skip all visual demonstrations
+                                * and title cards. Measurements still
+                                * run; summary still renders interactively.
+                                * For batch users who want timings
+                                * without the journey. v0.6.0. */
     char          out_path[64];
 } opts_t;
 
