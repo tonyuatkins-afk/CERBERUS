@@ -108,7 +108,20 @@ verdict_t diag_dma_summary_verdict(int ch_pass, int ch_fail, int ch_skip)
  *   7. resetting flip-flop
  *   8. restoring the original value (low byte then high byte)
  *
- * Returns 1 if readback matched DMA_PROBE_PATTERN, 0 otherwise. */
+ * Returns 1 if readback matched DMA_PROBE_PATTERN, 0 otherwise.
+ *
+ * Host-test stub: CERBERUS_HOST_TEST builds never call into probe
+ * logic (the tests exercise orchestration/verdict code, not port
+ * I/O), so we stub the whole function out to avoid pulling in
+ * inp/outp which don't exist on non-DOS platforms. */
+#ifdef CERBERUS_HOST_TEST
+static int probe_dma_channel(unsigned int count_port, unsigned int clear_ff_port)
+{
+    (void)count_port;
+    (void)clear_ff_port;
+    return 0;
+}
+#else
 static int probe_dma_channel(unsigned int count_port, unsigned int clear_ff_port)
 {
     unsigned char saved_lo, saved_hi;
@@ -138,6 +151,7 @@ static int probe_dma_channel(unsigned int count_port, unsigned int clear_ff_port
 
     return (readback == DMA_PROBE_PATTERN) ? 1 : 0;
 }
+#endif  /* CERBERUS_HOST_TEST */
 
 /* ----------------------------------------------------------------------- */
 /* Orchestration                                                            */
