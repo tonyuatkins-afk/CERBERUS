@@ -25,6 +25,8 @@ void diag_all(result_table_t *t, const opts_t *o)
     diag_lissajous(t, o);
     WRAP_DIAG("video", diag_video(t));
     WRAP_DIAG("cache", diag_cache(t));
+    /* v0.6.1 T5: Latency Heat Map visual after cache diag. */
+    diag_latency_map(o);
     WRAP_DIAG("dma",   diag_dma(t));
     /*
      * v0.3 completion landed diag_cache (stride-ratio timing probe) and

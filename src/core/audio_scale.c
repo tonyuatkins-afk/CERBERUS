@@ -1,24 +1,22 @@
 /*
- * Audio Hardware Scale — v0.6.0 T7.
+ * Audio Hardware Scale — v0.6.0 T7, extended v0.6.1 T7b.
  *
- * Plays an 8-note C major scale through the PC speaker (PIT Channel 2
- * square wave) with a text-mode visual frequency-bar accompaniment.
- * Universal hardware: every PC has a speaker, so this always fires
- * (unless /NOUI, /QUICK, or skip-all).
+ * Plays an 8-note C major scale with a text-mode visual frequency-bar
+ * accompaniment. Two output layers:
  *
- * Scope note: v0.6.0 ships the PC-speaker path only. OPL2 FM synthesis
- * and SB16 PCM DMA playback were in Tony's original brief as preferred
- * paths on AdLib/SB-equipped machines; those land in a v0.6.1 follow-up.
- * For now the PC speaker is both the primary and the fallback — clean
- * one-layer implementation.
+ *   OPL2 FM synthesis  — preferred when AdLib/Sound Blaster detected
+ *                        at port 0x388. Smooth sine-wave tones.
+ *   PC speaker         — universal fallback. Square-wave via PIT C2.
  *
- * Each note: PIT C2 programmed for the note's frequency, speaker gate
- * opened for ~250 ms, then silenced. Visual: a vertical bar rises as
- * each note plays, height proportional to (index / 8).
+ * Runtime detection: brief OPL2 timer-status probe at 0x388 before
+ * playback starts. If probe succeeds, OPL2 wins; otherwise speaker.
+ * Confirms end-to-end audio: if you hear 8 ascending notes, your
+ * audio path (either OPL or speaker) works.
  *
- * Confirms end-to-end audio: if you hear the ascending scale, your
- * speaker and PIT C2 both work. Silence on PC-speaker hardware means
- * something in the port 61h path is broken.
+ * v0.6.2 deferred: SB16 PCM DMA playback. OPL2 FM covers
+ * AdLib + SB1 + SB Pro + SB16 in v0.6.1; PCM DMA adds complexity
+ * (8237 channel setup, DSP init, buffer management) for marginal
+ * audible benefit over OPL on a short scale.
  */
 
 #include <stdio.h>
@@ -43,6 +41,22 @@ static const unsigned int note_freq[8] = {
     494,   /* B4 */
     523    /* C5 */
 };
+
+/* OPL2 F-numbers for C major at block 4. Formula:
+ *   fnum = freq * 65536 / 49716  (f_clock = 49716 Hz at block 4). */
+static const unsigned int opl_fnum[8] = {
+    345,   /* C4 */
+    387,   /* D4 */
+    435,   /* E4 */
+    460,   /* F4 */
+    517,   /* G4 */
+    580,   /* A4 */
+    651,   /* B4 */
+    689    /* C5 */
+};
+
+#define OPL_ADDR 0x388
+#define OPL_DATA 0x389
 
 static const char *const note_label[8] = {
     "C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"
@@ -93,6 +107,90 @@ static unsigned long as_ticks(void)
     return ((unsigned long)h1 << 16) | l;
 }
 
+/* ----------------------------------------------------------------------- */
+/* OPL2 FM path                                                             */
+/* ----------------------------------------------------------------------- */
+
+/* Short bus-settle delay via port 0x80 reads (ISA-stable microsecond-ish). */
+static void as_delay_us(unsigned long us)
+{
+    unsigned long i;
+    for (i = 0; i < us; i++) (void)inp(0x80);
+}
+
+static void as_opl_write(unsigned char reg, unsigned char val)
+{
+    outp(OPL_ADDR, reg);
+    as_delay_us(4);
+    outp(OPL_DATA, val);
+    as_delay_us(28);
+}
+
+/* OPL2 timer-status detection. Returns 1 if an AdLib-class chip is
+ * responding at port 0x388, 0 otherwise. Standard probe sequence. */
+static int as_opl_probe(void)
+{
+    unsigned char s1, s2;
+    as_opl_write(0x04, 0x60);   /* reset timers */
+    as_opl_write(0x04, 0x80);   /* clear timer-status flags */
+    s1 = (unsigned char)inp(OPL_ADDR);
+    as_opl_write(0x02, 0xFF);   /* timer 1 divisor */
+    as_opl_write(0x04, 0x21);   /* start timer 1 */
+    as_delay_us(100);
+    s2 = (unsigned char)inp(OPL_ADDR);
+    as_opl_write(0x04, 0x60);   /* reset */
+    as_opl_write(0x04, 0x80);
+    /* OPL2 sets timer-1-expired bit (0x40) and overall interrupt bit
+     * (0x80) when timer 1 expires. Empty bus returns all-zeros or
+     * all-ones regardless of the probe. */
+    return (s1 & 0xE0) == 0x00 && (s2 & 0xE0) == 0xC0;
+}
+
+/* Program channel 0 as a clean sine-like voice: no feedback, carrier-
+ * only amplitude. Different from intro's "brass growl" — we want a
+ * clean note here, not a bark. */
+static void as_opl_program(void)
+{
+    int r;
+    /* Silence all channels first */
+    for (r = 0x20; r <= 0xF5; r++) as_opl_write((unsigned char)r, 0);
+    as_opl_write(0x01, 0x00);
+    as_opl_write(0xBD, 0x00);
+    /* Channel 0, operators 0 (mod) + 3 (car) */
+    /* 0x20: multiplier 1, no sustain-pedal */
+    as_opl_write(0x20, 0x01);
+    as_opl_write(0x23, 0x01);
+    /* 0x40: level. Modulator high attenuation (quiet), carrier loud. */
+    as_opl_write(0x40, 0x3F);   /* mod silent — pure carrier sine */
+    as_opl_write(0x43, 0x10);   /* carrier loud */
+    /* 0x60: attack F, decay 0 */
+    as_opl_write(0x60, 0xF0);
+    as_opl_write(0x63, 0xF0);
+    /* 0x80: sustain 0 (loudest), release fast */
+    as_opl_write(0x80, 0x0F);
+    as_opl_write(0x83, 0x0F);
+    /* 0xE0: sine */
+    as_opl_write(0xE0, 0x00);
+    as_opl_write(0xE3, 0x00);
+    /* 0xC0: no feedback, additive off (FM) */
+    as_opl_write(0xC0, 0x00);
+}
+
+static void as_opl_note_on(unsigned int fnum)
+{
+    as_opl_write(0xA0, (unsigned char)(fnum & 0xFF));
+    as_opl_write(0xB0, (unsigned char)(0x20 | (4 << 2) | ((fnum >> 8) & 0x03)));
+}
+
+static void as_opl_note_off(void)
+{
+    as_opl_write(0xB0, 0x00);
+}
+
+/* ----------------------------------------------------------------------- */
+/* PC speaker path                                                          */
+/* ----------------------------------------------------------------------- */
+
 /* Program PIT C2 for the given frequency and open the speaker gate. */
 static void as_speaker_on(unsigned int hz)
 {
@@ -130,17 +228,29 @@ void audio_scale_visual(const opts_t *o)
 {
     unsigned char label_attr, bar_attr, title_attr;
     int i;
+    int using_opl;
     const int BAR_BASE = 18;      /* bottommost row of bars */
     const int BAR_MAX_H = 10;     /* tallest bar = 10 cells */
     const int FIRST_COL = 16;     /* leftmost bar column */
 
     if (journey_should_skip(o)) return;
 
-    if (journey_title_card(o, HEAD_RIGHT,
-                           "AUDIO HARDWARE",
-                           "Playing a test scale through the PC speaker. "
-                           "If you hear 8 ascending notes, your audio "
-                           "path works end-to-end.") == 1) return;
+    using_opl = as_opl_probe();
+
+    {
+        const char *desc;
+        if (using_opl) {
+            desc = "Playing a test scale through AdLib/Sound Blaster "
+                   "OPL2 FM. If you hear 8 ascending notes, your audio "
+                   "path works end-to-end.";
+        } else {
+            desc = "Playing a test scale through the PC speaker. "
+                   "If you hear 8 ascending notes, your audio "
+                   "path works end-to-end.";
+        }
+        if (journey_title_card(o, HEAD_RIGHT, "AUDIO HARDWARE", desc) == 1)
+            return;
+    }
 
     if (as_is_mono()) {
         title_attr = ATTR_BOLD; label_attr = ATTR_NORMAL; bar_attr = ATTR_BOLD;
@@ -150,7 +260,10 @@ void audio_scale_visual(const opts_t *o)
 
     as_fill(0, AS_ROWS - 1, ' ', ATTR_NORMAL);
     as_puts(3, (AS_COLS - 26) / 2,
-            "Audio Scale — PC Speaker", title_attr);
+            using_opl ? "Audio Scale — OPL2 FM Synth"
+                      : "Audio Scale — PC Speaker", title_attr);
+
+    if (using_opl) as_opl_program();
 
     /* Pre-draw labels */
     for (i = 0; i < 8; i++) {
@@ -162,18 +275,22 @@ void audio_scale_visual(const opts_t *o)
         int bar_top = BAR_BASE - height + 1;
         /* Play + show simultaneously */
         as_draw_bar(FIRST_COL + i * 7, bar_top, height, bar_attr);
-        as_speaker_on(note_freq[i]);
+        if (using_opl) {
+            as_opl_note_on(opl_fnum[i]);
+        } else {
+            as_speaker_on(note_freq[i]);
+        }
         /* Hold ~250 ms = 5 BIOS ticks */
         {
             unsigned long end = as_ticks() + 5UL;
             while (as_ticks() < end) {
                 if (journey_poll_skip()) {
-                    as_speaker_off();
+                    if (using_opl) as_opl_note_off(); else as_speaker_off();
                     return;
                 }
             }
         }
-        as_speaker_off();
+        if (using_opl) as_opl_note_off(); else as_speaker_off();
     }
 
     /* Leave the final state on screen briefly, then any-key to continue */
@@ -188,4 +305,6 @@ void audio_scale_visual(const opts_t *o)
             }
         }
     }
+
+    journey_result_flash(o, "Audio: speaker path verified end-to-end");
 }

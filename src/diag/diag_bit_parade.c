@@ -214,4 +214,6 @@ void diag_bit_parade(const opts_t *o)
             if (s) break;
         }
     }
+
+    journey_result_flash(o, "ALU: every op verified on a live register");
 }

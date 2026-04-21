@@ -81,12 +81,14 @@ OBJS = src\main.obj                                                  &
        src\diag\diag_cache.obj src\diag\diag_dma.obj                 &
        src\diag\diag_bit_parade.obj                                  &
        src\diag\diag_lissajous.obj                                   &
+       src\diag\diag_latency_map.obj                                 &
        src\bench\bench_all.obj src\bench\bench_cpu.obj               &
        src\bench\bench_memory.obj src\bench\bench_fpu.obj            &
        src\bench\bench_cache.obj src\bench\bench_video.obj           &
        src\bench\bench_dhrystone.obj src\bench\bench_whetstone.obj   &
        src\bench\bench_whet_fpu.obj                                  &
        src\bench\bench_mandelbrot.obj                                &
+       src\bench\bench_cache_waterfall.obj                           &
        src\upload\upload.obj
 
 all: $(TARGET) .SYMBOLIC
@@ -240,6 +242,9 @@ src\diag\diag_bit_parade.obj: src\diag\diag_bit_parade.c src\diag\diag.h src\cor
 src\diag\diag_lissajous.obj: src\diag\diag_lissajous.c src\diag\diag.h src\core\journey.h src\core\display.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_lissajous.c
 
+src\diag\diag_latency_map.obj: src\diag\diag_latency_map.c src\diag\diag.h src\core\journey.h src\core\display.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_latency_map.c
+
 src\bench\bench_all.obj: src\bench\bench_all.c src\bench\bench.h src\core\crumb.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_all.c
 
@@ -275,6 +280,10 @@ src\bench\bench_whet_fpu.obj: src\bench\bench_whet_fpu.asm
 # math is the whole point, so -fpi inline is critical.
 src\bench\bench_mandelbrot.obj: src\bench\bench_mandelbrot.c src\bench\bench.h src\core\display.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_mandelbrot.c
+
+# Cache waterfall visual (v0.6.1 T4).
+src\bench\bench_cache_waterfall.obj: src\bench\bench_cache_waterfall.c src\bench\bench.h src\core\journey.h src\core\display.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_cache_waterfall.c
 
 src\upload\upload.obj: src\upload\upload.c src\upload\upload.h
 	$(CC) $(CFLAGS) -fo=$^@ src\upload\upload.c

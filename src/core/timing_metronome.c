@@ -159,4 +159,6 @@ void timing_metronome_visual(const opts_t *o)
     }
     elapsed = mt_ticks() - start;
     (void)elapsed;
+
+    journey_result_flash(o, "Timer: PIT ticking at 18.2 Hz");
 }

@@ -115,6 +115,8 @@ void bench_all(result_table_t *t, const opts_t *o)
     puts("[benchmark] running...");
     WRAP_BENCH("cpu",        bench_cpu(t, o));
     WRAP_BENCH("memory",     bench_memory(t, o));
+    /* v0.6.1 T4: Cache Waterfall visual after memory bench. */
+    bench_cache_waterfall_visual(o);
     WRAP_BENCH("fpu",        bench_fpu(t, o));
     WRAP_BENCH("cache",      bench_cache(t, o));
     WRAP_BENCH("video",      bench_video(t, o));

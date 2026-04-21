@@ -347,4 +347,5 @@ void bench_video(result_table_t *t, const opts_t *o)
         report_add_str(t, "bench.video.status", "ok",
                        CONF_HIGH, VERDICT_UNKNOWN);
     }
+    journey_result_flash(o, "Video: bandwidth measured on live VRAM");
 }

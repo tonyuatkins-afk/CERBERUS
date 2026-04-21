@@ -29,5 +29,6 @@ verdict_t diag_dma_summary_verdict(int ch_pass, int ch_fail, int ch_skip);
  * /QUICK, or after the skip-all latch. */
 void diag_bit_parade(const opts_t *o);
 void diag_lissajous(const result_table_t *t, const opts_t *o);
+void diag_latency_map(const opts_t *o);
 
 #endif

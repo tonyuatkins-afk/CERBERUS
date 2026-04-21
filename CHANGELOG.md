@@ -2,6 +2,97 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [v0.6.1], 2026-04-20 evening
+
+Visual-journey completeness pass. Closes the gaps flagged in the
+v0.6.0 "Known gaps" list.
+
+### Result flashes wired (T1.1)
+
+journey_result_flash() was authored in v0.6.0 but no visual called
+it. Now all six visuals end with a one-line result banner:
+  Bit parade    "ALU: every op verified on a live register"
+  Lissajous     "FPU: trig functions produced a symmetric curve"
+  Mandelbrot    "FPU: Whetstone done, Mandelbrot rendered live"
+  Metronome     "Timer: PIT ticking at 18.2 Hz"
+  Video pattern "Video: bandwidth measured on live VRAM"
+  Audio scale   "Audio: speaker path verified end-to-end"
+
+Each renders centered on row 12 for ~1 second before the next title
+card takes over.
+
+### T4 Memory Cache Waterfall
+
+Text-mode 9-band bar chart, one band per block size (1B, 2B, 4B, 16B,
+256B, 1KB, 4KB, 16KB, 64KB). Each band's fill length + animation
+speed is proportional to measured write bandwidth at that block size
+against a 32 KB FAR-allocated buffer.
+
+Colors: bright green for fastest tier, yellow middle, bright red for
+slowest. On cached systems the small-block bars land in the green
+tier (L1 speed); large-block bars land in red (main-memory speed).
+The visible transition IS the cache boundary.
+
+All adapters, text mode. No VGA-specific path; the bars are CP437
+block characters and the color classes degrade cleanly on mono.
+
+### T5 Cache Latency Heat Map
+
+Text-mode horizontal heat strip, 64 cells spanning the width of an
+allocated 32 KB buffer (one cell per 512-byte window). Each cell
+timed by tight read-sweep; heat level classified into 4 quartiles
+of the min→max range. Green/yellow/red attribute classes.
+
+On a 486 with 8 KB L1 cache the expected pattern is: first 16 cells
+green (in cache), remainder transition through yellow to red. On
+cacheless systems the entire strip should be red.
+
+Annotation labels mark 0 KB, 16 KB, 32 KB and include a legend
+below.
+
+### T7b OPL2 FM scale
+
+audio_scale.c now probes port 0x388 for an AdLib/OPL2 chip before
+playing the 8-note scale. If probe succeeds: play via OPL2 with a
+clean sine voice (modulator silent, carrier sine wave, no feedback);
+title changes to "Audio Scale — OPL2 FM Synth." If probe fails:
+falls back to the v0.6.0 PC-speaker path.
+
+OPL2 probe uses the standard timer-status sequence (write 0x60 to
+reg 0x04, clear status, start timer 1, 100us wait, check status for
+0xC0 pattern). Universal across AdLib, Sound Blaster 1, SB Pro,
+SB16. Probe is ~400us total — imperceptible.
+
+### T7c SB16 PCM DMA — DEFERRED to v0.6.2
+
+Original brief had a third audio layer: PCM DMA playback of
+triangle/square samples via 8237 + SB DSP for Sound Blaster 16+
+machines. Scoped out for v0.6.1 because:
+  - OPL2 FM covers AdLib + SB1 + SB Pro + SB16 (all cards with an
+    OPL chip) with equivalent short-scale audio fidelity.
+  - PCM adds complexity (DMA channel programming, DSP init, buffer
+    management, IRQ handling) for marginal audible benefit on an
+    8-note 2-second scale.
+
+OPL2 path ships in v0.6.1; PCM DMA a v0.6.2 candidate if a use case
+surfaces that actually needs the upgrade.
+
+### Build state
+
+- CERBERUS.EXE: 157,002 bytes (target <180KB; 165KB flag threshold
+  not tripped)
+- DGROUP: 57,280 / 56,000 soft target exceeded (7,256 bytes under
+  DOS 64KB limit — Tony confirmed acceptable for v0.6.1)
+- Host tests: 7 suites, 201 OK, 0 failures
+
+### DGROUP note
+
+`-zc` was tried as a path to move const strings out of DGROUP; it
+doesn't move unnamed string literals (only explicitly const-qualified
+declarations). Left disabled. Future optimization candidate:
+renamed CONST class with a wlink ORDER directive to park it in a
+far segment. Not a v0.6.1 blocker.
+
 ## [v0.6.0], 2026-04-20 evening
 
 The Visual Diagnostics Journey release. CERBERUS becomes an experience

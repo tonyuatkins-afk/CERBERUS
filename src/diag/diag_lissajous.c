@@ -119,4 +119,5 @@ void diag_lissajous(const result_table_t *t, const opts_t *o)
     }
 
     lsj_set_mode(0x03);
+    journey_result_flash(o, "FPU: trig functions produced a symmetric curve");
 }

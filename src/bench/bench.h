@@ -53,4 +53,11 @@ void bench_video(result_table_t *t, const opts_t *o);
  * from bench_whetstone() after its numeric emit completes. */
 void bench_mandelbrot_demo(const opts_t *o);
 
+/* v0.6.1 T4: Memory Cache Waterfall visual. Measures write bandwidth
+ * across 9 block sizes (1B..64KB) and animates progressive-fill bars
+ * whose speed is proportional to measured rate. Cache boundary shows
+ * as a speed transition between small-block and large-block bars.
+ * Called from bench_all after bench_memory. Text mode, all adapters. */
+void bench_cache_waterfall_visual(const opts_t *o);
+
 #endif

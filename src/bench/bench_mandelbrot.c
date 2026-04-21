@@ -161,4 +161,5 @@ void bench_mandelbrot_demo(const opts_t *o)
     }
 
     mb_set_mode(0x03);
+    journey_result_flash(o, "FPU: Whetstone done, Mandelbrot rendered live");
 }
