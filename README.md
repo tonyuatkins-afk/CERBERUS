@@ -1,14 +1,24 @@
 # CERBERUS
 
-DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; v0.4.0 is 144,166 bytes. Targets an 8088 with 256KB and an MDA card as the floor and scales up through a 486 with VGA.
+DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; v0.7.0-rc1 is 163,922 bytes. Targets an 8088 with 256KB and an MDA card as the floor and scales up through a 486 with VGA.
 
-Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; NetISA is the hardware card for uploading results from DOS over TLS 1.3.
+Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelybooting-server](https://github.com/tonyuatkins-afk/barelybooting-server) is the companion web app that ingests uploaded CERBERUS.INI runs at `barelybooting.com/cerberus/`.
 
 ![CERBERUS v0.4.0 three-pane UI on a 486 DX-2](docs/releases/v0.4.0/screenshots/three-pane-ui-closeup.jpg)
 
 ## Status
 
-**`v0.4.0` tagged 2026-04-19.** Fourth release in the weekend arc: `v0.2-rc1`, `v0.3-rc1`, `v0.4-rc1`, `v0.4.0`. All six subsystems (detect, diagnose, benchmark, consistency engine, thermal tracker, UI) real-hardware-validated on BEK-V409 (Intel i486DX-2-66, AMI BIOS 11/11/92, S3 Trio64, Vibra 16S, 63 MB XMS). Full capture at [`tests/captures/486-real-2026-04-19-v0.4.0/`](tests/captures/486-real-2026-04-19-v0.4.0/). Five Homage Phase 2 research docs merged at [`docs/research/homage/`](docs/research/homage/). 386 and 8088 validation are the next-platforms work (see [`docs/sessions/NEXT-PLATFORMS.md`](docs/sessions/NEXT-PLATFORMS.md)). Hardware identification has 128 seed entries across 5 databases; your chip may not be present. `CERBERUS.UNK` captures get submitted as GitHub issues and added to the CSVs.
+**`v0.7.0-rc1` tagged 2026-04-20.** Release-candidate for the community-upload feature. Eleven tags across the arc: `v0.1.1-scaffold` → `v0.2-rc1` → `v0.3-rc1` → `v0.4-rc1` → **`v0.4.0`** → **`v0.5.0`** → **`v0.6.0`** → `v0.6.1` → `v0.6.2` → **`v0.7.0-rc1`**. The full `v0.7.0` tag is held until the companion server is deployed and an end-to-end upload round-trip validates on real hardware (see [`docs/ini-upload-contract.md`](docs/ini-upload-contract.md)).
+
+**What's in each milestone:**
+- **v0.4.0** (2026-04-19) — All six subsystems (detect, diagnose, benchmark, consistency engine, thermal tracker, UI) real-hardware-validated on BEK-V409.
+- **v0.5.0** — Scrollable three-heads summary UI; Whetstone x87-asm kernel; Mandelbrot FPU visual demo.
+- **v0.6.0** — Visual Diagnostics Journey: new tagline "Tough Times Demand Tough Tests"; directional head art (left / center / right); CPU ALU bit parade; FPU Lissajous; PIT metronome; journey framework with title cards + `/QUICK` flag.
+- **v0.6.1** — Memory Cache Waterfall; Cache Latency Heat Map; OPL2 FM audio scale; result flashes wired.
+- **v0.6.2** — Shared TUI helpers module; SB DSP direct-mode PCM audio (third audio path).
+- **v0.7.0-rc1** — Community Upload (Part A): network transport detection, `[upload]` INI section, `/NOUPLOAD`/`/UPLOAD`/`/NICK`/`/NOTE` flags, HTGET shell-out for POST, UPLOAD STATUS summary section, INI format frozen at `ini_format=1`, server API contract documented at [`docs/ini-upload-contract.md`](docs/ini-upload-contract.md).
+
+BEK-V409 (Intel i486DX-2-66, AMI BIOS 11/11/92, S3 Trio64, Vibra 16S, 63 MB XMS) is the validation workstation. 386 and 8088 validation are the next-platforms work. Hardware identification has 128 seed entries across 5 databases; your chip may not be present. `CERBERUS.UNK` captures get submitted as GitHub issues and added to the CSVs.
 
 | Subsystem | Target version | Current state |
 |---|---|---|
@@ -85,9 +95,9 @@ Requires [Open Watcom C/C++ 2.0](http://open-watcom.github.io/) and [NASM 2.x](h
 wmake
 ```
 
-Produces `CERBERUS.EXE`, DOS real-mode, medium memory model. v0.4.0 builds to 144,166 bytes; DGROUP (near data) 53,184 / 56,000 bytes (5% headroom under the internal working-ceiling, 19% under the 65,536-byte hardware ceiling). The 56,000-byte working-ceiling was lifted from 52,000 at v0.4 kickoff to absorb `bench_cache`, `bench_video`, and the Whetstone-asm deltas.
+Produces `CERBERUS.EXE`, DOS real-mode, medium memory model. v0.7.0-rc1 builds to 163,922 bytes; DGROUP (near data) 59,008 bytes, well under the 65,536-byte hardware ceiling.
 
-Host-side unit tests (run on Windows, Linux, or macOS dev box; exercise the pure-math and database-lookup paths with 163 assertions across timing, consist, thermal, diag_fpu, diag_cache, diag_dma, bench_cache):
+Host-side unit tests (run on Windows, Linux, or macOS dev box; exercise the pure-math and database-lookup paths with 201 assertions across timing, consist, thermal, diag_fpu, diag_cache, diag_dma, bench_cache):
 
 ```
 cd tests/host
@@ -109,13 +119,10 @@ The database is the lowest-friction extension point in the codebase. No C knowle
 
 ## Known issues
 
-- **[#1](https://github.com/tonyuatkins-afk/CERBERUS/issues/1)**. `test_timing` host test has 4 pre-existing failures after the PIT wrap-range rework (`b6c179b`, `6c3a023`). Test expectations drifted from behavior. Gated behind the Rule 4a UMC491 8254 phantom-wrap deep-dive. The other host suites (consist, thermal, diag_fpu, diag_cache, diag_dma, bench_cache) are clean.
-- **[#2](https://github.com/tonyuatkins-afk/CERBERUS/issues/2)**. Intermittent OPL detection on Vibra 16 PnP. Same binary plus same box plus different cold boot can produce `opl=opl3` vs `opl=none`. Partial fix in `eeba319` (BLASTER-base+8 primary, 0x388 fallback) made detection work *sometimes*; residual state dependence remains. The INI is still complete on the `opl=none` path: `audio.sb_present` and `sb_dsp_version` stay populated, and the composite T-key lookup falls back to the raw `none:<dsp>` form.
-- **[#3](https://github.com/tonyuatkins-afk/CERBERUS/issues/3)**. UI hang on real iron, observed once on the 486 DX-2 bench box on commit `7e4bdcb` (2026-04-18 afternoon). Without `/NOUI`, after `ui_render_consistency_alerts` paints, the program did not return to DOS without a hard reboot. Not reproducing on the current 486 state: 8 consecutive real-iron runs completed cleanly through the v0.4.0 capture. Instrumentation patch preserved as a local `git stash` entry for re-application if the hang returns. Reopen criterion: reproduction on real iron. `/NOUI` retained as a user-visible escape hatch.
-- **[#4](https://github.com/tonyuatkins-afk/CERBERUS/issues/4)**. Whetstone FPU-assembly rework. `bench.fpu.k_whetstones` stays CONF_LOW at ~109 K-Whet (CheckIt reference 11,420, ~100× low). Closing this requires NASM-compiled x87 inner kernels for `PA()`, `P0()`, and Module 2's hot loop with Watcom plus NASM calling-convention work.
-- **[#6](https://github.com/tonyuatkins-afk/CERBERUS/issues/6)**. `bench_video` measures ISA-range bandwidth on VLB hardware. The v0.4.0 BEK-V409 capture showed `bench.video.mode13h_kbps = 4,613` on a Trio64 VLB system. Known measurement-scope limitation; investigation plan covers physical VLB slot check, BIOS and jumper verification, and a CFLAGS_NOOPT vs -ox bench_video variant profile.
+- **[#4](https://github.com/tonyuatkins-afk/CERBERUS/issues/4)**. Whetstone calibration still needs multi-cold-boot BEK-V409 validation. v0.5.0 landed a hand-coded x87-asm kernel (`bench_whet_fpu.asm`) which should close most of the gap vs the prior ~109 K-Whet; the numbers now emit at CONF_HIGH but real-hardware anchor-to-reference is pending.
+- **[#6](https://github.com/tonyuatkins-afk/CERBERUS/issues/6)**. `bench_video` measures ISA-range bandwidth on VLB hardware. Known measurement-scope limitation.
 
-Issue #5 (diag_cache threshold miscalibration) closed at commit `25306b4` on 2026-04-19 via the per-line-ratio reformulation, validated on BEK-V409.
+Issues #1 (pre-existing test_timing failures), #2 (OPL detection intermittency), #3 (UI hang) and #5 (diag_cache threshold) closed prior to v0.5.0.
 
 ## Changelog
 
