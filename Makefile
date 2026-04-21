@@ -81,6 +81,7 @@ OBJS = src\main.obj                                                  &
        src\bench\bench_memory.obj src\bench\bench_fpu.obj            &
        src\bench\bench_cache.obj src\bench\bench_video.obj           &
        src\bench\bench_dhrystone.obj src\bench\bench_whetstone.obj   &
+       src\bench\bench_whet_fpu.obj                                  &
        src\upload\upload.obj
 
 all: $(TARGET) .SYMBOLIC
@@ -238,7 +239,14 @@ src\bench\bench_dhrystone.obj: src\bench\bench_dhrystone.c src\bench\bench.h src
 	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_dhrystone.c
 
 src\bench\bench_whetstone.obj: src\bench\bench_whetstone.c src\bench\bench.h src\core\timing.h src\core\report.h src\cerberus.h
-	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_whetstone.c
+	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_whetstone.c
+
+# Whetstone x87 FPU kernel — NASM asm (v0.5.0 T4a). Dispatched from
+# bench_whetstone.c when fpu.detected != "none". Opaque to Watcom's
+# optimizer, so the C wrapper can compile at -ox without the DCE-
+# suppression contortions that forced bench_whetstone.c to -od before.
+src\bench\bench_whet_fpu.obj: src\bench\bench_whet_fpu.asm
+	$(ASM) $(ASFLAGS) -o src\bench\bench_whet_fpu.obj src\bench\bench_whet_fpu.asm
 
 src\upload\upload.obj: src\upload\upload.c src\upload\upload.h
 	$(CC) $(CFLAGS) -fo=$^@ src\upload\upload.c
