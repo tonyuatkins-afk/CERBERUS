@@ -2,6 +2,128 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [Unreleased, post-v0.4.0], 2026-04-19 evening through 2026-04-20
+
+Development work on `main` past the `v0.4.0` tag. Not yet
+collected under a rc/final tag; next anchor point will be
+either a `v0.5.0-alpha` pre-release for the ANSI intro and
+instrumentation, or a full `v0.5.0` once issue #4 and issue
+#6 close.
+
+### ANSI boot intro (`593b139`)
+
+New module `src/core/intro.c` + `intro.h` plus wiring into
+`main.c` between `display_init` and `display_banner`. Adapter-
+aware three-headed-dog emblem with OPL2 stinger. Gated by
+`/NOINTRO` (already plumbed in `opts_t`) and `/NOUI`. Five
+iconographic elements (three heads with fangs, serpent-mane
+spines, chain-bound body, serpent tail, double-line gate)
+plus seven embellishments (heartbeat pre-sequence, eye
+cascade with escalating OPL2 barks, chain-shatter DAC flash
+with rhythm-mode snare, sustained A-minor chord with vibrato,
+sub-bass drone, hellfire ember row, chain rattle around
+broken link, breath sparks, serpent tail wiggle, wordmark
+color pulse, BEHOLD mid-sustain flash). Full classical
+iconography sourced from Pseudo-Apollodorus, Virgil, Dante,
+and Hercules 12th-labor Roman iconography.
+
+Real-hardware validated on BEK-V409 as `CERB-INT.EXE`
+(150,042 bytes). User reaction: "Wow that looked epic."
+Detect/diag/bench flow after the intro produces numbers
+consistent with v0.4.0 baseline; no regressions.
+
+### Issue-fix sweep
+
+- **Issue #1 (`036cc1c`).** The four pre-existing
+  `test_timing` assertion failures were written before a 25%
+  pit/bios divergence guard landed in `timing_compute_dual`;
+  their c2 values produced highly divergent pit_us vs bios_us
+  and now correctly trigger that guard. Updated the test
+  inputs to use near-full-wrap sub_ticks values that satisfy
+  all three kernel gates (lower-bail, upper-bail, divergence)
+  while preserving the test's original semantic (verifying
+  that target=1 with 0 wraps does not trip the lower-bail).
+  Added dedicated coverage for the divergence guard itself
+  (both pit>>bios and bios>>pit branches) which had no test
+  coverage before. 167 host-test assertions green, 0 failures.
+  Previous state: 163 green, 4 failed.
+
+- **Issue #3 closed.** UI hang unable to reproduce across 9
+  consecutive clean real-iron runs (v0.2-rc1 through v0.4.0
+  plus CERB-VOX diagnostic plus both CERB-INT runs). Closed
+  as "cannot reproduce" with reopen criteria preserved.
+  Instrumentation stash at
+  `docs/plans/attic/ui-hang-instrumentation-2026-04-18.patch`
+  available for re-application if the hang re-emerges.
+
+- **Issue #6 test-1 data-point landed earlier this session.**
+  Built `CERB-VOX.EXE` at 144,054 bytes with `bench_video.c`
+  compiled at `-ox` instead of `CFLAGS_NOOPT`. BEK-V409
+  results: `text_write_kbps` 4,988 (+6.9% vs 4,668 at
+  CFLAGS_NOOPT) and `mode13h_kbps` 5,021 (+8.8% vs 4,613).
+  CFLAGS_NOOPT tax is small, not the dominant factor.
+  Posted as comment to issue #6; bottleneck is not compile
+  flags.
+
+- **Issue #6 test-2 tool built (`2f5b26e`).** New standalone
+  `tools/repstosd/REPSTOSD.EXE` (11,258 bytes) with pure-
+  assembly REP STOSW inner loop writing 128 MB to mode 13h
+  VRAM. Isolates C-loop overhead vs hardware-path limitation.
+  Shipped to BEK-V409 for Tony to run; output will tell us
+  whether CERBERUS's 4.6 MB/s number reflects a real hardware
+  ceiling or a C-loop-overhead artifact.
+
+- **Issue #2 instrumentation (`74bc439`).** New INI key
+  `audio.opl_probe_trace` emits byte-level trace of every
+  status-register read across primary and fallback OPL
+  probe attempts. Enables multi-cold-boot capture-and-diff
+  to identify which byte value differs between "opl3
+  detected" runs and "none detected" runs on the same
+  Vibra 16 PnP card. Built into `CERB-DBG.EXE` on BEK-V409
+  (150,556 bytes).
+
+### Homage Phase 3 research (`37777f3`)
+
+Seven additional lesson docs in `docs/research/homage/` under
+the same ethical frame as Phase 2: no decompiled code, no
+binary redistribution, attribution preserved, corrections
+flagged openly.
+
+Deferred-from-Phase-2 tasks now closed: T3 CheckIt
+Whetstone (confirmed custom synthetic, not Curnow-Wichmann;
+reframes issue #4), T5 CheckIt video methodology (text-mode
+only, no mode 13h reference), T8 CACHECHK UMC timer
+workaround (structural match to CERBERUS; raw-forensic-emit
+pattern filed as v0.5+ Rule 4a enhancement), T9+T10
+SPEEDSYS (Afanasiev attribution confirmed, Russian origin;
+Pentium-era peer, out of CERBERUS scope).
+
+New issue-#6 second-opinion research: T14 PCPBENCH (PC
+Player magazine / Computec Media, German origin; DOS/4GW
+32-bit 3D with REP STOSD primitives), T15 3DBENCH v1 and
+v2 (Superscape VRT Ltd, UK; per-frame phase breakdown with
+dedicated Clr column is the sharpest issue-#6 comparator
+in the corpus), T16 CHRISB (DJGPP 1996; SVGA variant's S3
+path relevant to BEK-V409 Trio64), T17 LM60 Landmark Speed
+6.0 (same IBM PC/XT anchor as CheckIt, era convention).
+
+Three attribution corrections this pass: SPEEDSYS (Roedy
+Green → Vladimir Afanasiev), PCPBENCH (Jim Leonard → PC
+Player magazine), 3DBENCH (Future Crew → Superscape VRT
+Ltd).
+
+### Envelope at end of 2026-04-19 work block
+
+- `main` HEAD: `37777f3`
+- EXE (tip-of-tree, CERB-DBG / non-tag): 150,556 bytes
+- DGROUP: 53,808 / 56,000 (4% headroom under working
+  ceiling; 18% under 65,536 hardware ceiling)
+- Host tests: 167 assertions, all green
+- Phase 2 lesson docs: 7 (unchanged from v0.4.0)
+- Phase 3 lesson docs: 7 (added this session)
+- GitHub issues: 2 closed (#3, #5), 4 open (#1 gated, #2
+  instrumented, #4 reframed, #6 two tests built)
+
 ## [v0.4.0], 2026-04-19
 
 Fourth release in the weekend arc. Closes the UI defects found in v0.4-rc1's BEK-V409 screenshot. Full release notes at [`docs/releases/v0.4.0.md`](docs/releases/v0.4.0.md).
