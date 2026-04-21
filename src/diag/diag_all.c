@@ -21,6 +21,8 @@ void diag_all(result_table_t *t, const opts_t *o)
     diag_bit_parade(o);
     WRAP_DIAG("mem",   diag_mem(t));
     WRAP_DIAG("fpu",   diag_fpu(t));
+    /* v0.6.0 T3: FPU Lissajous visual after diag_fpu. */
+    diag_lissajous(t, o);
     WRAP_DIAG("video", diag_video(t));
     WRAP_DIAG("cache", diag_cache(t));
     WRAP_DIAG("dma",   diag_dma(t));

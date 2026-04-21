@@ -79,6 +79,7 @@ OBJS = src\main.obj                                                  &
        src\diag\diag_video.obj                                       &
        src\diag\diag_cache.obj src\diag\diag_dma.obj                 &
        src\diag\diag_bit_parade.obj                                  &
+       src\diag\diag_lissajous.obj                                   &
        src\bench\bench_all.obj src\bench\bench_cpu.obj               &
        src\bench\bench_memory.obj src\bench\bench_fpu.obj            &
        src\bench\bench_cache.obj src\bench\bench_video.obj           &
@@ -228,6 +229,9 @@ src\diag\diag_dma.obj: src\diag\diag_dma.c src\diag\diag.h src\core\report.h src
 
 src\diag\diag_bit_parade.obj: src\diag\diag_bit_parade.c src\diag\diag.h src\core\journey.h src\core\display.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_bit_parade.c
+
+src\diag\diag_lissajous.obj: src\diag\diag_lissajous.c src\diag\diag.h src\core\journey.h src\core\display.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_lissajous.c
 
 src\bench\bench_all.obj: src\bench\bench_all.c src\bench\bench.h src\core\crumb.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_all.c

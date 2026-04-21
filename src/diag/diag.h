@@ -28,5 +28,6 @@ verdict_t diag_dma_summary_verdict(int ch_pass, int ch_fail, int ch_skip);
  * Each honors journey_should_skip() on entry and no-ops on /NOUI,
  * /QUICK, or after the skip-all latch. */
 void diag_bit_parade(const opts_t *o);
+void diag_lissajous(const result_table_t *t, const opts_t *o);
 
 #endif
