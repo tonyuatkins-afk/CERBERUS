@@ -62,6 +62,7 @@ OBJS = src\main.obj                                                  &
        src\core\crumb.obj     src\core\ui.obj                        &
        src\core\intro.obj     src\core\head_art.obj                  &
        src\core\journey.obj   src\core\timing_metronome.obj          &
+       src\core\audio_scale.obj                                      &
        src\core\cache_buffers.obj                                    &
        src\detect\detect_all.obj                                     &
        src\detect\env.obj     src\detect\unknown.obj                 &
@@ -132,6 +133,9 @@ src\core\journey.obj: src\core\journey.c src\core\journey.h src\core\head_art.h 
 
 src\core\timing_metronome.obj: src\core\timing_metronome.c src\core\timing.h src\core\journey.h src\core\display.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\timing_metronome.c
+
+src\core\audio_scale.obj: src\core\audio_scale.c src\core\audio_scale.h src\core\journey.h src\core\display.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\core\audio_scale.c
 
 src\core\cache_buffers.obj: src\core\cache_buffers.c src\core\cache_buffers.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\cache_buffers.c

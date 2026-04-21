@@ -8,6 +8,7 @@
 #include "core/ui.h"
 #include "core/intro.h"
 #include "core/journey.h"
+#include "core/audio_scale.h"
 #include "core/consist.h"
 #include "core/thermal.h"
 #include "core/timing.h"
@@ -164,6 +165,11 @@ int main(int argc, char *argv[])
         /* v0.6.0 T6: PIT metronome visual. */
         timing_metronome_visual(&opts);
     }
+
+    /* v0.6.0 T7: Audio Hardware scale visual — last journey beat
+     * before the summary screen. PC speaker only in v0.6.0; OPL2 +
+     * SB16 PCM paths are v0.6.1 follow-up. */
+    audio_scale_visual(&opts);
 
     /* Consistency cross-check runs after all three heads so it sees
      * everything that got populated. Thermal follows, consuming the
