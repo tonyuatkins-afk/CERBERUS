@@ -45,7 +45,9 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <conio.h>
+#ifndef CERBERUS_HOST_TEST
+#include <conio.h>                  /* inp()/outp() for port probes */
+#endif
 #include "diag.h"
 #include "../core/report.h"
 
