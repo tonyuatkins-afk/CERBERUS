@@ -119,3 +119,8 @@ devenv/*.TMP
 # Bench-floppy: stage CERBERUS.EXE lives here per variant. Not
 # interesting to track separately since it is a copy of dist/.
 /bench-floppy/*/CERBERUS.EXE
+
+# Bench-floppy: whitelist bundled mTCP binaries (otherwise caught by
+# the *.exe ignore above). These are GPL v3 third-party tools with
+# source at brutman.com/mTCP — redistributed on the bench floppy.
+!/bench-floppy/network/NET/*.exe

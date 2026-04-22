@@ -31,19 +31,20 @@ bye
 - `C:\Development\CERBERUS\dist\CERBERUS.EXE` — stock v0.8.1 (170,722 bytes, commit `bdfe95c` on `main`)
 - `C:\Development\CERBERUS\dist-investigation\CERBERUS.EXE` — v0.8.1 + BEK-V409 investigation hooks (170,946 bytes, commit `f49a1d2` on `investigation/bek-v409-null-write`). Adds `/SKIP:s3probe`, `/SKIP:et4000probe`, `/SKIP:biosscan`, `/SKIP:oplfb` selective-skip flags plus crumb markers on each probe site.
 
-## Bench floppy (single-disk, bootable)
+## Bench floppy (single-disk, bootable, 1.44 MB across the fleet)
 
-For the 286 and Leading Edge sessions where FTP is not available, use the bench floppy kit staged at `C:\Development\CERBERUS\bench-floppy\`. Two variants:
+Tony confirmed every bench box supports 1.44 MB floppies — use 1.44 MB across the board as the common format. Kit staged at `C:\Development\CERBERUS\bench-floppy\`:
 
-- **offline** (fits 360 KB / 720 KB / 1.2 MB / 1.44 MB): auto-runs CERBERUS from a boot floppy, captures to `A:\CAP.INI` + `A:\CAP.CSV`. Pull the floppy, read on a modern PC. Five interactive session choices at boot.
-- **network** (fits 720 KB / 1.2 MB / 1.44 MB, NOT 360 KB): same plus packet-driver + mTCP drop-in slots. Drop in the right `.COM` packet driver for the NIC + mTCP tools; boot auto-loads + runs DHCP.
+- **offline** — ~180 KB content. No network. Captures to `A:\CAP.INI` + `A:\CAP.CSV`; pull floppy, read on PC. Five interactive session choices at boot. Use when the box has no NIC, or when you don't want to mess with network config.
+- **network** — ~470 KB content, **fully turnkey**: bundled 6 packet drivers (3C509, 3C503, NE2000, NE1000, WD8003E, SMC_WD from Crynwr) + 5 mTCP binaries (DHCP, FTP, HTGET, SNTP, PING from brutman.com, GPL v3). Uncomment one line in `A:\NET\NET.BAT` for your NIC + one DHCP line; boot auto-configures. FTP back the capture when done.
 
-See `bench-floppy/README.md` for floppy-making instructions (Rufus recommended) and which variant to use on which box.
+See `bench-floppy/README.md` for floppy-making instructions (Rufus recommended). All six bundled packet drivers cover the common ISA / 16-bit / 8-bit NIC families. If a box has a NIC not in the bundled set, fall back to the offline floppy + remove-by-hand workflow.
 
 **Floppy use in tonight's sessions:**
-- Session 6 (286): offline variant, whichever floppy format the 286's drive supports.
-- Session 7 / 8 (Leading Edge XT): offline variant, 360 KB 5.25" DD.
-- Sessions 1-5 (BEK-V409 / IBM 486 / 386 DX-40): FTP is already configured on those boxes; bench floppy is backup.
+- Sessions 1, 2, 3, 4 (BEK-V409, 386 DX-40): FTP is already configured; floppy is only backup if FTP breaks.
+- Session 5 (IBM 486): network floppy with `3C509.COM` or `NE2000.COM` (most likely candidates).
+- Session 6 (286): network if the 286 has a supported NIC; offline otherwise. Run conservative first: `/Q /SKIP:BENCH /NOUI`.
+- Sessions 7, 8 (Leading Edge XT): network floppy with `NE1000.COM` or `3C503.COM` if the box has an 8-bit NIC installed; offline otherwise. XT's 5.25" 1.44 MB would need an unusual DD→HD upgrade — if only 5.25" 360 KB is available on this box, use offline and write to 360 KB separately (offline fits).
 
 ## Session 1: 0.8.1 validation parade (both boxes, ~20 min each)
 
