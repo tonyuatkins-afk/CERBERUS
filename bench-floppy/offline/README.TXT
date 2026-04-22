@@ -30,10 +30,12 @@ To make this floppy (on Windows):
     AUTOEXEC/MENU/CERBERUS.EXE.
 
 Disk size notes:
-  360 KB  fits  170 (CERBERUS) + ~130 (DOS boot) + small files = ~305 KB
-           leaves ~55 KB for INI output. Works for Leading Edge
-           Model D (XT class) and other 5.25 DD-only boxes.
-  720 KB  or larger: comfortable.
+  720 KB  recommended fleet format. Tony's 8088 supports 720 KB
+           only; AT-class boxes (286/386/486) read 720 KB fine too.
+           Content ~305 KB, leaves ~415 KB headroom for INI output.
+  1.44 MB works on 286 / 386 / 486 (not on the 8088).
+  360 KB  5.25 DD: only if a box is limited to that format.
+           Content ~305 KB fits with ~55 KB headroom.
 
 Session choices from the MENU:
 

@@ -1,29 +1,29 @@
 # CERBERUS bench floppy
 
-Self-contained content to drop onto a bootable DOS 1.44 MB floppy so any bench machine (8088 through 486) can run CERBERUS end-to-end from a single disk. All of Tony's target boxes support 1.44 MB, so 1.44 MB is the recommended format across the fleet.
+Self-contained content to drop onto a bootable DOS floppy so any bench machine (8088 through 486) can run CERBERUS end-to-end from a single disk. **720 KB is the universal fleet format** — the 8088 supports 720 KB but not 1.44 MB, and every AT-class box (286 / 386 / 486) reads 720 KB just as easily as 1.44 MB. Standardizing on 720 KB means one physical floppy format across every bench box. If you already have 1.44 MB disks formatted for the AT-class fleet, those work just as well.
 
 Two variants:
 
-- **`offline/`** — no network. Fits every format 360 KB and up. ~180 KB of floppy content + DOS boot. Captures land on `A:\CAP.INI` and `A:\CAP.CSV`; pull floppy, read on a modern PC. Use when the box has no NIC, or you don't want to mess with network config.
+- **`offline/`** — no network. ~310 KB content + DOS boot on a 720 KB floppy, leaves ~410 KB spare. Captures land on `A:\CAP.INI` and `A:\CAP.CSV`; pull floppy, read on a modern PC. Use when the box has no NIC, or you don't want to mess with network config.
 
-- **`network/`** — bundled packet drivers + mTCP, ready to go. Fits 720 KB and up (NOT 360 KB). ~600 KB of floppy content + DOS boot. Includes 6 packet drivers (3C509, 3C503, NE2000, NE1000, WD8003E, SMC_WD) and 5 mTCP binaries (DHCP, FTP, HTGET, SNTP, PING). Pick the NIC driver, uncomment one line in `NET\NET.BAT`, boot — DHCP handles the rest.
+- **`network/`** — bundled packet drivers + mTCP, ready to go. ~600 KB content + DOS boot on a 720 KB floppy, leaves ~120 KB spare. Includes 6 packet drivers (3C509, 3C503, NE2000, NE1000, WD8003E, SMC_WD) and 5 mTCP binaries (DHCP, FTP, HTGET, SNTP, PING). Pick the NIC driver, uncomment one line in `NET\NET.BAT`, boot — DHCP handles the rest.
 
 ## Which to use tonight
 
-| Bench machine | Recommended floppy | Why |
-|---|---|---|
-| BEK-V409 (486) | FTP path (already configured) — bench floppy is backup | FTP over existing network setup is the established flow |
-| IBM 486 (NIC unknown) | network, fall back to offline | Try NE2000 or 3C509 first; if the NIC isn't in the bundled set, offline still captures |
-| 386 DX-40 | FTP path (already configured) — bench floppy is backup | Same as BEK-V409 |
-| 286 board | network if a supported NIC is present, else offline | Bundled drivers cover 3C509 / NE2000 / WD/SMC; should hit most AT-era cards |
-| Leading Edge Model D (XT) | offline, OR network if an 8-bit NIC is present | 8-bit NE1000 / 3C503 are bundled for this case |
+| Bench machine | Floppy format | Recommended variant | Why |
+|---|---|---|---|
+| BEK-V409 (486) | 720 KB or 1.44 MB | FTP path (already configured), floppy is backup | FTP over existing network setup is the established flow |
+| IBM 486 (NIC unknown) | 720 KB or 1.44 MB | network, fall back to offline | Try NE2000 or 3C509 first; if the NIC isn't in the bundled set, offline still captures |
+| 386 DX-40 | 720 KB or 1.44 MB | FTP path (already configured), floppy is backup | Same as BEK-V409 |
+| 286 board | 720 KB or 1.44 MB | network if a supported NIC is present, else offline | Bundled drivers cover 3C509 / NE2000 / WD/SMC; should hit most AT-era cards |
+| Leading Edge Model D (8088) | **720 KB (only format this drive supports)** | offline, OR network if an 8-bit NIC is present | 8-bit NE1000 / 3C503 are bundled for this case |
 
 ## How to make the floppy
 
 ### Option A: Rufus (simplest on Windows)
 
 1. Download [Rufus](https://rufus.ie).
-2. Insert a 1.44 MB formatted floppy in your USB floppy drive.
+2. Insert a formatted floppy (720 KB DD or 1.44 MB HD) in your USB floppy drive. 720 KB is recommended for fleet-wide compatibility; the 8088 bench box supports 720 KB only.
 3. Rufus → "Create a bootable disk using" → FreeDOS.
 4. Once Rufus finishes, copy the entire contents of `offline/` or `network/` onto the drive via Explorer.
 

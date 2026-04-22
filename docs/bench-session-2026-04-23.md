@@ -31,9 +31,9 @@ bye
 - `C:\Development\CERBERUS\dist\CERBERUS.EXE` — stock v0.8.1 (170,722 bytes, commit `bdfe95c` on `main`)
 - `C:\Development\CERBERUS\dist-investigation\CERBERUS.EXE` — v0.8.1 + BEK-V409 investigation hooks (170,946 bytes, commit `f49a1d2` on `investigation/bek-v409-null-write`). Adds `/SKIP:s3probe`, `/SKIP:et4000probe`, `/SKIP:biosscan`, `/SKIP:oplfb` selective-skip flags plus crumb markers on each probe site.
 
-## Bench floppy (single-disk, bootable, 1.44 MB across the fleet)
+## Bench floppy (single-disk, bootable, 720 KB universal)
 
-Tony confirmed every bench box supports 1.44 MB floppies — use 1.44 MB across the board as the common format. Kit staged at `C:\Development\CERBERUS\bench-floppy\`:
+Correction after Tony flagged the 8088 only supports 720 KB: **720 KB is the universal fleet format**. 8088 through 486 all read 720 KB. 1.44 MB works on 286 / 386 / 486 but not on the 8088. If you want one floppy stack, format all as 720 KB. Kit staged at `C:\Development\CERBERUS\bench-floppy\`:
 
 - **offline** — ~180 KB content. No network. Captures to `A:\CAP.INI` + `A:\CAP.CSV`; pull floppy, read on PC. Five interactive session choices at boot. Use when the box has no NIC, or when you don't want to mess with network config.
 - **network** — ~470 KB content, **fully turnkey**: bundled 6 packet drivers (3C509, 3C503, NE2000, NE1000, WD8003E, SMC_WD from Crynwr) + 5 mTCP binaries (DHCP, FTP, HTGET, SNTP, PING from brutman.com, GPL v3). Uncomment one line in `A:\NET\NET.BAT` for your NIC + one DHCP line; boot auto-configures. FTP back the capture when done.
@@ -44,7 +44,7 @@ See `bench-floppy/README.md` for floppy-making instructions (Rufus recommended).
 - Sessions 1, 2, 3, 4 (BEK-V409, 386 DX-40): FTP is already configured; floppy is only backup if FTP breaks.
 - Session 5 (IBM 486): network floppy with `3C509.COM` or `NE2000.COM` (most likely candidates).
 - Session 6 (286): network if the 286 has a supported NIC; offline otherwise. Run conservative first: `/Q /SKIP:BENCH /NOUI`.
-- Sessions 7, 8 (Leading Edge XT): network floppy with `NE1000.COM` or `3C503.COM` if the box has an 8-bit NIC installed; offline otherwise. XT's 5.25" 1.44 MB would need an unusual DD→HD upgrade — if only 5.25" 360 KB is available on this box, use offline and write to 360 KB separately (offline fits).
+- Sessions 7, 8 (Leading Edge XT): **720 KB DD floppy — it's this box's native max.** Network floppy with `NE1000.COM` or `3C503.COM` if an 8-bit NIC is installed; offline otherwise. Both variants fit 720 KB (offline 310 KB / 410 KB spare; network 600 KB / 120 KB spare).
 
 ## Session 1: 0.8.1 validation parade (both boxes, ~20 min each)
 

@@ -32,9 +32,11 @@ Size budget on the floppy:
     CERBERUS + scripts ~180 KB
     NET\ payload       ~290 KB
     Total              ~600 KB
-    Fits 720 KB, 1.2 MB, 1.44 MB. Does NOT fit 360 KB; use the
-    offline variant (bench-floppy/offline/) for 360 KB floppies
-    or for any box without a NIC.
+    Fits 720 KB (~120 KB spare), 1.2 MB, 1.44 MB. Does NOT fit
+    360 KB; use the offline variant (bench-floppy/offline/) for
+    360 KB floppies or for any box without a NIC.
+    720 KB is the recommended fleet format: Tony's 8088 supports
+    720 KB only, and AT-class (286/386/486) reads 720 KB fine.
 
 License + attribution:
     mTCP (dhcp.exe, ftp.exe, htget.exe, sntp.exe, ping.exe):
