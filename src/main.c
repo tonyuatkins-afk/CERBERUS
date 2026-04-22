@@ -80,7 +80,12 @@ static int parse_args(int argc, char *argv[], opts_t *o)
         char *a = argv[i];
         if (!strcmp(a, "/?")) { print_help(); return 0; }
         else if (!strcmp(a, "/Q")) { o->mode = MODE_QUICK; o->runs = 1; }
-        else if (str_starts_with(a, "/C")) {
+        else if (!strcmp(a, "/CSV"))     { o->do_csv = 1; }
+        else if (str_starts_with(a, "/C") &&
+                 (a[2] == '\0' || a[2] == ':')) {
+            /* /C or /C:<n> — calibrated mode. Guard on "a[2] is end-of-
+             * string or colon" so /CSV (v0.8.1 M1.2) doesn't get consumed
+             * as /C before the exact-match branch runs. */
             int n;
             o->mode = MODE_CALIBRATED;
             n = (a[2] == ':' && a[3]) ? atoi(a + 3) : 7;
@@ -120,7 +125,8 @@ static int parse_args(int argc, char *argv[], opts_t *o)
         else if (!strcmp(a, "/NOUI"))    { o->no_ui = 1; }
         else if (!strcmp(a, "/QUICK"))   { o->do_quick = 1; }
         else if (!strcmp(a, "/MONO"))    { o->force_mono = 1; }
-        else if (!strcmp(a, "/CSV"))     { o->do_csv = 1; }
+        /* /CSV is handled immediately after /Q to prevent the /C
+         * calibrated-mode prefix from consuming it. */
         else if (!strcmp(a, "/NOUPLOAD")) { o->no_upload = 1; }
         else if (!strcmp(a, "/UPLOAD"))  {
 #ifdef CERBERUS_UPLOAD_ENABLED

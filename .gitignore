@@ -99,6 +99,7 @@ devenv/*.INI
 devenv/*.LOG
 devenv/*.RC
 devenv/*.MARK
+devenv/*.CSV
 devenv/*.TMP
 
 # Stale shell-redirect artifacts. Anchored to repo root with leading /
