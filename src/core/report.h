@@ -35,6 +35,14 @@ void report_add_q16(result_table_t *t, const char *key, long fixed,
  * Returns 0 on success, -1 on error. */
 int  report_write_ini(const result_table_t *t, const opts_t *o, const char *path);
 
+/* v0.8.1 M1.2 (research gap H): write a sibling CSV file. Header row
+ * is "key,value,confidence,verdict"; one data row per emitted result.
+ * Values containing comma, quote, or newline are enclosed in double
+ * quotes with embedded quotes doubled (RFC 4180 minimal quoting).
+ * Confidence renders as HIGH/MEDIUM/LOW; verdict as PASS/WARN/FAIL/UNK.
+ * Returns 0 on success, -1 on fopen error. */
+int  report_write_csv(const result_table_t *t, const char *path);
+
 /* Compute the hardware-identity signature over the canonical 7-key subset
  * at CONF_HIGH only. MEDIUM/LOW values serialize as "unknown".
  * Writes a 9-byte hex string (8 chars + NUL) into out_hex. */

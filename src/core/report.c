@@ -318,6 +318,96 @@ static void emit_section(const result_table_t *t, const char *target_section)
     if (wrote_header) buf_write("\n");
 }
 
+/* RFC 4180 field escape: wrap in quotes and double any embedded quotes
+ * if the field contains comma, quote, or newline. Caller provides out[]
+ * with cap bytes. Writes a NUL-terminated result. */
+static void csv_escape_field(const char *in, char *out, unsigned int cap)
+{
+    const char *p = in ? in : "";
+    int needs_quote = 0;
+    unsigned int o_i = 0;
+    const char *scan;
+
+    for (scan = p; *scan; scan++) {
+        if (*scan == ',' || *scan == '"' || *scan == '\n' || *scan == '\r') {
+            needs_quote = 1;
+            break;
+        }
+    }
+
+    if (!needs_quote) {
+        unsigned int n = (unsigned int)strlen(p);
+        if (n >= cap) n = cap - 1;
+        memcpy(out, p, n);
+        out[n] = '\0';
+        return;
+    }
+
+    if (cap < 3) { out[0] = '\0'; return; }
+    out[o_i++] = '"';
+    while (*p && o_i < cap - 2) {
+        if (*p == '"') {
+            if (o_i >= cap - 3) break;
+            out[o_i++] = '"';
+            out[o_i++] = '"';
+        } else {
+            out[o_i++] = *p;
+        }
+        p++;
+    }
+    out[o_i++] = '"';
+    out[o_i] = '\0';
+}
+
+static const char *csv_conf_name(confidence_t c)
+{
+    switch (c) {
+        case CONF_HIGH:   return "HIGH";
+        case CONF_MEDIUM: return "MEDIUM";
+        case CONF_LOW:    return "LOW";
+    }
+    return "UNKNOWN";
+}
+
+static const char *csv_verdict_name(verdict_t v)
+{
+    switch (v) {
+        case VERDICT_PASS:    return "PASS";
+        case VERDICT_WARN:    return "WARN";
+        case VERDICT_FAIL:    return "FAIL";
+        case VERDICT_UNKNOWN: return "UNK";
+    }
+    return "UNK";
+}
+
+int report_write_csv(const result_table_t *t, const char *path)
+{
+    FILE *f;
+    unsigned int i;
+    char raw_value[192];
+    char key_out[160];
+    char value_out[256];
+
+    f = fopen(path, "wt");
+    if (!f) return -1;
+
+    fputs("key,value,confidence,verdict\n", f);
+    for (i = 0; i < t->count; i++) {
+        const result_t *r = &t->results[i];
+        format_result_value(r, raw_value, sizeof(raw_value));
+        csv_escape_field(r->key, key_out, sizeof(key_out));
+        csv_escape_field(raw_value, value_out, sizeof(value_out));
+        fprintf(f, "%s,%s,%s,%s\n",
+                key_out,
+                value_out,
+                csv_conf_name(r->confidence),
+                csv_verdict_name(r->verdict));
+    }
+
+    fclose(f);
+    return 0;
+}
+
 int report_write_ini(const result_table_t *t, const opts_t *o, const char *path)
 {
     char hw_sig[9];

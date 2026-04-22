@@ -24,7 +24,7 @@ static void print_help(void)
     puts("");
     puts("Usage: CERBERUS [/Q] [/C[:n]] [/ONLY:<h>] [/SKIP:<h>] [/O:file]");
     puts("                [/U] [/NOCYRIX] [/NOINTRO] [/QUICK] [/NOUI]");
-    puts("                [/NOUPLOAD] [/UPLOAD] [/NICK:<name>] [/NOTE:<text>] [/?]");
+    puts("                [/NOUPLOAD] [/UPLOAD] [/NICK:<name>] [/NOTE:<text>] [/CSV] [/?]");
     puts("  /Q              Quick mode (default)");
     puts("  /C[:n]          Calibrated mode, n runs (default 7)");
     puts("  /ONLY:DET|DIAG|BENCH   Run only that head");
@@ -36,6 +36,7 @@ static void print_help(void)
     puts("  /NOUI           Skip summary + consistency UI render (INI still written)");
     puts("  /QUICK          Skip visual demonstrations (title cards + visuals); run tests + summary");
     puts("  /MONO           Force monochrome rendering regardless of adapter");
+    puts("  /CSV            Also write sibling <out>.CSV (RFC 4180 minimal quoting)");
 #ifdef CERBERUS_UPLOAD_ENABLED
     puts("  /U, /UPLOAD     Upload without prompting (auto-yes)");
     puts("  /NOUPLOAD       Never prompt to upload, never upload");
@@ -70,6 +71,7 @@ static int parse_args(int argc, char *argv[], opts_t *o)
     o->do_quick = 0;
     o->no_upload = 0;
     o->force_mono = 0;
+    o->do_csv = 0;
     strcpy(o->out_path, "CERBERUS.INI");
     o->nickname[0] = '\0';
     o->note[0]     = '\0';
@@ -118,6 +120,7 @@ static int parse_args(int argc, char *argv[], opts_t *o)
         else if (!strcmp(a, "/NOUI"))    { o->no_ui = 1; }
         else if (!strcmp(a, "/QUICK"))   { o->do_quick = 1; }
         else if (!strcmp(a, "/MONO"))    { o->force_mono = 1; }
+        else if (!strcmp(a, "/CSV"))     { o->do_csv = 1; }
         else if (!strcmp(a, "/NOUPLOAD")) { o->no_upload = 1; }
         else if (!strcmp(a, "/UPLOAD"))  {
 #ifdef CERBERUS_UPLOAD_ENABLED
@@ -304,6 +307,30 @@ int main(int argc, char *argv[])
     crumb_enter("main.report_write");
     report_write_ini(&table, &opts, opts.out_path);
     crumb_exit();
+
+    /* v0.8.1 M1.2: /CSV flag writes a sibling CSV file. Path is the INI
+     * path with the extension replaced by .CSV (or appended if absent).
+     * The INI remains the authoritative submission format; CSV is a
+     * convenience for spreadsheet + automated analysis users. */
+    if (opts.do_csv) {
+        char csv_path[64];
+        int dot = -1;
+        int i_n;
+        strncpy(csv_path, opts.out_path, sizeof(csv_path) - 1);
+        csv_path[sizeof(csv_path) - 1] = '\0';
+        for (i_n = 0; csv_path[i_n]; i_n++) {
+            if (csv_path[i_n] == '.') dot = i_n;
+            if (csv_path[i_n] == '\\' || csv_path[i_n] == '/') dot = -1;
+        }
+        if (dot >= 0 && dot < (int)sizeof(csv_path) - 4) {
+            strcpy(csv_path + dot, ".CSV");
+        } else if ((int)strlen(csv_path) < (int)sizeof(csv_path) - 4) {
+            strcat(csv_path, ".CSV");
+        }
+        crumb_enter("main.report_write_csv");
+        report_write_csv(&table, csv_path);
+        crumb_exit();
+    }
 
     /* v0.7.0: attempt upload after INI is on disk. upload_execute
      * decides internally based on network transport + /NOUPLOAD /UPLOAD

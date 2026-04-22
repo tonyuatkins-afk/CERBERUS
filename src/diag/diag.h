@@ -24,6 +24,15 @@ void diag_dma(result_table_t *t);
  * fpu.detected=none. */
 void diag_fpu_fingerprint(result_table_t *t);
 
+/* v0.8.1 M1.1 — FPU IEEE-754 edge-case diagnostic (research gap L).
+ * 14 focused edge cases across FADD/FSUB/FMUL/FDIV/FSQRT: signed zero,
+ * infinity arithmetic, NaN propagation, 0/0, inf/inf, sqrt(-0).
+ * Emits per-op counts and an aggregate. Skipped when fpu.detected=none. */
+void diag_fpu_edges(result_table_t *t);
+
+/* Pure, host-testable classifier for IEEE-754 double bit patterns. */
+int fp_classify_double(double d);
+
 /* Pure-math kernels exposed for host-testing. */
 verdict_t diag_cache_classify_ratio_x100(unsigned long ratio_x100,
                                          const char **out_msg_prefix);

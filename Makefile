@@ -109,6 +109,7 @@ OBJS = src\main.obj                                                  &
        src\diag\diag_mem.obj  src\diag\diag_fpu.obj                  &
        src\diag\diag_fpu_fingerprint.obj                             &
        src\diag\diag_fpu_fingerprint_a.obj                           &
+       src\diag\diag_fpu_edges.obj                                   &
        src\diag\diag_video.obj                                       &
        src\diag\diag_cache.obj src\diag\diag_dma.obj                 &
        src\diag\diag_bit_parade.obj                                  &
@@ -271,6 +272,9 @@ src\diag\diag_fpu.obj: src\diag\diag_fpu.c src\diag\diag.h src\core\report.h src
 
 src\diag\diag_fpu_fingerprint.obj: src\diag\diag_fpu_fingerprint.c src\diag\diag.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_fpu_fingerprint.c
+
+src\diag\diag_fpu_edges.obj: src\diag\diag_fpu_edges.c src\diag\diag.h src\core\report.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_fpu_edges.c
 
 src\diag\diag_fpu_fingerprint_a.obj: src\diag\diag_fpu_fingerprint_a.asm
 	$(ASM) $(ASFLAGS) -o src\diag\diag_fpu_fingerprint_a.obj src\diag\diag_fpu_fingerprint_a.asm

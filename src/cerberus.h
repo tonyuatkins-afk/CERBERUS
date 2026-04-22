@@ -82,6 +82,11 @@ typedef struct {
                                 * clamping per MS-DOS UI-UX research
                                 * Tier 0 mapping (07h/0Fh/01h/70h/F0h).
                                 * v0.8.0-M3.5. */
+    unsigned char do_csv;      /* /CSV: write a sibling <out>.CSV file
+                                * alongside the INI, containing the same
+                                * result rows in RFC 4180 CSV form for
+                                * spreadsheet + automated analysis.
+                                * v0.8.1 M1.2 (research gap H). */
     char          out_path[64];
     /* v0.7.0 upload metadata from /NICK and /NOTE flags. Both empty
      * strings by default (anonymous submission). */

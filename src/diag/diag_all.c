@@ -24,6 +24,8 @@ void diag_all(result_table_t *t, const opts_t *o)
     /* v0.7.1: FPU behavioral fingerprint (runs only if fpu.detected != none).
      * Sits next to diag_fpu so the INI groups all FPU diagnostics together. */
     WRAP_DIAG("fpu_fingerprint", diag_fpu_fingerprint(t));
+    /* v0.8.1 M1.1: IEEE-754 edge-case diagnostic (research gap L). */
+    WRAP_DIAG("fpu_edges", diag_fpu_edges(t));
     /* v0.6.0 T3: FPU Lissajous visual after diag_fpu. */
     diag_lissajous(t, o);
     WRAP_DIAG("video", diag_video(t));
