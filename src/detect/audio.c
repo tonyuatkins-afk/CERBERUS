@@ -29,6 +29,7 @@
 #include "audio_db.h"
 #include "../core/timing.h"
 #include "../core/report.h"
+#include "../core/crumb.h"
 
 /* Display buffers per emitted key. report_add_str stores the value
  * pointer verbatim (report.c:55), so stack-local sprintf targets would
@@ -185,10 +186,18 @@ static int probe_opl(int *out_opl3)
         opl_trace_append("no-blaster");
     }
 
-    /* Fallback: industry-standard Adlib port. */
-    if (probe_opl_at(OPL_DEFAULT_ADDR, OPL_DEFAULT_DATA, out_opl3)) {
-        opl_trace_append(" result=fallback");
-        return 1;
+    /* Fallback: industry-standard Adlib port.
+     * INVESTIGATION: suspected BEK-V409 NULL-write trigger. /SKIP:oplfb
+     * disables this branch so the removal-at-a-time protocol can
+     * isolate whether this path is what reaches near-DGROUP:0. */
+    if (!crumb_skiplist_has("oplfb")) {
+        crumb_enter("detect.audio.oplfb");
+        if (probe_opl_at(OPL_DEFAULT_ADDR, OPL_DEFAULT_DATA, out_opl3)) {
+            opl_trace_append(" result=fallback");
+            crumb_exit();
+            return 1;
+        }
+        crumb_exit();
     }
     opl_trace_append(" result=none");
     return 0;

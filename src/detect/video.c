@@ -25,6 +25,7 @@
 #include "video_db.h"
 #include "../core/display.h"
 #include "../core/report.h"
+#include "../core/crumb.h"
 
 /* VBE version display buffer. report_add_str stores the value pointer
  * verbatim (report.c:55), so a stack-local sprintf target would dangle
@@ -260,12 +261,28 @@ void detect_video(result_table_t *t)
      * with higher priority than the true vendor signature. */
     chip = (const video_db_entry_t *)0;
     if (a == ADAPTER_VGA_COLOR || a == ADAPTER_VGA_MONO || a == ADAPTER_MCGA) {
-        chip = probe_s3_chipid();
-        /* v0.8.1 M3.2: ET4000 chip-level probe. Fires on OEM boards
-         * (Genoa, etc.) whose BIOS strings the text scan would miss. */
-        if (!chip) chip = probe_et4000_chipid();
+        /* INVESTIGATION: BEK-V409 NULL-write isolation. These probes are
+         * bracketed with crumbs so a CERBERUS.LAS trail shows exactly
+         * which ran last before the canary fires. /SKIP:s3probe and
+         * /SKIP:et4000probe individually disable each call, so the
+         * removal-at-a-time protocol can isolate the offender without
+         * a separate binary per experiment. */
+        if (!crumb_skiplist_has("s3probe")) {
+            crumb_enter("detect.video.s3");
+            chip = probe_s3_chipid();
+            crumb_exit();
+        }
+        if (!chip && !crumb_skiplist_has("et4000probe")) {
+            crumb_enter("detect.video.et4000");
+            chip = probe_et4000_chipid();
+            crumb_exit();
+        }
     }
-    if (!chip) chip = scan_video_bios();
+    if (!chip && !crumb_skiplist_has("biosscan")) {
+        crumb_enter("detect.video.biosscan");
+        chip = scan_video_bios();
+        crumb_exit();
+    }
     if (chip) {
         report_add_str(t, "video.vendor",  chip->vendor,
                        env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
