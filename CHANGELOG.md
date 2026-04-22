@@ -49,7 +49,7 @@ Same-day follow-up to v0.8.0. Closes every item the v0.8.0 notes marked "deferre
 ### Build state
 
 - `CERBERUS.EXE` stock: **170,722 bytes**.
-- DGROUP near-data: **61,824 bytes** / 62 KB soft target, 3,712 bytes vs 64 KB hard ceiling. Status: AT RISK (yellow) per `tools/dgroup_check.py`. Accumulated pressure; each milestone stayed inside its cap but the cumulative delta is noticeable. 0.9.0 M1.1 is a `keys.h` centralization pass targeting at least 2,500 bytes recovered.
+- DGROUP near-data: **61,824 bytes** / 62 KB soft target, 3,712 bytes vs 64 KB hard ceiling. Status: AT RISK (yellow) per `tools/dgroup_check.py`. Accumulated pressure; each milestone stayed inside its cap but the cumulative delta is noticeable. 0.9.0 M1.1 explores DGROUP reclaim tactics — the first-try `keys.h` centralization hypothesis was empirically disproven (Watcom 2.0 beta already performs cross-TU string-literal dedup); revised strategy is `__far const` migration of the CSV-generated DB tables, filed against the 0.9.0 plan.
 - Host tests: **376 assertions across 12 suites**, 0 failures.
 - Zero compiler warnings on stock build.
 

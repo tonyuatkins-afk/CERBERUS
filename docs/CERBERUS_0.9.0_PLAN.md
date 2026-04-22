@@ -54,7 +54,7 @@ Filed in `project_cerberus_0_9_0_hw_id_roadmap.md` in the auto-memory. The full 
 
 ### Deferred infrastructure
 
-- **DGROUP reclaim via keys.h**. Watcom does not cross-TU dedup string literals. Top duplicated keys (`fpu.detected` × 12, `cpu.detected` × 12, `cpu.class` × 8, `bus.class` × 10, etc.) add up to ~1-2 KB of CONST that a centralized `keys.h` header would reclaim. Prerequisite for the expansion work.
+- **DGROUP reclaim** (prerequisite for the expansion work). First-try hypothesis was keys.h centralization of the top duplicated literals; empirical measurement on 2026-04-22 showed Watcom 2.0 beta already performs cross-TU string-literal dedup, so centralization produces zero reclaim. Revised strategy is `__far const` migration of the CSV-generated DB tables (see M1.1 below).
 - **Consistency Rule 4b activation**. Blocked on per-class IPC anchors in `cpu_db`. Adding `class_ipc_low_q16` / `class_ipc_high_q16` columns to `hw_db/cpus.csv` unblocks the rule. Small DGROUP cost; practical high-value rule (catches thermal throttle, TSR overhead, cache disabled in BIOS).
 
 ### Deferred out of 0.9.0 (stays 1.0.0+)
@@ -68,11 +68,25 @@ Seven milestones, ordered by dependency. M1 is a prerequisite for everything els
 
 ### M1 — Foundations (DGROUP reclaim + 0.8.2 carry-ins)
 
-**M1.1 DGROUP reclaim via keys.h centralization.**
-- New `src/core/keys.h` with `#define KEY_FPU_DETECTED "fpu.detected"` etc. for the top-20 duplicated literals.
-- Sweep `src/**/*.c` replacing literals with the defines. Single source in CONST per key.
-- Target: recover at least 1,500 bytes DGROUP headroom before any expansion code lands. Blocks M2 start.
-- Post-reclaim baseline: `tools/dgroup_check.py` status must be `OK` not `AT RISK`.
+**M1.1 DGROUP reclaim — empirical finding + revised strategy.**
+
+The first-try hypothesis (keys.h centralization of duplicated string literals, under the assumption that Watcom does not cross-TU dedup) was **empirically disproven** during the 0.9.0 plan execution pass on 2026-04-22. A full 32-file sweep replacing the top-20 duplicated keys with `#define` macros was built and measured: CERBERUS.EXE size and DGROUP both unchanged from the v0.8.1 baseline (170,722 bytes EXE, 61,824 bytes DGROUP). Watcom 2.0 beta evidently already performs cross-TU string-literal dedup at link time, so centralizing the literals at the source level produces zero reclaim. The sweep was reverted.
+
+**Revised strategy.** Substantive DGROUP reclaim requires moving payload out of the near-data segments, not relabeling literals. Candidates in priority order:
+
+1. **`__far const` migration of the five CSV-generated DB tables.** `cpu_db[]` (34 entries), `fpu_db[]` (15), `video_db[]` (28), `audio_db[]` (31), `bios_db[]` (21) are currently plain `const` arrays in CONST (which lives in DGROUP). Each entry is a struct of pointers to strings. Moving the array to `__far const` moves the pointer table far, and fully reclaiming requires each struct field to become `const char __far *`. Significant refactor (all lookup code changes signatures), but the payoff is multi-KB. Pure-effort estimate: 4-6 hours.
+2. **Consolidate per-module display buffers.** Multiple detect/bench/diag modules hold file-scope `static char foo_display[16]` buffers for sprintf output. Replacing with a single shared display-buffer pool keyed by module+slot could save ~200-400 bytes of BSS.
+3. **Move large sprintf format strings to `__far const`.** INI writer format strings, consistency-rule narration strings, bench display-value formatters. ~300-500 bytes potential.
+
+None of these are cheap. The v0.8.1 DGROUP status of AT RISK (yellow) is acceptable for M2 start if M2 DGROUP costs are kept honest; the real reclaim pass can happen mid-0.9.0 if budget becomes binding.
+
+**Revised M1.1 scope: DGROUP investigation + `__far const` DB migration prep.**
+- Measure per-struct size of DB entries. Confirm CONST impact of the DB tables before touching them.
+- Prototype the `__far const` migration on one table (probably the smallest: `fpu_db` at 15 entries) to verify the Watcom far-pointer-in-const-struct-field semantics work end-to-end.
+- If the prototype shows measurable reclaim (>500 bytes), extend to all five DB tables.
+- If the prototype yields nothing (Watcom generates same code), defer the migration to a dedicated 1.0.0 reclaim pass and accept AT RISK through 0.9.0, scope-trimming per §5 if headroom goes red.
+
+**Post-investigation baseline:** either DGROUP status is `OK` (after successful migration), or the plan §5 scope-trim order activates before M2.
 
 **M1.2 M4 BEK-V409 BSS overwrite root-cause.**
 - Hardware-gated. Tony builds instrumented binary with crumb markers isolating S3 Trio64 / Vibra 16S OPL-fallback / UMC491 PIT paths. Runs on BEK-V409, cold-reboots, compares `CERBERUS.LAS` trails across crash-vs-clean runs.
