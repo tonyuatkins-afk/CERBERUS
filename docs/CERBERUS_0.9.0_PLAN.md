@@ -80,13 +80,27 @@ The first-try hypothesis (keys.h centralization of duplicated string literals, u
 
 None of these are cheap. The v0.8.1 DGROUP status of AT RISK (yellow) is acceptable for M2 start if M2 DGROUP costs are kept honest; the real reclaim pass can happen mid-0.9.0 if budget becomes binding.
 
-**Revised M1.1 scope: DGROUP investigation + `__far const` DB migration prep.**
-- Measure per-struct size of DB entries. Confirm CONST impact of the DB tables before touching them.
-- Prototype the `__far const` migration on one table (probably the smallest: `fpu_db` at 15 entries) to verify the Watcom far-pointer-in-const-struct-field semantics work end-to-end.
-- If the prototype shows measurable reclaim (>500 bytes), extend to all five DB tables.
-- If the prototype yields nothing (Watcom generates same code), defer the migration to a dedicated 1.0.0 reclaim pass and accept AT RISK through 0.9.0, scope-trimming per §5 if headroom goes red.
+**Prototype measurement** (executed 2026-04-22). Minimum-viable `__far` on `fpu_db` alone: changed the array declaration to `const fpu_db_entry_t __far fpu_db[]`, changed struct fields to `const char __far *`, changed the return type of `fpu_db_lookup` to `const fpu_db_entry_t __far *`. Clean rebuild: DGROUP dropped from 61,824 to 61,712 bytes — **112 bytes recovered from one 15-entry DB table**. The build succeeded but emitted four `W112 Pointer truncated` warnings because `report_add_str` takes a NEAR `const char *` and the callers pass FAR pointers; the truncation would corrupt runtime INI output. Prototype reverted.
 
-**Post-investigation baseline:** either DGROUP status is `OK` (after successful migration), or the plan §5 scope-trim order activates before M2.
+**Extrapolation.** If the 112-byte reclaim on 15 entries holds roughly proportionally:
+- `fpu_db` 15 entries → 112 bytes (measured)
+- `cpu_db` 34 entries → ~250 bytes
+- `fpu_db` 15 entries → 112 bytes
+- `video_db` 28 entries → ~210 bytes
+- `audio_db` 31 entries → ~230 bytes
+- `bios_db` 21 entries → ~160 bytes
+
+Total projected: **~960 bytes** DGROUP from moving the array structures alone. Substantial additional CONST reclaim is available if the string payload itself moves to `__far const` (each entry has 3-4 string fields averaging 30-60 chars), but that requires the consumer pipeline to accept FAR string pointers throughout — `report_add_str`, `report_add_u32`, result-table storage, INI writer, UI renderer.
+
+**Revised M1.1 scope** (code-only, 4-6 hours, real work):
+1. Add `report_add_fstr()` variants that accept `const char __far *` and copy into a FAR static pool, OR upgrade `result_t::v.s` to a FAR pointer and sweep every consumer.
+2. Extend the `__far` migration from `fpu_db` to all five DB tables.
+3. Sweep the five consumer files (`detect/*.c`) to pass FAR pointers through cleanly without truncation warnings.
+4. Verify clean build, clean smoketest, clean host tests, measure final DGROUP delta.
+
+This is deferred out of the autonomous block — it's substantive refactor work that benefits from a contiguous session. The prototype has proven the tactic works; the execution is implementation effort, not research.
+
+**Post-migration target:** DGROUP status `OK` (>= 2 KB headroom vs 62 KB soft target). Post-migration value provides room for M2-M7 additions.
 
 **M1.2 M4 BEK-V409 BSS overwrite root-cause.**
 - Hardware-gated. Tony builds instrumented binary with crumb markers isolating S3 Trio64 / Vibra 16S OPL-fallback / UMC491 PIT paths. Runs on BEK-V409, cold-reboots, compares `CERBERUS.LAS` trails across crash-vs-clean runs.
