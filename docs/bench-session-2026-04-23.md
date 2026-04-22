@@ -31,6 +31,20 @@ bye
 - `C:\Development\CERBERUS\dist\CERBERUS.EXE` — stock v0.8.1 (170,722 bytes, commit `bdfe95c` on `main`)
 - `C:\Development\CERBERUS\dist-investigation\CERBERUS.EXE` — v0.8.1 + BEK-V409 investigation hooks (170,946 bytes, commit `f49a1d2` on `investigation/bek-v409-null-write`). Adds `/SKIP:s3probe`, `/SKIP:et4000probe`, `/SKIP:biosscan`, `/SKIP:oplfb` selective-skip flags plus crumb markers on each probe site.
 
+## Bench floppy (single-disk, bootable)
+
+For the 286 and Leading Edge sessions where FTP is not available, use the bench floppy kit staged at `C:\Development\CERBERUS\bench-floppy\`. Two variants:
+
+- **offline** (fits 360 KB / 720 KB / 1.2 MB / 1.44 MB): auto-runs CERBERUS from a boot floppy, captures to `A:\CAP.INI` + `A:\CAP.CSV`. Pull the floppy, read on a modern PC. Five interactive session choices at boot.
+- **network** (fits 720 KB / 1.2 MB / 1.44 MB, NOT 360 KB): same plus packet-driver + mTCP drop-in slots. Drop in the right `.COM` packet driver for the NIC + mTCP tools; boot auto-loads + runs DHCP.
+
+See `bench-floppy/README.md` for floppy-making instructions (Rufus recommended) and which variant to use on which box.
+
+**Floppy use in tonight's sessions:**
+- Session 6 (286): offline variant, whichever floppy format the 286's drive supports.
+- Session 7 / 8 (Leading Edge XT): offline variant, 360 KB 5.25" DD.
+- Sessions 1-5 (BEK-V409 / IBM 486 / 386 DX-40): FTP is already configured on those boxes; bench floppy is backup.
+
 ## Session 1: 0.8.1 validation parade (both boxes, ~20 min each)
 
 **Binary:** stock `dist\CERBERUS.EXE`. Same binary for both boxes.

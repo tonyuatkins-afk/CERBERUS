@@ -115,3 +115,7 @@ devenv/*.TMP
 
 # Investigation-branch binary; not tagged, not released
 /dist-investigation/
+
+# Bench-floppy: stage CERBERUS.EXE lives here per variant. Not
+# interesting to track separately since it is a copy of dist/.
+/bench-floppy/*/CERBERUS.EXE

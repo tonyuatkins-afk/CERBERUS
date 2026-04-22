@@ -1,0 +1,20 @@
+; mTCP / WATTCP configuration template for the bench floppy.
+; Copy to A:\NET\WATTCP.CFG and edit per your network.
+;
+; DHCP mode is simplest on a live bench network:
+dhcp=1
+
+; If the bench network does not have DHCP, use static:
+; dhcp=0
+; my_ip=10.69.69.200
+; netmask=255.255.255.0
+; gateway=10.69.69.1
+; nameserver=10.69.69.1
+
+; Point mTCP at the packet driver INT vector.
+packet_int=0x60
+
+; Timeouts — generous defaults for older hardware / slow links.
+timestamps=1
+connect_timeout=30
+read_timeout=30
