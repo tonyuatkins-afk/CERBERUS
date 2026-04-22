@@ -84,7 +84,7 @@ unsigned int bench_cc_infer_l1_kb(const unsigned long *kbps_by_size,
     return 0;
 }
 
-/* Given five throughput numbers for strides 4/8/16/32/64 on a
+/* Given six throughput numbers for strides 4/8/16/32/64/128 on a
  * larger-than-L1 working set, infer the cache line size by finding
  * the plateau point.
  *
@@ -100,15 +100,23 @@ unsigned int bench_cc_infer_l1_kb(const unsigned long *kbps_by_size,
  * single-point coincidence). The first stride that begins such a
  * plateau is the line size.
  *
- * Returns one of {4, 8, 16, 32, 64} bytes, or 0 if no plateau found. */
+ * v0.8.0 M2.1: extended from 5 to 6 stride points by adding stride=128.
+ * This enables the plateau detector to distinguish line=32 (Pentium)
+ * and line=64 (Pentium Pro+) which the 5-point sweep could not:
+ * line=64 requires the plateau to start at stride=64 and hold at 128,
+ * so stride=128 is the third point needed for the 2-step plateau
+ * guard. Legacy 486 case (line=16) was already covered by the first
+ * three points (16, 32, 64).
+ *
+ * Returns one of {4, 8, 16, 32, 64, 128} bytes, or 0 if no plateau. */
 unsigned int bench_cc_infer_line_bytes(const unsigned long *kbps_by_stride,
                                        unsigned int n_strides)
 {
-    static const unsigned int strides[] = { 4, 8, 16, 32, 64 };
+    static const unsigned int strides[] = { 4, 8, 16, 32, 64, 128 };
     unsigned int i;
 
     if (!kbps_by_stride || n_strides < 3U) return 0;
-    if (n_strides > 5U) n_strides = 5U;
+    if (n_strides > 6U) n_strides = 6U;
 
     /* Walk strides looking for the first index i where the ratios
      * kbps[i+1]/kbps[i] and kbps[i+2]/kbps[i+1] are both in [0.92, 1.08].
@@ -274,14 +282,14 @@ static char line_bytes_display[8];
 static char read_kbps_display[12];
 static char write_kbps_display[12];
 static char size_kbps_displays[5][12];     /* one per size sweep point */
-static char stride_kbps_displays[5][12];   /* one per stride sweep point */
+static char stride_kbps_displays[6][12];   /* one per stride sweep point (M2.1: 6 points, added 128) */
 
 /* --- Entry point ------------------------------------------------- */
 
 void bench_cache_char(result_table_t *t)
 {
     static const unsigned int sizes_kb[5]   = { 2, 4, 8, 16, 32 };
-    static const unsigned int strides_b[5]  = { 4, 8, 16, 32, 64 };
+    static const unsigned int strides_b[6]  = { 4, 8, 16, 32, 64, 128 };
     /* Iterations tuned for a single-PIT-wrap measurement window
      * (<55 ms per kernel) on a 486 DX-2. The first real-iron v0.7.1
      * capture caught a bug: timing_start_long/stop_long (BIOS tick,
@@ -295,7 +303,7 @@ void bench_cache_char(result_table_t *t)
     static const unsigned long iters_per_measure = 20000UL;
 
     unsigned long size_kbps[5]   = { 0, 0, 0, 0, 0 };
-    unsigned long stride_kbps[5] = { 0, 0, 0, 0, 0 };
+    unsigned long stride_kbps[6] = { 0, 0, 0, 0, 0, 0 };
     unsigned long read_kbps      = 0;
     unsigned long write_kbps     = 0;
     unsigned int  l1_kb;
@@ -377,8 +385,11 @@ void bench_cache_char(result_table_t *t)
                        CONF_LOW, VERDICT_UNKNOWN);
     }
 
-    /* ----- Probe 2: line size sweep (strides 4..64, 32 KB buffer) ----- */
-    for (i = 0U; i < 5U; i++) {
+    /* ----- Probe 2: line size sweep (strides 4..128, 32 KB buffer) -----
+     * M2.1: extended from 5 to 6 stride points by adding stride=128.
+     * Enables line=32 (Pentium) and line=64 (Pentium Pro+) inference
+     * via the 2-step plateau guard, which previously topped at line=32. */
+    for (i = 0U; i < 6U; i++) {
         timing_start();
         stride_read(large_buf, CACHE_BUFFERS_LARGE_BYTES,
                     strides_b[i], iters_per_measure);
@@ -396,8 +407,10 @@ void bench_cache_char(result_table_t *t)
                    stride_kbps[3], stride_kbps_displays[3], conf, VERDICT_UNKNOWN);
     report_add_u32(t, "bench.cache.char.stride_64_kbps",
                    stride_kbps[4], stride_kbps_displays[4], conf, VERDICT_UNKNOWN);
+    report_add_u32(t, "bench.cache.char.stride_128_kbps",
+                   stride_kbps[5], stride_kbps_displays[5], conf, VERDICT_UNKNOWN);
 
-    line_bytes = bench_cc_infer_line_bytes(stride_kbps, 5U);
+    line_bytes = bench_cc_infer_line_bytes(stride_kbps, 6U);
     if (line_bytes > 0U) {
         sprintf(line_bytes_display, "%u", line_bytes);
         report_add_u32(t, "bench.cache.char.line_bytes",

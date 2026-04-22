@@ -177,6 +177,61 @@ mem_xt_factor=51.5700
 fpu_xt_factor=16.6600
 ```
 
+## [diagnose] FPU fingerprint rows (M2 additions)
+
+Per 0.8.0 plan §6 M2, five new keys join the behavioral fingerprint
+(v0.7.1's `infinity_mode` / `pseudo_nan` / `has_fprem1` / `has_fsin`):
+
+```
+fpu.fptan_pushes_one=yes|no
+fpu.rounding_nearest=2,-2
+fpu.rounding_down=1,-2
+fpu.rounding_up=2,-1
+fpu.rounding_truncate=1,-1
+fpu.rounding_modes_ok=yes|no
+fpu.precision_modes_ok=yes|no
+fpu.exceptions_raised=N_of_6
+```
+
+- `fptan_pushes_one` (M2.2, research gap I): 387+ always pushes 1.0
+  onto ST(0) after FPTAN; 8087/287 leaves cos(θ)-ish denominator. Adds
+  a fifth behavioral axis to `family_behavioral` inference.
+- `rounding_nearest/down/up/truncate` (M2.3, gap J): FISTP(1.5) and
+  FISTP(-1.5) under each RC mode, as "pos,neg". The four expected
+  pairs per IEEE-754: (2,-2), (1,-2), (2,-1), (1,-1). All distinct.
+- `rounding_modes_ok`: yes if all four modes match the IEEE table.
+  Tagged VERDICT_PASS or VERDICT_WARN accordingly.
+- `precision_modes_ok` (M2.4, gap K): yes if 1.0/3.0 computed under
+  PC=single / PC=double / PC=extended produced three bytewise-distinct
+  10-byte extended results (proves PC actually changes precision).
+- `exceptions_raised` (M2.6, gap M): count of x87 exceptions (out of
+  6: IE/DE/ZE/OE/UE/PE) that raised their expected status-word bit
+  when deliberately triggered. Healthy FPU: `6_of_6`.
+
+## [diagnose] memory rows (M2 additions)
+
+Per 0.8.0 plan §6 M2 + QA-Plus homage pattern:
+
+```
+memory.checkerboard=pass|fail
+memory.inv_checkerboard=pass|fail
+```
+
+Catches adjacent-cell coupling faults (bit-line shorts, row/column
+decoder leaks) that walking-1s/0s miss. 0x55/0xAA and 0xAA/0x55
+alternating patterns on the DGROUP-resident 4 KB diagnostic buffer.
+
+## [bench] cache.char stride sweep extended (M2.1)
+
+```
+cache.char.stride_128_kbps=<N>
+```
+
+Added to the stride sweep to enable inference of line=32 (Pentium)
+and line=64 (Pentium Pro+). The `line_bytes` inference function
+n_strides cap raised from 5 to 6 accordingly; pre-M2 stride sweeps
+with 5 points still work (backward compatible via internal cap).
+
 ### `fpu.whetstone_status` enum
 
 - `disabled_for_release` — stock 0.8.0 build; Whetstone kernel is compiled but emit is suppressed. No `fpu.k_whetstones` row. See `docs/methodology.md` "Why Whetstone is not in 0.8.0".

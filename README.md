@@ -8,17 +8,19 @@ Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelyboot
 
 ## Status
 
-**`v0.8.0-M1` on `main` 2026-04-21.** First milestone of the 0.8.0 "trust and validation" release. 0.8.0 tag is held for M2 (precision expansion), M3 (CUA-lite shell polish), and M4 (docs parity). The 0.8.0 release doctrine is at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md).
+**`v0.8.0-M2` on `main` 2026-04-21.** Second milestone of the 0.8.0 "trust and validation" release. M1 closed the known credibility traps and established the real-hardware validation corpus; M2 adds the research-gap FPU probes and cache stride extension that fit within DGROUP budget. 0.8.0 tag is held for M3 (CUA-lite shell polish) and M4 (docs parity). Release doctrine at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md).
 
 Real-hardware validation status: **Validated on 386 and 486. 286 and 8088 paths untested.** Per plan section 10 claim hierarchy, 286 and 8088/XT captures will upgrade the claim as hardware becomes accessible. Current captures archived in `tests/captures/`:
 - BEK-V409 (Intel i486DX-2-66 + AMI 11/11/92 + S3 Trio64 + Vibra 16S + 63 MB XMS)
 - 386 DX-40 + IIT 3C87 + Genoa ET4000 + Aztech ISA + AMI 02/02/91 + ~16 MB
 
-### What M1 changed (full detail in [CHANGELOG.md](CHANGELOG.md))
+### What M1 and M2 changed (full detail in [CHANGELOG.md](CHANGELOG.md))
 
-Trust-first cuts: Whetstone emit suppressed in stock builds (`wmake WHETSTONE=1` to re-enable for research); runtime upload compiled out of stock binaries (`wmake UPLOAD=1` to re-enable). Fixes: nickname buffer leak (issue #9), `cpu.class` normalization to family token, `bench_cpu` DB anchor widened for TSR-loaded real-iron captures, end-of-run `_exit` bypass for Watcom libc teardown hangs observed on BEK-V409. New: DGROUP audit tool, real-hardware validation corpus, quality-gate documentation framework.
+**M1 (trust-first cuts)**: Whetstone emit suppressed in stock builds (`wmake WHETSTONE=1` to re-enable); runtime upload compiled out of stock binaries (`wmake UPLOAD=1` to re-enable). Fixes: nickname buffer leak (issue #9), `cpu.class` normalization to family token, `bench_cpu` DB anchor widened, end-of-run `_exit` bypass. Infrastructure: DGROUP audit tool, real-hardware validation corpus, quality-gate framework.
 
-Historical arc (unchanged): `v0.1.1-scaffold` → `v0.2-rc1` → `v0.3-rc1` → `v0.4-rc1` → **`v0.4.0`** → **`v0.5.0`** → **`v0.6.0`** → `v0.6.1` → `v0.6.2` → `v0.7.0-rc1` → **`v0.7.0-rc2`** → **`v0.7.1`** → **`v0.8.0-M1`** (current).
+**M2 (precision expansion)**: FPU research-gap probes land for FPTAN behavior (I), rounding-control cross-check (J), precision-control cross-check (K), exception-flag roundtrip (M). Cache stride sweep extended to 6 points including stride=128 (enables line=32/64 inference for Pentium+). Memory checkerboard + inv-checkerboard patterns added (catches adjacent-cell coupling faults). M2.5 IEEE-754 edge cases and M2.8 CSV output deferred to post-M2 under DGROUP budget pressure.
+
+Historical arc (unchanged): `v0.1.1-scaffold` → `v0.2-rc1` → `v0.3-rc1` → `v0.4-rc1` → **`v0.4.0`** → **`v0.5.0`** → **`v0.6.0`** → `v0.6.1` → `v0.6.2` → `v0.7.0-rc1` → **`v0.7.0-rc2`** → **`v0.7.1`** → **`v0.8.0-M1`** → **`v0.8.0-M2`** (current).
 
 ### Known issues at M1 close-out (carried to M2)
 

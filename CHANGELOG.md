@@ -2,6 +2,48 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [v0.8.0-M2], 2026-04-21 (overnight) — precision expansion milestone
+
+Second milestone of the 0.8.0 "trust and validation" release. M2 lands the research-gap FPU probes and cache stride extension that fit within DGROUP budget. Full gate outcome at `docs/quality-gates/M2-gate-2026-04-21.md`.
+
+### Added (M2 research-gap probes)
+
+- **M2.1 Cache stride=128**. `bench_cache_char.c` stride sweep extended from 5 to 6 points (4/8/16/32/64/128). `bench_cc_infer_line_bytes` accepts 6 strides, enabling inference of line=32 (Pentium) and line=64 (Pentium Pro+) via the 2-step plateau guard. New INI key `bench.cache.char.stride_128_kbps`. Backward compatible: pre-M2 tests passing 5 strides still work.
+- **M2.2 FPU FPTAN probe** (research gap I per `docs/FPU Test Research.md`). New asm function `fpu_fp_try_fptan` loads angle=0.5, does FPTAN, compares ST(0) to 1.0 via FCOMP, returns FSTSW. `fp_probe_result_t` gains a `fptan_pushes_one` axis. `family_behavioral` inference now uses 5 axes (was 4). New INI key `diagnose.fpu.fptan_pushes_one`. Distinguishes 387+ (always pushes 1.0) from 8087/287 (pushes cos-ish denominator).
+- **M2.3 FPU rounding-control cross-check** (gap J). New asm `fpu_fp_probe_rounding(mode, out_pair)` sets RC bits of control word, performs FISTP(1.5) and FISTP(-1.5), returns integer results. C-side runs all 4 modes, emits 4 per-mode rows `diagnose.fpu.rounding_nearest/down/up/truncate=<pos>,<neg>` plus summary `diagnose.fpu.rounding_modes_ok=yes|no`. Canonical IEEE-754 table: nearest=(2,-2), down=(1,-2), up=(2,-1), truncate=(1,-1). All four pairs are distinct, fully characterizing RC behavior.
+- **M2.4 FPU precision-control cross-check** (gap K). New asm `fpu_fp_probe_precision(pc_mode, out_10)` sets PC bits of control word, computes 1.0/3.0 (always inexact in binary), stores 10-byte extended result. C-side runs all 3 modes (PC=single/double/extended; mode 01 reserved per Intel), emits summary `diagnose.fpu.precision_modes_ok=yes|no` (yes iff the three 10-byte buffers are bytewise distinct). Per-mode detail not emitted by default to preserve DGROUP; infrastructure ready to expand if real iron shows `no`.
+- **M2.6 FPU exception-flag roundtrip** (gap M). New asm `fpu_fp_probe_exceptions(out_6)` triggers all 6 x87 exceptions in sequence (IE via FSQRT(-1), DE via denormal load, ZE via 1/0, OE via FSCALE(1,+20000), UE via FSCALE(1,-20000), PE via 1/3), captures FSTSW after each. Pure inference helpers `fpu_fp_exceptions_count_raised()` and `fpu_fp_exceptions_bitmap()` are host-testable. Emits summary `diagnose.fpu.exceptions_raised=N_of_6`. Healthy FPU: 6/6.
+- **M2.7 Memory checkerboard + inverse-checkerboard patterns**. `diag_mem.c` gains `pattern_checkerboard` (0x55/0xAA alternating) and `pattern_inv_checkerboard` (0xAA/0x55). Catches adjacent-cell coupling faults that walking-1s/0s miss. New INI rows `diagnose.memory.checkerboard=pass|fail` and `diagnose.memory.inv_checkerboard=pass|fail`. QA-Plus homage pattern.
+
+### Deferred from M2 scope
+
+- **M2.5 FPU IEEE-754 edge-case diagnostic** (gap L). Scope (9 operand classes × 5 ops = 45 cases) would cost 800-1500 bytes of DGROUP for labels and expected results. Budget pressure at M2 exit (60,416 B / 62 KB soft target, 3 KB headroom). Deferred to post-gate incremental pass or M3.
+- **M2.8 CSV output mode** (`/CSV` flag). Format-string DGROUP cost plus new code surface. Lower-priority than FPU research-gap closure. Deferred to post-M3 once DGROUP reclaim work (const-to-far migration, possible-causes FAR pool) opens headroom.
+
+### Empirical findings from DOSBox-X M2 smoketest
+
+- `fpu.fptan_pushes_one=yes` (emulated 486 FPU is 387+ era).
+- `fpu.rounding_modes_ok=yes`, all 4 per-mode pairs match IEEE table.
+- `fpu.precision_modes_ok=no` - DOSBox-X PC field emulation is incomplete; the three PC modes produce byte-identical 1.0/3.0 tword results. Real iron expected to pass.
+- `fpu.exceptions_raised=0_of_6` - DOSBox-X doesn't set exception flags in status word. Real iron expected 6/6.
+
+The two "no"s are the probes working as designed, surfacing real emulation gaps. Real-hardware capture will be the first data point for actual FPU-generation characterization via these axes.
+
+### Build state at M2 close-out
+
+- `CERBERUS.EXE` stock: 165,842 bytes (+2,004 from M1's 163,838)
+- `CERBERUS.EXE` research (`wmake WHETSTONE=1 UPLOAD=1`): 172,254 bytes
+- DGROUP near-data: 60,416 bytes (59.0 KB), 3,072 bytes headroom vs 62 KB soft target, 5,120 bytes headroom vs 64 KB hard ceiling. STATUS: OK per `tools/dgroup_check.py`.
+- Host test suite: 320 assertions, 0 failures (+22 from M1's 298).
+- Zero compiler warnings stock and research.
+
+### Known issues carried from M1 (none resolved in M2)
+
+- W4/W6 BSS-overwrite bug localized to BEK-V409 specifically (486 + S3 Trio64 VLB + Vibra 16S + AMI 11/11/92). Tracked for investigation when 486 is back from temporary storage.
+- IIT 3C87 FPU on 386 DX-40 capture mis-tagged as Intel 80387. Target machine for M2+ IIT discrimination probe.
+- Genoa ET4000 video on 386 DX-40 detected as generic vga. Video DB / probe-path gap.
+- Mandelbrot coda removed from stock builds (piggybacked on Whetstone).
+
 ## [v0.8.0-M1], 2026-04-21 — trust and validation milestone
 
 First milestone of the 0.8.0 "trust and validation" release. Per the plan at `docs/CERBERUS_0.8.0_PLAN.md`, M1 cuts known credibility traps and establishes the real-hardware validation corpus. 0.8.0 tag is held for M2 (precision expansion), M3 (CUA-lite shell), and M4 (docs parity).

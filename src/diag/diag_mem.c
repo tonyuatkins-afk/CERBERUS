@@ -96,6 +96,44 @@ static int pattern_addr_in_addr(unsigned int *out_first_bad_offset)
     return 1;
 }
 
+/* Checkerboard: alternate 0x55 / 0xAA by byte (01010101 / 10101010 bit
+ * patterns). Inverse checkerboard flips the starting phase. Catches
+ * adjacent-cell coupling faults that walking-1s/0s miss: a cell that
+ * leaks into its neighbor only shows up when the two cells are set to
+ * complementary bit patterns. M2.7 addition per QA-Plus homage lesson
+ * (docs/research/homage/qa-plus-lessons.md) and 0.8.0 plan section 6 M2. */
+static int pattern_checkerboard(unsigned int *out_first_bad_offset)
+{
+    unsigned int i;
+    for (i = 0; i < DIAG_MEM_BUF_SIZE; i++) {
+        diag_mem_buf[i] = (i & 1U) ? 0xAAU : 0x55U;
+    }
+    for (i = 0; i < DIAG_MEM_BUF_SIZE; i++) {
+        unsigned char expected = (i & 1U) ? 0xAAU : 0x55U;
+        if (diag_mem_buf[i] != expected) {
+            *out_first_bad_offset = i;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int pattern_inv_checkerboard(unsigned int *out_first_bad_offset)
+{
+    unsigned int i;
+    for (i = 0; i < DIAG_MEM_BUF_SIZE; i++) {
+        diag_mem_buf[i] = (i & 1U) ? 0x55U : 0xAAU;
+    }
+    for (i = 0; i < DIAG_MEM_BUF_SIZE; i++) {
+        unsigned char expected = (i & 1U) ? 0x55U : 0xAAU;
+        if (diag_mem_buf[i] != expected) {
+            *out_first_bad_offset = i;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 void diag_mem(result_table_t *t)
 {
     unsigned int bad_off = 0;
@@ -121,9 +159,25 @@ void diag_mem(result_table_t *t)
         report_set_verdict(t, "memory.conventional_kb", VERDICT_FAIL);
         return;
     }
+    if (!pattern_checkerboard(&bad_off)) {
+        sprintf(diag_mem_detail, "checkerboard failed at offset %u", bad_off);
+        report_add_str(t, "diagnose.memory.checkerboard", diag_mem_detail,
+                       CONF_HIGH, VERDICT_FAIL);
+        report_set_verdict(t, "memory.conventional_kb", VERDICT_FAIL);
+        return;
+    }
+    if (!pattern_inv_checkerboard(&bad_off)) {
+        sprintf(diag_mem_detail, "inv-checkerboard failed at offset %u", bad_off);
+        report_add_str(t, "diagnose.memory.inv_checkerboard", diag_mem_detail,
+                       CONF_HIGH, VERDICT_FAIL);
+        report_set_verdict(t, "memory.conventional_kb", VERDICT_FAIL);
+        return;
+    }
 
-    report_add_str(t, "diagnose.memory.walking_1s",    "pass", CONF_HIGH, VERDICT_PASS);
-    report_add_str(t, "diagnose.memory.walking_0s",    "pass", CONF_HIGH, VERDICT_PASS);
-    report_add_str(t, "diagnose.memory.addr_in_addr",  "pass", CONF_HIGH, VERDICT_PASS);
+    report_add_str(t, "diagnose.memory.walking_1s",       "pass", CONF_HIGH, VERDICT_PASS);
+    report_add_str(t, "diagnose.memory.walking_0s",       "pass", CONF_HIGH, VERDICT_PASS);
+    report_add_str(t, "diagnose.memory.addr_in_addr",     "pass", CONF_HIGH, VERDICT_PASS);
+    report_add_str(t, "diagnose.memory.checkerboard",     "pass", CONF_HIGH, VERDICT_PASS);
+    report_add_str(t, "diagnose.memory.inv_checkerboard", "pass", CONF_HIGH, VERDICT_PASS);
     report_set_verdict(t, "memory.conventional_kb", VERDICT_PASS);
 }
