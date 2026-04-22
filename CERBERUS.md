@@ -29,7 +29,7 @@ CERBERUS is not a synthetic benchmark. It does not produce a single performance 
 
 ## 3. Status
 
-**v0.8.0-M3** on `main` 2026-04-22. Third milestone of the 0.8.0 "trust and validation" release. The 0.8.0 release doctrine is at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md).
+**v0.8.0** tagged on `main` 2026-04-22. Final release of the 0.8.0 "trust and validation" arc (M1 + M2 + M3 + M4). Release doctrine: [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md). Release notes: [`docs/releases/v0.8.0.md`](docs/releases/v0.8.0.md).
 
 Release arc (shipped):
 
@@ -288,7 +288,7 @@ wmake WHETSTONE=1 UPLOAD=1        # both enabled
 wmake dgroup-report               # audit near-data budget against 64 KB ceiling
 ```
 
-Produces `CERBERUS.EXE`, DOS real-mode, medium memory model (code >64 KB allowed, near data ≤64 KB). v0.8.0-M3 stock build: 166,898 bytes. DGROUP near-data: 60,976 bytes (59.5 KB), 2.4 KB headroom vs 62 KB soft target. Host-side unit test suite (run on Windows/Linux dev box, exercises pure-math + inference paths): 320 assertions across 9 suites.
+Produces `CERBERUS.EXE`, DOS real-mode, medium memory model (code >64 KB allowed, near data ≤64 KB). v0.8.0 stock build: ~167 KB. DGROUP near-data: 60,976 bytes (59.5 KB), 2.4 KB headroom vs 62 KB soft target. Host-side unit test suite (run on Windows/Linux dev box, exercises pure-math + inference paths): 320 assertions across 9 suites.
 
 ## 10. Upload ecosystem (0.9.0+)
 
