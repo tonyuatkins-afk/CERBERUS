@@ -2,6 +2,125 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [v0.8.1], 2026-04-22 — Completion release
+
+Same-day follow-up to v0.8.0. Closes every item the v0.8.0 notes marked "deferred to 0.8.1." Full release notes at `docs/releases/v0.8.1.md`. Tag at `bdfe95c`.
+
+### Added
+
+- **M1.1 IEEE-754 edge-case diagnostic** (research gap L). New `src/diag/diag_fpu_edges.c` exercises 14 focused edges across FADD (4), FSUB (1), FMUL (2), FDIV (3), FSQRT (4): signed zero preservation, infinity arithmetic, NaN propagation, 0/0, inf/inf, sqrt(-0). Per-op counters as `diagnose.fpu.edge.<op>_ok=N_of_M`, aggregate as `diagnose.fpu.edge_cases_ok=14_of_14` on a conformant FPU. FSQRT via `#pragma aux fsqrt` to emit the bare instruction (Watcom libc `sqrt()` clamps domain errors to 0.0 rather than propagating NaN). SNaN deliberately not exercised: pre-387 silent-accept is covered by `diag_fpu_fingerprint`. Pure classifier `fp_classify_double()` exported for host tests.
+- **M1.2 `/CSV` output mode** (research gap H). `report_write_csv()` writes a sibling CSV file with RFC 4180 minimal quoting: fields containing comma, quote, CR, or LF get double-quoted with embedded quotes doubled. Schema is `key,value,confidence,verdict`. Confidence renders as `HIGH` / `MEDIUM` / `LOW`; verdict as `PASS` / `WARN` / `FAIL` / `UNK`. `/CSV` flag derives path from `/O:<file>` (replaces extension with `.CSV`, or appends if absent).
+- **M2.1 L1 pointer-chase latency probe** (research gap A). `pointer_chase_latency_ns()` reinterprets the shared 2 KB FAR buffer as a 1024-slot unsigned int array, initializes a coprime-step (67) chain that visits every slot before repeating, primes with one full cycle, then measures 20,000 data-dependent chase iterations via PIT-C2. Emits `bench.cache.char.l1_ns`.
+- **M2.2 L2 reach via 64 KB FAR buffer** (research gap B, narrowed scope). `_fmalloc(65520)` allocates an ephemeral buffer, `stride_read` measures throughput at 64 KB working set, `_ffree` releases. Emits `bench.cache.char.size_64kb_kbps` + `bench.cache.char.l2_status=ok`. Allocation failure path emits `l2_status=no_far_mem`. **Scope-cut**: 128 KB / 256 KB envelope requires huge-pointer arithmetic to span 64 KB segment boundaries; deferred to 0.9.0.
+- **M2.3 DRAM ns derivation** (research gap E). New pure helper `bench_cc_derive_dram_ns(kbps, line_bytes)` returns `line_bytes * 1e6 / kbps`. Emits `bench.cache.char.dram_ns` at `CONF_MEDIUM` (64 KB may still land in L2 on chips with larger L2).
+- **M3.1 IIT 3C87 routing (partial).** `hw_db/fpus.csv` gains `iit-3c87` row (IIT vendor). `fpu_db.c` regenerated, 15 entries. `fpu_probe_iit_3c87()` stub in place with routing; real FNSAVE-or-opcode discriminator signature awaits a 386 DX-40 + IIT 3C87 real-iron capture. Hardware-gated.
+- **M3.2 Genoa ET4000 chip-level probe.** `probe_et4000_chipid()` in `detect/video.c` runs a 3CDh read-write-readback test that fires on any ET4000-family chip regardless of BIOS string. Integrated after `probe_s3_chipid()`, before BIOS text scan. No new DB row: Genoa OEM'd Tseng silicon.
+- **M3.3 Hercules variant discrimination.** New `hercules_variant_t` enum (HGC / HGC+ / InColor / UNKNOWN / NA). `src/core/display_hercules_ids.c` holds the pure classifier + token mapper, included as source from `display.c` and from the host test directly. `display_hercules_variant()` samples 3BAh outside vertical retrace, reads bits 6:4 as the 3-bit variant ID. New `video.hercules_variant` key emits alongside the stable `video.adapter=hercules` signature key. 16-assertion host-test suite.
+- `devenv/smoketest-0-8-1.conf` — dedicated 0.8.1 DOSBox Staging smoketest config covering the new surface.
+- `docs/releases/v0.8.1.md` release notes.
+- `docs/CERBERUS_0.8.1_PLAN.md` plan document.
+- `docs/CERBERUS_0.9.0_PLAN.md` plan document for the next release.
+- `docs/quality-gates/0.8.1-M1-gate-2026-04-22.md`, `0.8.1-M2-gate-2026-04-22.md`, `0.8.1-M3-gate-2026-04-22.md` — per-milestone gates.
+
+### Changed
+
+- `CERBERUS_VERSION` bumped from `0.8.0` to `0.8.1`.
+- `opts_t` gains `do_csv` field. `/CSV` CLI flag parsed; help output documents it.
+- `bench_cache_char.c` dispatcher order: L1 size sweep → line-size sweep → write-policy probe → L1 latency probe (M2.1) → L2 reach probe (M2.2) → DRAM ns derivation (M2.3).
+- Host test suite: 320 assertions / 9 suites at v0.8.0 → 376 assertions / 12 suites at v0.8.1. New suites: `test_diag_fpu_edges` (21 assertions), `test_report_csv` (15 assertions), `test_hercules_variant` (16 assertions). DRAM-ns additions in `test_bench_cache_char`.
+
+### Fixed
+
+- **Hotfix: `/CSV` consumed by `/C` calibrated-mode prefix** (commit `ed2948d`). `str_starts_with(a, "/C")` was silently matching `/CSV` as the calibrated-mode prefix before the exact `/CSV` match branch was reached. Result: `do_csv` never got set and runs defaulted to `mode=calibrated, runs=7`. Fix reorders the parser so `/CSV` is matched immediately after `/Q` (before any prefix check) and tightens the `/C` guard to require `a[2]` be NUL or colon. Bug passed both the host-test suite and `wmake rc=0`; only the DOSBox Staging end-to-end exposed it.
+- **Version macro bump** (commit `bdfe95c`). Initial v0.8.1 tag was cut without bumping `CERBERUS_VERSION` from `"0.8.0"` to `"0.8.1"`, so the tagged binary self-identified as `version=0.8.0` in INI output. Post-tag smoketest caught it; tag was moved forward to include the macro bump before anyone pulled.
+
+### Deferred from 0.8.1 (carried to 0.9.0)
+
+- **M4 BEK-V409 BSS overwrite root-cause investigation.** Hardware-gated; needs BEK-V409 + debugger session.
+- **M3.1 IIT 3C87 real signature.** Stub returns 0 unconditionally; DB row + routing ready for a small-diff follow-up once real-iron capture supplies the signature.
+- **M3.2 Genoa ET4000 probe confirmation.** Algorithm from Tseng reference; real-iron validation pending.
+- **L2 sweep at 128 KB / 256 KB working sets.** Requires huge-pointer `stride_read_huge()`. Fully scoped in the 0.9.0 plan.
+
+### Memory + doctrine additions
+
+- New durable feedback memory: **smoketest after every CERBERUS.EXE build**. Host-test green + `wmake rc=0` is not sufficient proof. The `/CSV` flag-parsing regression and the CERBERUS_VERSION bump omission were both caught only by the end-to-end DOSBox Staging pass. The directive is now load-bearing for every build from 0.8.1 forward.
+- 0.9.0 hardware-ID roadmap filed to auto-memory as `project_cerberus_0_9_0_hw_id_roadmap.md`: BIOS ROM 64 KB hash, expansion card ROM walk, NIC detection + OUI lookup, UART FIFO probe, parallel ECP/EPP, game port, RTC presence. Synthesized into the 0.9.0 plan.
+
+### Build state
+
+- `CERBERUS.EXE` stock: **170,722 bytes**.
+- DGROUP near-data: **61,824 bytes** / 62 KB soft target, 3,712 bytes vs 64 KB hard ceiling. Status: AT RISK (yellow) per `tools/dgroup_check.py`. Accumulated pressure; each milestone stayed inside its cap but the cumulative delta is noticeable. 0.9.0 M1.1 is a `keys.h` centralization pass targeting at least 2,500 bytes recovered.
+- Host tests: **376 assertions across 12 suites**, 0 failures.
+- Zero compiler warnings on stock build.
+
+## [v0.8.0], 2026-04-22 — Trust-first release
+
+First release where every shipped result has been verified on real iron. The cut is smaller than the v0.7.1 envelope on purpose: features that could not be trust-proved on a 486 DX-2-66 inside the milestone window were either compiled out (upload), emit-suppressed (Whetstone), or deferred to 0.8.1. Full release notes at `docs/releases/v0.8.0.md`. Tag at `b2ace2e`.
+
+The individual 0.8.0 milestone entries (M1, M2, M3, M4) are preserved below for reference. This section summarizes the final tag.
+
+### Added
+
+- **M1.1 Whetstone emit suppression in stock builds.** `bench_whetstone.c` dispatcher returns immediately with `bench.fpu.whetstone_status=disabled_for_release` row; the Curnow-Wichmann kernel stays compiled + host-tested but does not emit a number. `wmake WHETSTONE=1` re-enables for research. Reason: the kernel reads 10-30x below the published reference band on real 486 silicon.
+- **M1.2 Upload compiled out of stock builds.** `#ifdef CERBERUS_UPLOAD_ENABLED` gates the HTGET-era call sites. Stock stub returns `UPLOAD_DISABLED` with `upload.status=not_built`. `/UPLOAD` rejects at parse time. Reason: v0.7.1 stack overflow when `barelybooting.com` unreachable.
+- **M1.3 Nickname buffer leak fix** (issue #9). `_nmalloc` the nickname + notes buffers into the near heap with static fallback.
+- **M1.4 `cpu.class` normalization to family token.** CPUID-class CPUs emit `cpu.class=486` / `pentium` / `pentium_pro` / `pentium_4` instead of the vendor string. Vendor remains as `cpu.vendor`.
+- **M1.5 `bench_cpu` DB anchor widening.** 486 DX-2-66 `iters_low` lowered from 4,700,000 to 1,500,000 after BEK-V409 real-iron measurement of ~1.96M iters/sec.
+- **M1.6 DGROUP audit tooling.** `tools/dgroup_check.py` + `wmake dgroup-report`.
+- **M1.7 End-of-run `_exit()` bypass.** `src/main.c` replaces `return exit_code` with `_exit((int)exit_code)` to skip the Watcom libc teardown chain that was hanging on BEK-V409.
+- **M1.8 Three-tier real-hardware validation corpus.** BEK-V409 (486 DX-2-66) + 386 DX-40 + IIT 3C87 + Genoa ET4000 captures under `tests/captures/`.
+- **M2.1 Cache stride=128** (6-point sweep). Enables `line_bytes=32` (Pentium) + `line_bytes=64` (Pentium-Pro+) inference via 2-step plateau guard.
+- **M2.2 FPU FPTAN probe** (research gap I). `diagnose.fpu.fptan_pushes_one`.
+- **M2.3 FPU rounding-control cross-check** (gap J). 4 modes × FISTP(±1.5). `diagnose.fpu.rounding_modes_ok`.
+- **M2.4 FPU precision-control cross-check** (gap K). 3 significand widths × 1.0/3.0 stored as tword. `diagnose.fpu.precision_modes_ok`.
+- **M2.6 FPU exception-flag roundtrip** (gap M). All 6 x87 exceptions triggered + observed + cleared. `diagnose.fpu.exception_flags_ok`.
+- **M2.7 Memory checkerboard + inverse checkerboard patterns.** 0x55/0xAA and 0xAA/0x55 across adjacent-cell coupling fault coverage.
+- **M3.1 CGA snow safety gate**, **M3.2 F-key legend**, **M3.3 F1 help overlay**, **M3.4 F3 exit + CUA grammar**, **M3.5 `/MONO` flag**, **M3.6 16-bg color enable**, **M3.7 adapter-tier waterfall refinement** — see the v0.8.0-M3 sub-entry below for per-item detail.
+- **M4.1 Possible-causes narration on consistency rules.** FAIL/WARN verdicts carry a short hint after the verdict token.
+- **M4.2 CERBERUS.md master spec rewrite.** Head I/II/III subsystem tables refreshed with Implemented/Deferred status.
+- **M4.3 README.md full refresh.** New "Subsystem state at v0.8.0" table + "What does not work yet" section.
+- **M4.4 methodology.md extended.** New sections for cache stride detection, FPU 5-axis fingerprint, memory pattern diagnostics, CGA snow gate, adapter waterfall, /MONO role mapping.
+- **M4.5 consistency-rules.md extended.** New Rule 11 `xt_slave_dma`, per-rule narration table.
+- **M4.6 Why real-hardware section extended.** 5 new DOSBox-X-invisible observations appended.
+- `docs/releases/v0.8.0.md` release notes.
+- `docs/CERBERUS_0.8.0_PLAN.md` plan document.
+- `docs/quality-gates/M1-gate-2026-04-21.md`, `M2-gate-2026-04-21.md`, `M3-gate-2026-04-22.md`, `M4-gate-2026-04-22.md` — per-milestone gates.
+
+### Changed
+
+- `CERBERUS_VERSION` bumped from `0.7.1` through `0.8.0-M1`, `0.8.0-M2`, `0.8.0-M3` to `0.8.0` at tag.
+- `opts_t` gains `force_mono`. CLI help + usage documents all current flags.
+- `diag_fpu_fingerprint` grows from 4 to 5 axes (adding FPTAN).
+- Real-iron captures land in `tests/captures/<class>-<id>-<date>-m<N>/` replacing the earlier flat `runs/` convention.
+
+### Removed
+
+- Runtime upload POST path from stock builds (gated via `CERBERUS_UPLOAD_ENABLED`).
+
+### Deferred from 0.8.0 (landed in 0.8.1)
+
+- IEEE-754 edge-case diagnostic (gap L) → 0.8.1 M1.1.
+- `/CSV` output mode (gap H) → 0.8.1 M1.2.
+- L1 pointer-chase latency (gap A) → 0.8.1 M2.1.
+- L2 detection via 64 KB FAR buffer (gap B narrowed) → 0.8.1 M2.2.
+- DRAM ns derivation (gap E) → 0.8.1 M2.3.
+
+### Deferred out of 0.8.x (stays 0.9.0)
+
+- Per-instruction FPU microbenchmarks (Whetstone replacement, gap N).
+- Upload path re-enabled (stack-safe offline fallback + live barelybooting.com).
+- 8088 / XT real-hardware capture.
+- Disk throughput via INT 13h.
+- Full CUA shell (menus, dropdowns, modals).
+- 128 KB / 256 KB L2 sweep via huge-pointer arithmetic.
+
+### Build state
+
+- `CERBERUS.EXE` stock: **166,994 bytes**.
+- DGROUP near-data: **60,976 bytes** / 62 KB soft target. Headroom 2,512 bytes vs soft, 4,560 bytes vs 64 KB hard ceiling. Status: OK at tag.
+- Host tests: **320 assertions across 9 suites**, 0 failures.
+- Zero compiler warnings on stock build.
+
 ## [v0.8.0-M3], 2026-04-22 (overnight) — CUA-lite interaction polish
 
 Third milestone of the 0.8.0 "trust and validation" release. M3 closes the interaction-axis gap: CUA-standard keybindings, Norton-style F-key legend, F1 help overlay, /MONO flag, 16-background-color enable, CGA snow gate. No menu bar, no modal dialog system, no structural UI refactor (per plan §9 CUA-lite decision). Full gate at `docs/quality-gates/M3-gate-2026-04-22.md`.
