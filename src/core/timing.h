@@ -88,10 +88,98 @@ void          timing_metronome_visual(const opts_t *o);
  *   success:
  *     timing.cross_check.pit_us, bios_us (numeric)
  *     timing.cross_check.status = "ok"
+ *     timing.pit_jitter_pct (v0.7.1: derived from the two clocks)
  * See timing_self_check for the contract and status key semantics. */
 void          timing_emit_self_check(result_table_t *t,
                                      int dual_measure_rc,
                                      us_t pit_us,
                                      us_t bios_us);
+
+/* =====================================================================
+ * v0.7.1 additions: measurement stats + RDTSC backend + method info
+ *
+ * The original PIT-C2 / BIOS-tick API stays exactly as-is. These new
+ * primitives layer on top: a timing_stats_t accumulator for repeat-
+ * with-jitter measurement, and an opt-in RDTSC path for Pentium-class
+ * CPUs where available. The emit helpers put all of this into the INI
+ * under the timing.* section so downstream tools know which clock the
+ * numbers came from and how tight the repeat spread was.
+ * ===================================================================== */
+
+typedef enum {
+    TM_BIOS  = 0,      /* 54.925 ms/tick BIOS system timer */
+    TM_PIT   = 1,      /* PIT Channel 2 gate, ~838 ns/tick */
+    TM_RDTSC = 2       /* Pentium+ 64-bit cycle counter (low 32 bits used) */
+} timing_method_t;
+
+/* Repeat-measurement accumulator. The workflow is:
+ *   timing_stats_init(&s);
+ *   for (i = 0; i < N; i++) {
+ *     timing_start(); <kernel>; us = timing_stop();
+ *     timing_stats_add(&s, us);
+ *   }
+ *   timing_stats_finalize(&s);
+ *
+ * After finalize, s.mean_us / s.min_us / s.max_us / s.range_pct /
+ * s.confidence are populated. range_pct = (max-min)*100/mean, clamped
+ * at 999 for pathological inputs. confidence is derived via the pure
+ * helper below; callers MAY override if they have domain knowledge.
+ *
+ * No floating point; all 32-bit integer math. Safe to use in bench
+ * kernels compiled with or without -fpi. */
+typedef struct {
+    us_t          mean_us;
+    us_t          min_us;
+    us_t          max_us;
+    unsigned int  n;
+    unsigned int  range_pct;    /* (max-min)*100/mean, 0..999 */
+    confidence_t  confidence;   /* derived at finalize, overridable */
+} timing_stats_t;
+
+void          timing_stats_init(timing_stats_t *s);
+void          timing_stats_add(timing_stats_t *s, us_t sample);
+void          timing_stats_finalize(timing_stats_t *s);
+
+/* Pure map from range_pct to a CONF level. Thresholds:
+ *   0..5%   -> CONF_HIGH
+ *   6..20%  -> CONF_MEDIUM
+ *   21%+    -> CONF_LOW
+ * Host-testable. Used by timing_stats_finalize and also exposed for
+ * callers that want to apply the same criterion to externally-computed
+ * jitter numbers (e.g. cache probe confidence). */
+confidence_t  timing_confidence_from_range_pct(unsigned int range_pct);
+
+/* Short human-readable token for INI emission: "bios", "pit", "rdtsc". */
+const char *  timing_method_name(timing_method_t m);
+
+/* ---- RDTSC backend (HW-gated, behind CERBERUS_HOST_TEST guard) ----- */
+
+/* 1 if this CPU advertises CPUID + leaf 1 EDX bit 4 (TSC). Result
+ * cached after first call. Depends on cpu_get_class() having run
+ * (Phase 1 detection) — returns 0 if class is UNKNOWN or pre-486. */
+int           timing_has_rdtsc(void);
+
+/* Low 32 bits of the TSC. Returns 0 if RDTSC is unavailable. Callers
+ * interested in intervals should subtract two reads with unsigned
+ * wrap: (end - start) handles single mid-interval wrap automatically. */
+unsigned long timing_rdtsc_lo(void);
+
+/* Best-effort CPU MHz estimate, calibrated once via RDTSC vs a 4-
+ * BIOS-tick (~220 ms) interval. Returns 0 if RDTSC is unavailable,
+ * if the measurement looks degenerate, or if the emulator flag is
+ * set. Result cached after first call. */
+unsigned long timing_cpu_mhz_est(void);
+
+/* Returns the highest-fidelity clock available on this CPU: RDTSC if
+ * present and non-emulator, else PIT (if timing_init's self-test
+ * passed), else BIOS. This is the value emitted as timing.method in
+ * the INI. */
+timing_method_t timing_best_method(void);
+
+/* Emit timing.method and timing.cpu_mhz into the result table. Call
+ * once per run, alongside timing_self_check. Safe to call multiple
+ * times (report_update_str semantics — but avoid, since downstream
+ * consumers read these keys only at INI write time). */
+void          timing_emit_method_info(result_table_t *t);
 
 #endif

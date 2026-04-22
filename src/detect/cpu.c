@@ -60,6 +60,10 @@ extern void cpu_asm_cpuid(unsigned long leaf, cpuid_regs_t __far *out);
 static cpu_class_t last_detected = CPU_CLASS_UNKNOWN;
 cpu_class_t cpu_get_class(void) { return last_detected; }
 
+/* Cached CPUID family for class-token derivation. Set in detect_cpu()
+ * when class==CPU_CLASS_CPUID; otherwise 0xFF meaning "no CPUID data". */
+static unsigned char cpuid_family = 0xFF;
+
 static const char *legacy_token(cpu_class_t c)
 {
     switch (c) {
@@ -68,6 +72,33 @@ static const char *legacy_token(cpu_class_t c)
         case CPU_CLASS_386:         return "386";
         case CPU_CLASS_486_NOCPUID: return "486-no-cpuid";
         default:                    return "unknown";
+    }
+}
+
+/* Family-to-class-token for CPUID-capable CPUs.
+ *
+ * v0.8.0 M1.4 normalization: prior to 0.8.0, cpu.class on CPUID-capable
+ * paths carried the full vendor string (e.g. "GenuineIntel"), which
+ * broke validator rules keyed on family tokens and produced INI drift
+ * vs. pre-CPUID captures. The normalized token here is the single
+ * canonical family name shared between CPUID and legacy paths. Vendor
+ * string continues to be emitted separately as cpu.vendor for callers
+ * that need it.
+ *
+ * Non-Intel vendors on family 5/6 (Cyrix 6x86, AMD K5/K6) collapse to
+ * "pentium" or "pentium_pro"; that's intentional for 0.8.0 scope. The
+ * DB-matched cpu.detected row carries the fine-grained identity. Add
+ * vendor-prefixed tokens if a consistency rule later needs the
+ * distinction. */
+static const char *family_to_class_token(unsigned char family)
+{
+    switch (family) {
+        case 3:  return "386";
+        case 4:  return "486";
+        case 5:  return "pentium";
+        case 6:  return "pentium_pro";
+        case 15: return "pentium_4";
+        default: return "cpuid_unknown";
     }
 }
 
@@ -91,6 +122,15 @@ static void restore_int6(void)
 static cpuid_regs_t leaf0_regs;
 static cpuid_regs_t leaf1_regs;
 static char         vendor_string[13];  /* 12 chars + NUL */
+
+int cpu_has_tsc(void)
+{
+    /* CPUID leaf 1 EDX bit 4 = Time Stamp Counter. leaf1_regs is
+     * zero-initialized by C rules and populated by detect_cpu on
+     * CPU_CLASS_CPUID, so the feature test is safe to call anytime. */
+    if (last_detected != CPU_CLASS_CPUID) return 0;
+    return (leaf1_regs.edx & 0x10UL) ? 1 : 0;
+}
 
 static void extract_vendor_string(void)
 {
@@ -164,6 +204,7 @@ void detect_cpu(result_table_t *t, const opts_t *o)
             stepping = (unsigned char)( leaf1_regs.eax        & 0x0F);
             model    = (unsigned char)((leaf1_regs.eax >>  4) & 0x0F);
             family   = (unsigned char)((leaf1_regs.eax >>  8) & 0x0F);
+            cpuid_family = family;  /* cache for class-token derivation */
 
             entry = cpu_db_lookup_cpuid(vendor_string, family, model, stepping);
 
@@ -220,7 +261,7 @@ void detect_cpu(result_table_t *t, const opts_t *o)
                     (unsigned)(leaf1_regs.eax & 0x0F),
                     leaf1_regs.edx);
             unknown_record("cpu",
-                           "CPUID-capable CPU not in DB — please submit",
+                           "CPUID-capable CPU not in DB, please submit",
                            unk_detail);
         } else if (class != CPU_CLASS_UNKNOWN) {
             sprintf(unk_detail, "legacy_class=%s", legacy_token(class));
@@ -231,18 +272,30 @@ void detect_cpu(result_table_t *t, const opts_t *o)
     }
 
     {
-        /* cpu.class is one of the canonical signature keys. For CPUID-
-         * capable CPUs we carry the vendor-normalized short token so the
-         * signature is stable (e.g. "intel" or "amd5x86" rather than
-         * "cpuid-capable"). */
+        /* cpu.class — one of the canonical signature keys, and the input
+         * to several consistency rules (486dx_fpu, extmem_cpu, 8086_bus,
+         * dma_class_coherence) + the validator's cache_l1_within_known_max
+         * rule. Must be a normalized family token, shared between CPUID
+         * and legacy paths. Per 0.8.0 plan §6 M1.4: pre-0.8.0 the CPUID
+         * path carried the full vendor string ("GenuineIntel") which
+         * broke rules keyed on family. Now family-derived.
+         *
+         * Selection:
+         *   1. DB entry with legacy_class set → use entry->legacy_class
+         *      (authoritative; hand-curated in hw_db/cpus.csv).
+         *   2. CPUID-capable without DB-supplied legacy_class → derive
+         *      token from family field (3→"386", 4→"486", 5→"pentium",
+         *      etc. via family_to_class_token).
+         *   3. Pre-CPUID detection without DB entry → legacy_token(class).
+         *   4. Unknown → "unknown".
+         *
+         * Vendor string is always emitted separately as cpu.vendor above. */
         const char *class_token;
-        if (entry) {
-            /* Use a short token derived from the entry. For now, piggyback
-             * on the legacy_class if present, else the vendor name. */
-            if (entry->match_kind == CPU_DB_MATCH_LEGACY)
-                class_token = entry->legacy_class;
-            else
-                class_token = vendor_string;
+        if (entry && entry->match_kind == CPU_DB_MATCH_LEGACY
+                 && entry->legacy_class && entry->legacy_class[0]) {
+            class_token = entry->legacy_class;
+        } else if (class == CPU_CLASS_CPUID && cpuid_family != 0xFF) {
+            class_token = family_to_class_token(cpuid_family);
         } else {
             class_token = legacy_token(class);
         }

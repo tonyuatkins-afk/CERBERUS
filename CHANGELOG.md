@@ -2,6 +2,141 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [v0.8.0-M1], 2026-04-21 — trust and validation milestone
+
+First milestone of the 0.8.0 "trust and validation" release. Per the plan at `docs/CERBERUS_0.8.0_PLAN.md`, M1 cuts known credibility traps and establishes the real-hardware validation corpus. 0.8.0 tag is held for M2 (precision expansion), M3 (CUA-lite shell), and M4 (docs parity).
+
+### Added
+
+1. **DGROUP audit tool (`tools/dgroup_check.py` + `wmake dgroup-report`).** Parses `cerberus.map` near-data segments against the 64 KB DOS hard ceiling, 62 KB soft target, and 2 KB hard-reserve window. Per 0.8.0 plan section 4 ship criterion 4, this is the gate tool for M2 scope decisions. M1 exits with DGROUP at 58.5 KB, 3.6 KB headroom.
+
+2. **Real-hardware capture corpus.** `tests/captures/` grows three new dated subdirectories:
+   - `486-BEK-V409-2026-04-21-m1/` first M1 run, pre-em-dash-fix, shows the BIOS-date BSS stomp + audio scale hang (historical evidence)
+   - `486-BEK-V409-2026-04-21-m1-noui/` second run, post-em-dash-fix, pre-_exit-fix, shows `CERBERUS.LAS=main.return` diagnostic that drove the M1.7 fix
+   - `486-BEK-V409-2026-04-21-m1-exit/` clean exit post-_exit-fix, the shipping baseline
+   - `386-real-2026-04-21-m1/` 386 DX-40 capture with IIT 3C87 + Genoa ET4000 + Aztech ISA, baseline for M2 DB coverage work
+   Each dir has a `README.md` with ground truth, invariant verification, and post-capture findings.
+
+3. **Validation handoff protocol (`tests/target/VALIDATION-0.8.0-M1.md`).** Per-tier expectations (486 / 386 / 286 / 8088) with canonical signature keys, expected consistency rule outcomes, and acceptance criteria.
+
+4. **Quality gate documentation (`docs/quality-gates/M1-gate-2026-04-21.md`).** Five-round adversarial review with BLOCK/WARN/NOTE categorization. Zero BLOCK, six WARN tracked, six NOTE captured. M1 gate outcome: PASS with warnings.
+
+5. **`docs/CERBERUS_0.8.0_PLAN.md`.** Release doctrine for 0.8.0. Revised after red-team critique into a plan with explicit decisions on DGROUP budget, Whetstone scope, upload posture, UI scope, and the 8088-floor claim policy.
+
+6. **Research documents (`docs/Cache Test Research.md`, `docs/FPU Test Research.md`, `docs/General Test Research.md`).** Source material for the 0.8.0 plan's M2 research-gap scope.
+
+### Changed
+
+1. **M1.1 Whetstone emit suppressed in stock builds.** `bench_whetstone.c` dispatcher early-returns with `whetstone_status=disabled_for_release`; no `k_whetstones` row emitted. Kernel stays compiled in every build; `wmake WHETSTONE=1` re-enables emit for research work. Rule 10 (`whetstone_fpu`) updated to skip on `disabled_for_release`. `bench_fpu.ops_per_sec` remains the aggregate FPU throughput metric. Rationale: the Curnow-Wichmann kernel has never produced an in-envelope value across four release cycles; a trust-first release cannot ship a 10x-30x-wrong number. Per 0.8.0 plan section 7. Full reasoning in `docs/methodology.md` "Why Whetstone is not in 0.8.0".
+
+2. **M1.2 Upload runtime compiled out of stock binaries.** `#ifdef CERBERUS_UPLOAD_ENABLED` gates `upload_execute`, HTGET shell-out, `UPLOAD.TMP` handling, and /U and /UPLOAD flag parsing. Stock builds emit `upload.status=not_built`; `/UPLOAD` in stock errors at parse time with "upload not built into this binary; rebuild with 'wmake UPLOAD=1'". `[network] transport` detection stays in stock (useful diagnostic independent of upload). `/NICK` and `/NOTE` INI annotation stays. Contract doc `docs/ini-upload-contract.md` preserved as forward-looking design. Eliminates the unfixed stack-overflow-on-unreachable-endpoint defect from the default shipping artifact. Per 0.8.0 plan section 8.
+
+3. **M1.3 Nickname buffer leak (issue #9) fixed.** `upload_nickname_buf` + `upload_notes_buf` moved from BSS to the near heap via `_nmalloc` in `upload_populate_metadata`, with explicit fallback to file-scope statics if `_nmalloc` fails. Changes BSS layout so the progressive-overwrite pattern observed on v0.7.1 captures no longer lands on these buffers. Verified: `nickname=BEK-V409` verbatim on both 486 and 386 captures. The underlying overwriter remains unidentified (tracked as W4 for M2 investigation).
+
+4. **M1.4 `cpu.class` normalized to family token.** Pre-M1, CPUID-capable CPUs emitted the full vendor string ("GenuineIntel") as `cpu.class`. Now emits a normalized family token (`486`, `386`, `286`, `8086`, `pentium`, `pentium_pro`, etc.) derived from CPUID family field via new `family_to_class_token()` helper. `cpu.vendor` is emitted as a separate key. Server-side validator's `_CPU_L1_MAX_KB` table extended with `pentium_pro=32`, `pentium_4=128` entries and the stale "CPUID-era quirk" comment replaced with current doctrine. Per 0.8.0 plan section 6 M1.4.
+
+5. **M1.5 `bench_cpu` DB anchor widened.** `hw_db/cpus.csv` 486 DX-2 `iters_low` lowered from 4,700,000 to 1,500,000 to cover TSR-loaded real-iron captures. BEK-V409 measured 1,964,636 iters/sec (under HIMEM+EMM386+mouse TSR load); was WARN pre-M1.5, now PASS. Header calibration note updated explaining the widening and the fact that heavy-TSR machines will still WARN below 1.5M. Rule 4b three-way cache-contextualized narration retained unchanged.
+
+6. **M1.7 End-of-run `_exit` bypass.** `src/main.c` replaces `return exit_code` with `crumb_exit() + _exit((int)exit_code)`. Bypasses Watcom's libc teardown (atexit chain, FPU state cleanup, stdio close, `_NULL` signature check) which was hanging on BEK-V409 under DOS 6.22 + HIMEM + EMM386 + AMI 11/11/92. All resources explicitly released before this point. CERBERUS registers zero atexit handlers. Root-cause analysis via the `main.return` crumb diagnostic; the crumb_exit before _exit unlinks `CERBERUS.LAS` on clean exit. Verified clean on BEK-V409 and 386 real iron. Per 0.8.0 plan section 6 M1.7. Prominent DO-NOT-REMOVE comment block in `src/main.c` protects the load-bearing end-of-run crumb chain.
+
+7. **Em-dash purge in runtime strings.** `audio_scale.c` (3 strings), `timing_metronome.c` (1), `diag_bit_parade.c` (1), `bench_cache_char.c` (1), `detect/cpu.c` unknown_record string (1), `detect/unknown.c` UNK header (1), and research-build-only `upload.c` message (1) replaced UTF-8 em-dash bytes (0xE2 0x80 0x94) with ASCII colon / comma. Real-iron rendering on CP437 previously showed "ΓÇö" triplets in display (e.g. "Audio Scale ΓÇö SB DSP Direct PCM"). Verified zero em-dash bytes in compiled stock binary post-fix.
+
+### Fixed
+
+1. **Research-build `upload.status` staleness** (gate finding W2/A1). `upload_execute` offline/skipped/no_client paths now call `report_write_ini` after `set_status`. Pre-fix, those paths updated status in the in-memory table but never flushed to disk, leaving the INI with the `upload_populate_metadata` seed value (`not_built`) rather than the actual outcome (`offline` / `skipped` / `no_client`). Stock builds unaffected (status=not_built is the actual outcome). Gated behind `CERBERUS_UPLOAD_ENABLED`.
+
+2. **`fpu.whetstone_status` enum documented** in `docs/ini-format.md` with `disabled_for_release` as the stock-build value + the complete enum (`ok`, `skipped_no_fpu`, `inconclusive_*`, `inconclusive_runtime_exceeded`) for research builds. Rule 10 skip semantics noted.
+
+3. **`upload.status` enum extended** in `docs/ini-format.md` and `docs/ini-upload-contract.md` with `not_built` for 0.8.0 stock builds. Server parser must tolerate the full enum per the contract.
+
+### Known issues carried forward
+
+| ID | Severity | Scope | Carry-forward |
+|---|---|---|---|
+| W4 | WARN | BSS stomp of BIOS date (`dree=` pattern) on BEK-V409 specifically | M2: investigate overwriter source via removal-at-a-time on BEK-V409 |
+| W6 | WARN | "*** NULL assignment detected" message on BEK-V409 exit | M2: unified with W4, same underlying near-NULL pointer write |
+| W1 | WARN | Mandelbrot coda removed from stock builds | M2: decide whether to refactor Mandelbrot out of `bench_whetstone.c` into independent FPU visual |
+| W3 | WARN | Em-dashes in my M1 source-code comments | M4: docs-parity sweep |
+| W5 | WARN | Public README / CERBERUS.md references v0.7.x state before this commit | M4 (partially addressed in this commit for README) |
+| issue #2 | open | Vibra 16 PnP OPL detection intermittent (pre-existing) | M2 |
+
+The W4+W6 class of bug is empirically localized: the two-machine capture matrix (486 + 386) shows the symptoms only on BEK-V409. DOSBox-X also does not reproduce. Generic CERBERUS code paths are ruled out; M2 investigation narrows to BEK-V409-specific probes (S3 Trio64 chipset ID, Vibra 16S DSP + OPL fallback, UMC491 PIT wrap-guard, possibly AMI 11/11/92 BIOS interaction).
+
+### Build state
+
+- `CERBERUS.EXE` stock: 163,838 bytes (down from v0.7.1's 169,380; -5,542 bytes / -3.3%)
+- `CERBERUS.EXE` research (`wmake WHETSTONE=1 UPLOAD=1`): 170,250 bytes
+- DGROUP near-data: 59,888 bytes (58.5 KB), 3,600 bytes headroom vs 62 KB soft target, 5,648 bytes vs 64 KB hard ceiling
+- Host test suite: 296 assertions across 9 suites, 0 failures (+37 vs v0.7.1 baseline of 259)
+- Stock build zero warnings, research build zero warnings
+- Version string: `0.8.0-M1`
+
+### Real-hardware validation status at M1 close-out
+
+| Tier | Capture | Status |
+|---|---|---|
+| 486 (ceiling) | BEK-V409 | Archived |
+| 386 | 386 DX-40 + IIT 3C87 + Genoa ET4000 | Archived |
+| 286 (AT-class) | pending hardware | Deferred to post-M2 |
+| 8088 (XT-class) | n/a | Claim retracted to "286 through 486 validated, XT-class validation pending" per plan section 10 |
+
+Public claim: "Validated on 386 and 486. 286 and 8088 paths untested."
+
+## [v0.7.1], 2026-04-21 — cache characterization + FPU behavioral fingerprint
+
+Minor release that moves CERBERUS from "detects and benchmarks" to
+"characterizes and fingerprints" across three subsystems.
+
+### Added
+
+1. **Timing primitives (Batch A.1).** New `timing_stats_t` accumulator
+   for repeat-with-jitter measurement, `timing_confidence_from_range_pct`
+   mapping jitter to CONF_HIGH/MEDIUM/LOW bands, and an RDTSC backend
+   gated on CPUID leaf 1 EDX bit 4 via the new `cpu_has_tsc()` helper.
+   `timing_emit_method_info()` writes `timing.method` and, on RDTSC
+   paths, `timing.cpu_mhz` (calibrated via a 4-BIOS-tick window).
+   `timing_emit_self_check()` gains `timing.pit_jitter_pct`.
+
+2. **FPU behavioral fingerprint (Batch A.2, `src/diag/diag_fpu_fingerprint.c`).**
+   Four probes distinguish 8087/80287 from 80387+ orthogonally to
+   Phase 1's presence detection: infinity comparison mode (projective
+   vs affine), pseudo-NaN handling (silently accepted vs #IE raised),
+   FPREM1 opcode (D9 F5) via INT 6 trap-catch, FSIN opcode (D9 FE)
+   via INT 6 trap-catch. Emits `diagnose.fpu.infinity_mode`,
+   `pseudo_nan`, `has_fprem1`, `has_fsin`, and an inferred
+   `family_behavioral` (FP_FAMILY_MODERN / FP_FAMILY_LEGACY /
+   FP_FAMILY_MIXED anomaly flag).
+
+3. **Cache characterization (Batch B, `src/bench/bench_cache_char.c`).**
+   Three probes infer L1 parameters from throughput sweeps: L1 size
+   via a 2/4/8/16/32 KB working-set scan (inflection = L1 size), line
+   size via a 4/8/16/32/64 B stride sweep, and write policy via a
+   read-vs-write delta (wb / wt / unknown classification).
+   Self-skips on emulator captures: the stride probes rely on real
+   cache miss penalties that DOSBox Staging and kin do not faithfully
+   reproduce. Associativity probe deferred to a follow-up release
+   (requires physical-address control medium-model DOS doesn't offer).
+
+### Changed
+
+- `CERBERUS.EXE` grew from 164,050 bytes (v0.7.0-rc2) to ~169,380 bytes
+  (+5,330 bytes, under the 180 KB budget). DGROUP near-data at 60.6 KB
+  (was 59.3 KB), still under the 65 KB limit.
+- `tests/host/` suite expanded from 201 to 259+ assertions across
+  9 test exes (new `test_diag_fpu_fingerprint.exe` and
+  `test_bench_cache_char.exe`).
+- `devenv/smoketest-staging.conf` uses `/SKIP:BENCH` — the full
+  bench suite exceeds 120 sec under DOSBox Staging's emulation
+  overhead. Real-iron captures validate the bench-path keys.
+
+### Notes
+
+- Real-hardware validation of cache characterization kernels is
+  deferred to the 486 capture workflow. Host tests cover the
+  pure-math inference paths exhaustively; kernels skip on emulator
+  by design.
+- Whetstone still hangs DOSBox Staging (unchanged from v0.7.0).
+
 ## [v0.7.0-rc2], 2026-04-20 — end-to-end quality gate fixes
 
 Release candidate 2 lands fixes surfaced by a systematic end-to-end

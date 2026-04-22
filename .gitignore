@@ -93,3 +93,21 @@ devenv/SMOKE.INI
 devenv/SMOKE.LOG
 devenv/SMOKE.RC
 runs/
+
+# CERBERUS smoketest artifacts (devenv/)
+devenv/*.INI
+devenv/*.LOG
+devenv/*.RC
+devenv/*.MARK
+devenv/*.TMP
+
+# Stale shell-redirect artifacts. Anchored to repo root with leading /
+# so tracked captures under tests/captures/ are not matched. Git on
+# Windows is case-insensitive by default so plain `CAPTURE.INI` without
+# the root anchor catches `capture.ini` under captures/, which is wrong.
+/CERBERUS.LAS
+/CERBERUS.LAST
+/CERBERUS.UNK
+/UPLOAD.TMP
+/CAPTURE.INI
+/cerberus.map

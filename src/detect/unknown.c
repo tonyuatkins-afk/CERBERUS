@@ -116,7 +116,7 @@ void unknown_finalize(void)
     if (!unk_disabled) {
         f = fopen(unk_path, "wt");
         if (f) {
-            fprintf(f, "# CERBERUS.UNK — captured unknown hardware\n");
+            fprintf(f, "# CERBERUS.UNK: captured unknown hardware\n");
             fprintf(f, "# Tool version: %s\n", CERBERUS_VERSION);
             fprintf(f, "# Total captures: %u\n", capture_count);
             fprintf(f, "#\n");

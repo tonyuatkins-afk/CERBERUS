@@ -20,6 +20,7 @@
 
 #include "timing.h"
 #include "report.h"
+#include "../detect/cpu.h"
 #include <stdio.h>
 
 /* ----------------------------------------------------------------------- */
@@ -220,6 +221,101 @@ int timing_compute_dual(unsigned int initial_c2,
 }
 
 /* ----------------------------------------------------------------------- */
+/* v0.7.1 stats + method-name primitives — pure, host-testable             */
+/* ----------------------------------------------------------------------- */
+
+confidence_t timing_confidence_from_range_pct(unsigned int range_pct)
+{
+    /* Repeat-measurement jitter bands, calibrated against real-hardware
+     * and emulator captures. On DOSBox Staging with a clean host, PIT
+     * jitter over a benchmark kernel typically sits 0..3%. On real
+     * hardware with no TSRs, 2..8%. With a loaded TSR stack, 10..30%.
+     * Beyond 20% the sample is unreliable for anything quantitative,
+     * so we clamp to CONF_LOW and the caller decides what to emit. */
+    if (range_pct <= 5U)  return CONF_HIGH;
+    if (range_pct <= 20U) return CONF_MEDIUM;
+    return CONF_LOW;
+}
+
+const char *timing_method_name(timing_method_t m)
+{
+    switch (m) {
+        case TM_RDTSC: return "rdtsc";
+        case TM_PIT:   return "pit";
+        case TM_BIOS:  return "bios";
+        default:       return "unknown";
+    }
+}
+
+void timing_stats_init(timing_stats_t *s)
+{
+    s->mean_us    = 0UL;
+    s->min_us     = 0xFFFFFFFFUL;   /* sentinel: first add() lowers it */
+    s->max_us     = 0UL;
+    s->n          = 0;
+    s->range_pct  = 0;
+    s->confidence = CONF_LOW;
+}
+
+void timing_stats_add(timing_stats_t *s, us_t sample)
+{
+    /*
+     * Running sum stored in mean_us during accumulation, divided out
+     * to the real mean at finalize. At n=1024 samples of max ~5 000 000
+     * us each, sum = ~5e9 which would overflow 32-bit. No CERBERUS
+     * caller feeds >16 repeats, so overflow is not a real concern, but
+     * defensively clamp n so the divisor in finalize stays nonzero and
+     * within 8-bit range even on buggy callers.
+     */
+    if (s->n >= 255U) return;    /* refuse further samples; finalize as-is */
+    s->mean_us += sample;
+    if (sample < s->min_us) s->min_us = sample;
+    if (sample > s->max_us) s->max_us = sample;
+    s->n++;
+}
+
+void timing_stats_finalize(timing_stats_t *s)
+{
+    /*
+     * Convert running sum into the real mean, compute the spread as a
+     * percentage of the mean, and derive a confidence band.
+     *
+     * Degenerate cases:
+     *   n == 0            -> nothing measured; leave everything at init
+     *                        values, confidence CONF_LOW (already set)
+     *   mean == 0         -> either no samples or all-zero samples;
+     *                        range_pct is 0 (no spread) but we can't
+     *                        trust zero-latency measurements, so stay
+     *                        at CONF_LOW
+     *   max - min == 0    -> perfectly uniform; CONF_HIGH
+     */
+    unsigned long spread;
+
+    if (s->n == 0) {
+        s->min_us     = 0UL;
+        s->range_pct  = 0;
+        s->confidence = CONF_LOW;
+        return;
+    }
+
+    s->mean_us = s->mean_us / (unsigned long)s->n;
+
+    if (s->mean_us == 0UL) {
+        s->range_pct  = 0;
+        s->confidence = CONF_LOW;
+        return;
+    }
+
+    spread = (unsigned long)s->max_us - (unsigned long)s->min_us;
+    {
+        unsigned long pct = (spread * 100UL) / (unsigned long)s->mean_us;
+        if (pct > 999UL) pct = 999UL;
+        s->range_pct = (unsigned int)pct;
+    }
+    s->confidence = timing_confidence_from_range_pct(s->range_pct);
+}
+
+/* ----------------------------------------------------------------------- */
 /* Self-check emit helper — pure, host-testable                            */
 /* ----------------------------------------------------------------------- */
 
@@ -236,6 +332,7 @@ int timing_compute_dual(unsigned int initial_c2,
  * tests can exercise the emit path without pulling in <conio.h>. */
 static char self_check_pit_display[16];
 static char self_check_bios_display[16];
+static char self_check_jitter_display[8];
 
 void timing_emit_self_check(result_table_t *t,
                             int dual_measure_rc,
@@ -299,6 +396,24 @@ void timing_emit_self_check(result_table_t *t,
                    CONF_HIGH, VERDICT_UNKNOWN);
     report_add_str(t, "timing.cross_check.status", "ok",
                    CONF_LOW, VERDICT_UNKNOWN);
+
+    /* v0.7.1: derive PIT vs BIOS jitter as a percentage of the BIOS
+     * reference. Both clocks share the 1.193 MHz crystal so the
+     * expected delta is 0; any nonzero value is PIT C2 wrap-detection
+     * noise. timing_compute_dual already filters out samples above
+     * 25% divergence, so this value is bounded 0..25 on success. */
+    {
+        unsigned long delta, jitter_pct;
+        delta = (pit_us >= bios_us)
+              ? ((unsigned long)pit_us  - (unsigned long)bios_us)
+              : ((unsigned long)bios_us - (unsigned long)pit_us);
+        jitter_pct = (delta * 100UL) / (unsigned long)bios_us;
+        if (jitter_pct > 999UL) jitter_pct = 999UL;
+        sprintf(self_check_jitter_display, "%lu", jitter_pct);
+        report_add_u32(t, "timing.pit_jitter_pct", jitter_pct,
+                       self_check_jitter_display,
+                       CONF_HIGH, VERDICT_UNKNOWN);
+    }
 }
 
 /* ----------------------------------------------------------------------- */
@@ -673,6 +788,131 @@ void timing_self_check(result_table_t *t)
     us_t pit_us = 0, bios_us = 0;
     int rc = timing_dual_measure(4, &pit_us, &bios_us);
     timing_emit_self_check(t, rc, pit_us, bios_us);
+}
+
+/* ----------------------------------------------------------------------- */
+/* v0.7.1: RDTSC backend + method-info emission                            */
+/* ----------------------------------------------------------------------- */
+
+/* timing_a.asm — raw RDTSC wrapper. Caller MUST verify TSC is present
+ * via cpu_has_tsc() before invoking; this performs no trap handling.
+ * Returns bits 0..31 of the 64-bit TSC. */
+extern unsigned long timing_asm_rdtsc_lo(void);
+#pragma aux timing_asm_rdtsc_lo "timing_asm_rdtsc_lo_" \
+    value [dx ax] modify exact [ax dx];
+
+/* Caching: -1 = not probed yet, 0 = absent, 1 = present.
+ * First call to timing_has_rdtsc() resolves; subsequent calls return the
+ * cached value. Intentionally NOT an unsigned char so we can distinguish
+ * "probed-absent" from "not-yet-probed" without a second sentinel. */
+static int rdtsc_avail_cached = -1;
+
+int timing_has_rdtsc(void)
+{
+    if (rdtsc_avail_cached < 0) {
+        rdtsc_avail_cached = cpu_has_tsc() ? 1 : 0;
+    }
+    return rdtsc_avail_cached;
+}
+
+unsigned long timing_rdtsc_lo(void)
+{
+    if (!timing_has_rdtsc()) return 0UL;
+    return timing_asm_rdtsc_lo();
+}
+
+static unsigned long cpu_mhz_cached = 0xFFFFFFFFUL;    /* sentinel */
+
+unsigned long timing_cpu_mhz_est(void)
+{
+    /*
+     * Calibrate CPU MHz by counting TSC cycles across a known real-time
+     * window measured by the BIOS tick. The tick sits at 54.925 ms, so
+     * four ticks give us ~220 ms — long enough to dilute discretization
+     * (bios_us has one tick of quantization error) and short enough that
+     * the TSC low 32 bits don't wrap even at ~10 GHz.
+     *
+     * Returns 0 if RDTSC is unavailable, if the emulator flag is set
+     * (timing on DOSBox/Staging reports wall-clock not CPU cycles,
+     * making MHz meaningless), or if the measurement produces a
+     * pathological value (elapsed_us == 0, which would divide by zero).
+     */
+    unsigned long bt_start, bt_edge, bt_end;
+    unsigned long tsc_start, tsc_end, tsc_delta;
+    us_t          elapsed_us;
+
+    if (cpu_mhz_cached != 0xFFFFFFFFUL) return cpu_mhz_cached;
+
+    if (!timing_has_rdtsc() || emulator_flag) {
+        cpu_mhz_cached = 0UL;
+        return cpu_mhz_cached;
+    }
+
+    /* Sync to the NEXT BIOS tick edge so our interval brackets whole
+     * ticks and we don't inherit the partial-tick quantization from
+     * whenever this function happened to be called. */
+    bt_start = read_bios_tick();
+    do {
+        bt_edge = read_bios_tick();
+    } while (bt_edge == bt_start);
+
+    tsc_start = timing_asm_rdtsc_lo();
+    do {
+        bt_end = read_bios_tick();
+    } while (bt_end - bt_edge < 4UL);
+    tsc_end = timing_asm_rdtsc_lo();
+
+    tsc_delta  = tsc_end - tsc_start;    /* unsigned wrap handles 32-bit rollover */
+    elapsed_us = timing_bios_ticks_to_us_delta(bt_edge, bt_end);
+    if (elapsed_us == 0UL) {
+        cpu_mhz_cached = 0UL;
+        return cpu_mhz_cached;
+    }
+
+    /* cycles / microseconds = MHz. Integer division: 100.4 MHz rounds
+     * to 100, 99.8 to 99 — acceptable for the display. */
+    cpu_mhz_cached = tsc_delta / (unsigned long)elapsed_us;
+    return cpu_mhz_cached;
+}
+
+timing_method_t timing_best_method(void)
+{
+    /* Prefer RDTSC on non-emulator Pentium+ hosts; PIT elsewhere. BIOS
+     * is the last-resort fallback for cases where PIT C2 self-test
+     * didn't move (see timing_init's emulator_flag trip). */
+    if (timing_has_rdtsc() && !emulator_flag) return TM_RDTSC;
+    if (!emulator_flag)                       return TM_PIT;
+    return TM_BIOS;
+}
+
+static char method_mhz_display[12];
+
+void timing_emit_method_info(result_table_t *t)
+{
+    /*
+     * Emit the timing.method and timing.cpu_mhz keys so downstream
+     * tooling (server validator, barelybooting fingerprint DB) can tell
+     * which clock produced the numbers. cpu_mhz is only meaningful when
+     * RDTSC is the chosen method; absent otherwise.
+     *
+     * Confidence for method is HIGH (it's a direct observation of what
+     * the code chose). For cpu_mhz it's MEDIUM: integer truncation of a
+     * ~220 ms calibration window is good to ~1% at 100 MHz, degrading
+     * toward lower clocks. Callers inspecting for exact frequency should
+     * prefer cross-referencing with cpu.detected + the cpu_db entry.
+     */
+    timing_method_t m = timing_best_method();
+    report_add_str(t, "timing.method", timing_method_name(m),
+                   CONF_HIGH, VERDICT_UNKNOWN);
+
+    if (m == TM_RDTSC) {
+        unsigned long mhz = timing_cpu_mhz_est();
+        if (mhz > 0UL) {
+            sprintf(method_mhz_display, "%lu", mhz);
+            report_add_u32(t, "timing.cpu_mhz", mhz, method_mhz_display,
+                           CONF_MEDIUM, VERDICT_UNKNOWN);
+        }
+    }
 }
 
 #endif  /* CERBERUS_HOST_TEST */

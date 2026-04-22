@@ -119,6 +119,12 @@ void bench_all(result_table_t *t, const opts_t *o)
     bench_cache_waterfall_visual(o);
     WRAP_BENCH("fpu",        bench_fpu(t, o));
     WRAP_BENCH("cache",      bench_cache(t, o));
+    /* v0.7.1: cache characterization (L1 size / line size / write policy).
+     * Sits right after bench_cache so the INI groups all cache-related
+     * numbers together. Opts-independent: always quick-mode, skip-aware.
+     * Short-circuits on emulator captures (data unreliable anyway;
+     * real-iron only for v0.7.1). */
+    WRAP_BENCH("cache_char", bench_cache_char(t));
     WRAP_BENCH("video",      bench_video(t, o));
     WRAP_BENCH("dhrystone",  bench_dhrystone(t, o));
     WRAP_BENCH("whetstone",  bench_whetstone(t, o));

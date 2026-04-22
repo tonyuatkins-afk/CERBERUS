@@ -49,6 +49,34 @@ CFLAGS  = -0 -fpi -mm -ox -w3 -zq -bt=dos -i=src
 # share the synthetic-loop shape that burned Dhrystone/Whetstone — keeping
 # it in the no-opt pool is cheap belt-and-braces.
 CFLAGS_NOOPT = -0 -fpi -mm -ot -oi -w3 -zq -bt=dos -i=src
+
+# 0.8.0 build gates. Stock builds omit these; research builds re-enable.
+#
+# WHETSTONE=1 — re-enables Whetstone emit. Per 0.8.0 plan §7, stock
+#   builds compile the kernel but the dispatcher suppresses emit
+#   (writes whetstone_status=disabled_for_release and returns). Pass
+#   WHETSTONE=1 to produce a research binary that runs the full
+#   Curnow-Wichmann kernel and emits bench.fpu.k_whetstones.
+#
+# UPLOAD=1 — re-enables runtime upload execution. Per 0.8.0 plan §8,
+#   stock builds contain no HTTP client code path. /NICK, /NOTE, and
+#   [network] detection remain in stock; /UPLOAD in stock prints
+#   "not built with upload support" and exits. Pass UPLOAD=1 to build
+#   a binary with HTGET shell-out + INI transmission enabled (requires
+#   HTGET.EXE on PATH at runtime, requires barelybooting.com endpoint
+#   to be reachable, or the code path can stack-overflow on failure).
+!ifdef WHETSTONE
+WHETSTONE_FLAGS = -DCERBERUS_WHETSTONE_ENABLED
+!else
+WHETSTONE_FLAGS =
+!endif
+
+!ifdef UPLOAD
+UPLOAD_FLAGS = -DCERBERUS_UPLOAD_ENABLED
+!else
+UPLOAD_FLAGS =
+!endif
+
 ASFLAGS = -f obj
 
 TARGET  = CERBERUS.EXE
@@ -56,7 +84,8 @@ MAPFILE = cerberus.map
 STACK   = 4096
 
 OBJS = src\main.obj                                                  &
-       src\core\timing.obj    src\core\display.obj                   &
+       src\core\timing.obj    src\core\timing_a.obj                  &
+       src\core\display.obj                                          &
        src\core\report.obj    src\core\sha1.obj                      &
        src\core\consist.obj   src\core\thermal.obj                   &
        src\core\crumb.obj     src\core\ui.obj                        &
@@ -78,6 +107,8 @@ OBJS = src\main.obj                                                  &
        src\detect\network.obj                                        &
        src\diag\diag_all.obj  src\diag\diag_cpu.obj                  &
        src\diag\diag_mem.obj  src\diag\diag_fpu.obj                  &
+       src\diag\diag_fpu_fingerprint.obj                             &
+       src\diag\diag_fpu_fingerprint_a.obj                           &
        src\diag\diag_video.obj                                       &
        src\diag\diag_cache.obj src\diag\diag_dma.obj                 &
        src\diag\diag_bit_parade.obj                                  &
@@ -85,7 +116,8 @@ OBJS = src\main.obj                                                  &
        src\diag\diag_latency_map.obj                                 &
        src\bench\bench_all.obj src\bench\bench_cpu.obj               &
        src\bench\bench_memory.obj src\bench\bench_fpu.obj            &
-       src\bench\bench_cache.obj src\bench\bench_video.obj           &
+       src\bench\bench_cache.obj src\bench\bench_cache_char.obj      &
+       src\bench\bench_video.obj                                     &
        src\bench\bench_dhrystone.obj src\bench\bench_whetstone.obj   &
        src\bench\bench_whet_fpu.obj                                  &
        src\bench\bench_mandelbrot.obj                                &
@@ -99,10 +131,13 @@ $(TARGET): $(OBJS)
 
 # Explicit per-file rules (wmake inference rules across subdirs are fragile)
 src\main.obj: src\main.c src\cerberus.h src\detect\unknown.h src\core\ui.h src\core\consist.h src\core\thermal.h src\core\timing.h
-	$(CC) $(CFLAGS) -fo=$^@ src\main.c
+	$(CC) $(CFLAGS) $(UPLOAD_FLAGS) -fo=$^@ src\main.c
 
-src\core\timing.obj: src\core\timing.c src\core\timing.h src\core\report.h src\cerberus.h
+src\core\timing.obj: src\core\timing.c src\core\timing.h src\core\report.h src\detect\cpu.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\timing.c
+
+src\core\timing_a.obj: src\core\timing_a.asm
+	$(ASM) $(ASFLAGS) -o src\core\timing_a.obj src\core\timing_a.asm
 
 src\core\display.obj: src\core\display.c src\core\display.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\core\display.c
@@ -234,6 +269,12 @@ src\diag\diag_mem.obj: src\diag\diag_mem.c src\diag\diag.h src\core\report.h src
 src\diag\diag_fpu.obj: src\diag\diag_fpu.c src\diag\diag.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_fpu.c
 
+src\diag\diag_fpu_fingerprint.obj: src\diag\diag_fpu_fingerprint.c src\diag\diag.h src\core\report.h src\cerberus.h
+	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_fpu_fingerprint.c
+
+src\diag\diag_fpu_fingerprint_a.obj: src\diag\diag_fpu_fingerprint_a.asm
+	$(ASM) $(ASFLAGS) -o src\diag\diag_fpu_fingerprint_a.obj src\diag\diag_fpu_fingerprint_a.asm
+
 src\diag\diag_video.obj: src\diag\diag_video.c src\diag\diag.h src\core\display.h src\core\report.h src\cerberus.h
 	$(CC) $(CFLAGS) -fo=$^@ src\diag\diag_video.c
 
@@ -267,6 +308,9 @@ src\bench\bench_fpu.obj: src\bench\bench_fpu.c src\bench\bench.h src\core\timing
 src\bench\bench_cache.obj: src\bench\bench_cache.c src\bench\bench.h src\core\timing.h src\core\report.h src\core\cache_buffers.h src\cerberus.h
 	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_cache.c
 
+src\bench\bench_cache_char.obj: src\bench\bench_cache_char.c src\bench\bench.h src\core\timing.h src\core\report.h src\core\cache_buffers.h src\cerberus.h
+	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_cache_char.c
+
 src\bench\bench_video.obj: src\bench\bench_video.c src\bench\bench.h src\core\timing.h src\core\report.h src\core\display.h src\cerberus.h
 	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_video.c
 
@@ -274,7 +318,7 @@ src\bench\bench_dhrystone.obj: src\bench\bench_dhrystone.c src\bench\bench.h src
 	$(CC) $(CFLAGS_NOOPT) -fo=$^@ src\bench\bench_dhrystone.c
 
 src\bench\bench_whetstone.obj: src\bench\bench_whetstone.c src\bench\bench.h src\core\timing.h src\core\report.h src\cerberus.h
-	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_whetstone.c
+	$(CC) $(CFLAGS) $(WHETSTONE_FLAGS) -fo=$^@ src\bench\bench_whetstone.c
 
 # Whetstone x87 FPU kernel — NASM asm (v0.5.0 T4a). Dispatched from
 # bench_whetstone.c when fpu.detected != "none". Opaque to Watcom's
@@ -293,7 +337,7 @@ src\bench\bench_cache_waterfall.obj: src\bench\bench_cache_waterfall.c src\bench
 	$(CC) $(CFLAGS) -fo=$^@ src\bench\bench_cache_waterfall.c
 
 src\upload\upload.obj: src\upload\upload.c src\upload\upload.h
-	$(CC) $(CFLAGS) -fo=$^@ src\upload\upload.c
+	$(CC) $(CFLAGS) $(UPLOAD_FLAGS) -fo=$^@ src\upload\upload.c
 
 clean: .SYMBOLIC
 	-del src\*.obj
@@ -304,3 +348,10 @@ clean: .SYMBOLIC
 	-del src\upload\*.obj
 	-del $(TARGET)
 	-del $(MAPFILE)
+
+# DGROUP audit (0.8.0 plan section 4 ship criterion 4 + section 6 M1.6).
+# Parses cerberus.map and reports near-data usage against the 64 KB DOS
+# ceiling, 62 KB soft target, and 2 KB hard-reserve window. Requires
+# a prior wmake to produce cerberus.map.
+dgroup-report: .SYMBOLIC
+	python tools\dgroup_check.py

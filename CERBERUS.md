@@ -29,16 +29,22 @@ CERBERUS is not a synthetic benchmark. It does not produce a single performance 
 
 ## 3. Status
 
-**v0.1 (Skeleton).** Architecture and module layout complete. Timing subsystem, CPU detection, display abstraction, and INI reporter are implemented. BIOS info implemented. Memory detection partial. All other modules are structured stubs ready for implementation.
+**v0.8.0-M1** on `main` 2026-04-21. First milestone of the 0.8.0 "trust and validation" release. The 0.8.0 release doctrine is at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md).
 
-Next milestones:
+Release arc (shipped):
 
-- **v0.2**: Complete Head I (DETECT) across all subsystems
-- **v0.3**: Complete Head II (DIAGNOSE)
-- **v0.4**: Complete Head III (BENCHMARK)
-- **v0.5**: Consistency engine and thermal stability tracking
-- **v0.6**: NetISA upload path live
-- **v1.0**: First tagged release, itch.io launch, VOGONS announcement
+- **v0.1.1-scaffold** through **v0.4.0**: Heads I-III scaffolding, then filled in and real-hardware-proven on BEK-V409 (Intel i486DX-2-66 bench box).
+- **v0.5.0**: Scrollable three-heads summary UI, Whetstone x87 asm kernel, Mandelbrot FPU visual demo.
+- **v0.6.x**: Visual Diagnostics Journey (bit parade, Lissajous, cache waterfall, latency heatmap, PIT metronome, audio scale), OPL2 FM + SB DSP direct PCM audio paths.
+- **v0.7.0-rc1 / rc2**: Community upload client (Part A), end-to-end quality-gate fixes.
+- **v0.7.1**: Cache characterization + FPU behavioral fingerprint.
+- **v0.8.0-M1** (current): trust-and-validation milestone. Whetstone emit suppressed in stock builds. Runtime upload compiled out of stock builds. Nickname buffer leak fixed. `cpu.class` normalized to family token. `bench_cpu` DB anchor widened. End-of-run `_exit` bypass for Watcom libc teardown hangs. DGROUP audit tooling. Real-hardware validation on 486 and 386; claim hierarchy currently "Validated on 386 and 486. 286 and 8088 paths untested."
+
+Remaining milestones for 0.8.0 tag (per plan):
+
+- **M2**: precision expansion within DGROUP budget (FPU research gaps I/J/K/L/M, cache L2 detection + pointer-chase latency, memory checkerboard, CSV output, possible-causes narration).
+- **M3**: CUA-lite UI polish (F1 help, F3 exit, bottom F-key legend, /MONO flag, adapter-tier progressive enhancement). No menu bar, no full CUA shell; interaction grammar only.
+- **M4**: documentation parity, release notes, tag `v0.8.0`.
 
 ## Why real hardware
 

@@ -168,7 +168,7 @@ Benchmark numbers.
 cpu.int_iters_per_sec=1964636
 cpu.dhrystones=32131
 fpu.ops_per_sec=1119820
-fpu.k_whetstones=2100
+fpu.whetstone_status=disabled_for_release
 memory.write_kbps=15384
 memory.read_kbps=16260
 memory.copy_kbps=7220
@@ -176,6 +176,16 @@ cpu_xt_factor=93.4000
 mem_xt_factor=51.5700
 fpu_xt_factor=16.6600
 ```
+
+### `fpu.whetstone_status` enum
+
+- `disabled_for_release` — stock 0.8.0 build; Whetstone kernel is compiled but emit is suppressed. No `fpu.k_whetstones` row. See `docs/methodology.md` "Why Whetstone is not in 0.8.0".
+- `ok` — research build (`wmake WHETSTONE=1`) where the kernel ran cleanly. `fpu.k_whetstones` row present.
+- `skipped_no_fpu` — FPU absent; kernel never ran. Only emitted by research builds.
+- `inconclusive_elapsed_zero` / `inconclusive_sub_ms` / `inconclusive_sub_kwhet` — research build where the kernel ran but the measurement was below the usable threshold. `VERDICT_WARN` attached.
+- `inconclusive_runtime_exceeded` — research build where the kernel exceeded the 30 sec wall-clock cap and was aborted.
+
+Consistency Rule 10 (`whetstone_fpu`) skips when status is `disabled_for_release` or any `inconclusive_*`.
 
 ## [consistency]
 
@@ -212,17 +222,25 @@ v0.7.0. User metadata + upload outcome.
 
 | Value | When | Terminal? |
 |---|---|---|
-| `uploaded` | 200 received, 2-line response parsed, `submission_id` + `url` populated | Yes |
-| `offline` | `network.transport=none` — no network detected, no POST attempted | Yes |
-| `skipped` | User declined the Y/n prompt, or `/NOUPLOAD` was passed | Yes |
-| `no_client` | Network detected but `HTGET.EXE` not on PATH (install mTCP) | Yes |
-| `failed` | HTGET invoked, non-zero exit (connection refused / DNS miss / timeout) | Yes |
-| `bad_response` | HTGET returned 0, but the body wasn't the contract-specified 2 lines | Yes |
+| `not_built` | 0.8.0 stock build — runtime upload compiled out. No transmission attempted. | Yes |
+| `uploaded` | 200 received, 2-line response parsed, `submission_id` + `url` populated (research build only) | Yes |
+| `offline` | `network.transport=none` — no network detected, no POST attempted (research build only) | Yes |
+| `skipped` | User declined the Y/n prompt, or `/NOUPLOAD` was passed (research build only) | Yes |
+| `no_client` | Network detected but `HTGET.EXE` not on PATH (research build only) | Yes |
+| `failed` | HTGET invoked, non-zero exit (research build only) | Yes |
+| `bad_response` | HTGET returned 0, but the body wasn't the contract-specified 2 lines (research build only) | Yes |
 
 The `[upload]` section is always emitted (even when all fields are
-empty / `offline`) so the server parser can treat its absence as a
+empty / `not_built`) so the server parser can treat its absence as a
 client-error signal. The server parser MUST tolerate the full enum
 above; unrecognized values should be logged but not rejected.
+
+**Build gating (v0.8.0 change):** stock binaries compile runtime
+upload out (`#ifdef CERBERUS_UPLOAD_ENABLED` gates the HTGET shell-out
+and `upload_execute` body). Stock builds emit `status=not_built` and
+never attempt transmission. Research builds (`wmake UPLOAD=1`) enable
+the full flow and emit any of the remaining status values. See
+`docs/methodology.md` for the 0.8.0 doctrine.
 
 ## Trailer: `run_signature=<hex>`
 

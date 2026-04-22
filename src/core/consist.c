@@ -584,6 +584,15 @@ static void rule_whetstone_fpu_consistency(result_table_t *t)
      * or /ONLY:BENCH leaves one key absent; absence is not a fault. */
     if (!fpu_tag || !st) return;
 
+    /* 0.8.0 build-gate: stock builds suppress Whetstone emit and write
+     * status=disabled_for_release. The measurement did not run; there
+     * is nothing to cross-check. Rule 10 is not applicable on this
+     * axis and silently skips — no PASS, no WARN, no FAIL. See
+     * bench_whetstone.c file header and 0.8.0 plan §7. Re-enabled in
+     * research builds with `wmake WHETSTONE=1`, at which point the
+     * normal ok / skipped_no_fpu / inconclusive_* paths below apply. */
+    if (strcmp(st, "disabled_for_release") == 0) return;
+
     /* Whetstone reports "inconclusive_elapsed_zero" when the measurement
      * loop finished in under one PIT tick — emulator-artifact territory,
      * not a disagreement between detection heads. The status string is

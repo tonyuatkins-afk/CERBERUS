@@ -36,6 +36,20 @@ void bench_cache(result_table_t *t, const opts_t *o);
 unsigned long bench_cache_kb_per_sec(unsigned long bytes,
                                      unsigned long elapsed_us);
 
+/* v0.7.1 cache characterization — see docs/plans/cache-char.md (future).
+ * Infers L1 size, line size, and write policy from three throughput-
+ * sweep probes. Skipped on pre-486 CPUs (loops too slow) and when
+ * cache.present=no. Confidence clamps to LOW on emulator captures. */
+void bench_cache_char(result_table_t *t);
+
+/* Pure inference helpers exposed for host-testing. */
+unsigned int bench_cc_infer_l1_kb(const unsigned long *kbps_by_size,
+                                  unsigned int n_sizes);
+unsigned int bench_cc_infer_line_bytes(const unsigned long *kbps_by_stride,
+                                       unsigned int n_strides);
+const char * bench_cc_infer_write_policy(unsigned long read_kbps,
+                                         unsigned long write_kbps);
+
 /* v0.4 video bandwidth — see docs/plans/v0.4-benchmarks-and-polish.md §2.
  *
  * Quick-mode only for v0.4 (matches bench_cache's posture — see note

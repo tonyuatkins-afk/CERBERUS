@@ -740,6 +740,20 @@ static nav_key_t read_nav_key(void)
 /* Public entry points                                                      */
 /* ----------------------------------------------------------------------- */
 
+/* Clear the full 25-row text screen to ATTR_NORMAL and park the cursor
+ * at (0,0). Called before returning to DOS so the TUI's reverse-video
+ * status bar and any other non-default attributes don't bleed into the
+ * DOS prompt (UX item #7 from the 2026-04-21 real-iron review: the
+ * grey status-bar row persisted after Q and colored subsequent DOS
+ * output). The all-rows fill is deliberate: rendering the content
+ * cleared rows 0..23 but row 24 retained ATTR_INVERSE from the status
+ * bar; a post-exit DOS prompt landing on row 24 inherited that. */
+static void reset_screen_to_dos(void)
+{
+    vram_fill(0, VRAM_ROWS - 1, ' ', ATTR_NORMAL);
+    vram_cursor(0, 0);
+}
+
 void ui_render_summary(const result_table_t *t, const opts_t *o)
 {
     int scroll_top = 0;
@@ -784,13 +798,13 @@ void ui_render_summary(const result_table_t *t, const opts_t *o)
             scroll_top = max_scroll;
             break;
         case NAV_EXIT:
-            vram_cursor(VIEWPORT_ROWS, 0);
+            reset_screen_to_dos();
             return;
         case NAV_OTHER:
             break;
         }
     }
-    vram_cursor(VIEWPORT_ROWS, 0);
+    reset_screen_to_dos();
 }
 
 /* The consistency alerts are now rendered inline as the third section of

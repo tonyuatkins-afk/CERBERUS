@@ -10,7 +10,9 @@ CC       = wcl386
 CFLAGS   = -zq -bt=nt -w3 -DCERBERUS_HOST_TEST -I..\..\src
 
 TESTS = test_timing.exe test_consist.exe test_thermal.exe test_diag_fpu.exe &
-        test_diag_cache.exe test_diag_dma.exe test_bench_cache.exe
+        test_diag_fpu_fingerprint.exe                                      &
+        test_diag_cache.exe test_diag_dma.exe test_bench_cache.exe         &
+        test_bench_cache_char.exe
 
 all: $(TESTS) .SYMBOLIC
 
@@ -26,6 +28,9 @@ test_thermal.exe: test_thermal.c ..\..\src\core\thermal.c ..\..\src\core\thermal
 test_diag_fpu.exe: test_diag_fpu.c ..\..\src\diag\diag_fpu.c ..\..\src\diag\diag.h ..\..\src\core\report.c ..\..\src\core\sha1.c
 	$(CC) $(CFLAGS) -fe=$@ test_diag_fpu.c
 
+test_diag_fpu_fingerprint.exe: test_diag_fpu_fingerprint.c ..\..\src\diag\diag_fpu_fingerprint.c ..\..\src\diag\diag.h ..\..\src\core\report.c ..\..\src\core\sha1.c
+	$(CC) $(CFLAGS) -fe=$@ test_diag_fpu_fingerprint.c
+
 test_diag_cache.exe: test_diag_cache.c ..\..\src\diag\diag_cache.c ..\..\src\diag\diag.h ..\..\src\core\cache_buffers.c ..\..\src\core\cache_buffers.h ..\..\src\core\report.c ..\..\src\core\sha1.c
 	$(CC) $(CFLAGS) -fe=$@ test_diag_cache.c
 
@@ -35,14 +40,19 @@ test_diag_dma.exe: test_diag_dma.c ..\..\src\diag\diag_dma.c ..\..\src\diag\diag
 test_bench_cache.exe: test_bench_cache.c ..\..\src\bench\bench_cache.c ..\..\src\bench\bench.h ..\..\src\core\cache_buffers.c ..\..\src\core\cache_buffers.h ..\..\src\core\report.c ..\..\src\core\sha1.c
 	$(CC) $(CFLAGS) -fe=$@ test_bench_cache.c
 
+test_bench_cache_char.exe: test_bench_cache_char.c ..\..\src\bench\bench_cache_char.c ..\..\src\bench\bench.h ..\..\src\core\report.c ..\..\src\core\sha1.c
+	$(CC) $(CFLAGS) -fe=$@ test_bench_cache_char.c
+
 run: $(TESTS) .SYMBOLIC
 	@test_timing.exe
 	@test_consist.exe
 	@test_thermal.exe
 	@test_diag_fpu.exe
+	@test_diag_fpu_fingerprint.exe
 	@test_diag_cache.exe
 	@test_diag_dma.exe
 	@test_bench_cache.exe
+	@test_bench_cache_char.exe
 
 clean: .SYMBOLIC
 	-del *.exe

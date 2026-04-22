@@ -25,19 +25,30 @@
 # yet" and rule 4b no-ops. Submit refinements via hw_db/submissions.
 #
 # Calibration notes:
-#   486 DX-2 (f4m3): observed ~8.4M iters/sec clean on a 66MHz part with
-#     DOS 6.22 + HIMEM only, and ~2.2M under CTCM + TSR load. Range
-#     picked so clean machines PASS and heavy-TSR machines WARN — a real
-#     signal that something is stealing cycles.
+#   486 DX-2 (f4m3): observed 8.4M iters/sec clean on a 66MHz part with
+#     DOS 6.22 + HIMEM only, 2.2M under CTCM + TSR load, 1.96M on the
+#     BEK-V409 real-iron gate with HIMEM + EMM386 + mouse driver. The
+#     3-way captured spread is 4.3x, well beyond PIT jitter or thermal
+#     drift.
+#
+#   v0.8.0 M1.5 widening: original range 4.7M-10.5M (picked so clean
+#     machines PASS and heavy-TSR machines WARN) turned out to be too
+#     narrow. BEK-V409 with a normal DOS stack (not counting CTCM) lands
+#     below 4.7M, producing a cosmetic WARN on every real-hardware run.
+#     Widened lower bound to 1,500,000 (~20% below the lightest observed
+#     real-iron measurement) so a normal DOS load PASSes. Below 1.5M is
+#     still WARN via rule 4b; Rule 4b's three-way narration branch
+#     (cache_working / no_cache_effect / ambiguous) explains the
+#     hypothesis the user should investigate.
 #
 match_kind,vendor,family,model,stepping_min,stepping_max,legacy_class,friendly,iters_low,iters_high,notes
 cpuid,GenuineIntel,4,0,0,15,,Intel i486DX (A-step),0,0,early i486DX with FDIV-like microcode quirks
 cpuid,GenuineIntel,4,1,0,15,,Intel i486DX (B/C-step),0,0,mainstream i486DX-25/33/50
 cpuid,GenuineIntel,4,2,0,15,,Intel i486SX,0,0,no integrated FPU
-cpuid,GenuineIntel,4,3,0,15,,Intel i486DX2,4700000,10500000,clock-doubled i486DX; range seeded from 486DX2-66 bench box
+cpuid,GenuineIntel,4,3,0,15,,Intel i486DX2,1500000,10500000,clock-doubled i486DX; range widened in v0.8.0 M1.5 to cover TSR-loaded real-iron captures (see header)
 cpuid,GenuineIntel,4,4,0,15,,Intel i486SL,0,0,SL-enhanced mobile variant
 cpuid,GenuineIntel,4,5,0,15,,Intel i486SX2,0,0,clock-doubled i486SX (rare)
-cpuid,GenuineIntel,4,7,0,15,,Intel i486DX2 Write-Back Enhanced,4700000,10500000,
+cpuid,GenuineIntel,4,7,0,15,,Intel i486DX2 Write-Back Enhanced,1500000,10500000,range widened in v0.8.0 M1.5 (see header)
 cpuid,GenuineIntel,4,8,0,15,,Intel i486DX4,0,0,clock-tripled i486DX
 cpuid,GenuineIntel,4,9,0,15,,Intel i486DX4 Write-Back Enhanced,0,0,
 cpuid,GenuineIntel,5,1,0,15,,Intel Pentium 60/66,0,0,FDIV bug on stepping 0-3
@@ -45,8 +56,8 @@ cpuid,GenuineIntel,5,2,0,15,,Intel Pentium P54C,0,0,
 cpuid,GenuineIntel,5,4,0,15,,Intel Pentium MMX,0,0,
 cpuid,GenuineIntel,6,1,0,15,,Intel Pentium Pro,0,0,
 cpuid,GenuineIntel,6,3,0,15,,Intel Pentium II,0,0,
-cpuid,AuthenticAMD,4,3,0,15,,AMD Am486DX2,4700000,10500000,
-cpuid,AuthenticAMD,4,7,0,15,,AMD Am486DX2 Write-Back,4700000,10500000,
+cpuid,AuthenticAMD,4,3,0,15,,AMD Am486DX2,1500000,10500000,range widened in v0.8.0 M1.5 (see header)
+cpuid,AuthenticAMD,4,7,0,15,,AMD Am486DX2 Write-Back,1500000,10500000,range widened in v0.8.0 M1.5 (see header)
 cpuid,AuthenticAMD,4,8,0,15,,AMD Am486DX4,0,0,
 cpuid,AuthenticAMD,4,9,0,15,,AMD Am486DX4 Write-Back,0,0,
 cpuid,AuthenticAMD,4,14,0,15,,AMD Am5x86-P75,0,0,486 platform 133MHz

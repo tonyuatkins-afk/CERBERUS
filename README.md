@@ -1,6 +1,6 @@
 # CERBERUS
 
-DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; v0.7.0-rc2 is 164,050 bytes. Targets an 8088 with 256KB and an MDA card as the floor and scales up through a 486 with VGA.
+DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; v0.8.0-M1 stock build is 163,838 bytes. Targets an 8088 with 256KB and an MDA card as the design floor (XT-class validation pending per the current claim hierarchy) and scales up through a 486 with VGA, proven on BEK-V409 real iron.
 
 Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelybooting-server](https://github.com/tonyuatkins-afk/barelybooting-server) is the companion web app that ingests uploaded CERBERUS.INI runs at `barelybooting.com/cerberus/`.
 
@@ -8,7 +8,24 @@ Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelyboot
 
 ## Status
 
-**`v0.7.0-rc2` tagged 2026-04-20.** Release-candidate for the community-upload feature, quality-gated. Twelve tags across the arc: `v0.1.1-scaffold` → `v0.2-rc1` → `v0.3-rc1` → `v0.4-rc1` → **`v0.4.0`** → **`v0.5.0`** → **`v0.6.0`** → `v0.6.1` → `v0.6.2` → `v0.7.0-rc1` → **`v0.7.0-rc2`**. The companion server hit [`v0.1.0`](https://github.com/tonyuatkins-afk/barelybooting-server/releases/tag/v0.1.0) on 2026-04-21, production-ready (Docker + Cloudflare Tunnel, red-teamed). The full `v0.7.0` CERBERUS tag is held until the server goes live and an end-to-end upload round-trip validates on real hardware (see [`docs/ini-upload-contract.md`](docs/ini-upload-contract.md)).
+**`v0.8.0-M1` on `main` 2026-04-21.** First milestone of the 0.8.0 "trust and validation" release. 0.8.0 tag is held for M2 (precision expansion), M3 (CUA-lite shell polish), and M4 (docs parity). The 0.8.0 release doctrine is at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md).
+
+Real-hardware validation status: **Validated on 386 and 486. 286 and 8088 paths untested.** Per plan section 10 claim hierarchy, 286 and 8088/XT captures will upgrade the claim as hardware becomes accessible. Current captures archived in `tests/captures/`:
+- BEK-V409 (Intel i486DX-2-66 + AMI 11/11/92 + S3 Trio64 + Vibra 16S + 63 MB XMS)
+- 386 DX-40 + IIT 3C87 + Genoa ET4000 + Aztech ISA + AMI 02/02/91 + ~16 MB
+
+### What M1 changed (full detail in [CHANGELOG.md](CHANGELOG.md))
+
+Trust-first cuts: Whetstone emit suppressed in stock builds (`wmake WHETSTONE=1` to re-enable for research); runtime upload compiled out of stock binaries (`wmake UPLOAD=1` to re-enable). Fixes: nickname buffer leak (issue #9), `cpu.class` normalization to family token, `bench_cpu` DB anchor widened for TSR-loaded real-iron captures, end-of-run `_exit` bypass for Watcom libc teardown hangs observed on BEK-V409. New: DGROUP audit tool, real-hardware validation corpus, quality-gate documentation framework.
+
+Historical arc (unchanged): `v0.1.1-scaffold` → `v0.2-rc1` → `v0.3-rc1` → `v0.4-rc1` → **`v0.4.0`** → **`v0.5.0`** → **`v0.6.0`** → `v0.6.1` → `v0.6.2` → `v0.7.0-rc1` → **`v0.7.0-rc2`** → **`v0.7.1`** → **`v0.8.0-M1`** (current).
+
+### Known issues at M1 close-out (carried to M2)
+
+- BSS overwriter on BEK-V409 corrupts the first 32 bytes of DGROUP; Watcom's `*** NULL assignment detected` canary fires on every exit. On probe paths that spill past the 32-byte guard, adjacent CONST string data is corrupted (e.g. `[bios] dree=` instead of `date=`). Empirically localized to BEK-V409-specific hardware paths (S3 Trio64 probe, Vibra 16S DSP + OPL fallback, UMC491 PIT wrap-guard). Not reproducible on 386 real iron or DOSBox-X. M2 investigation targeted.
+- IIT 3C87 mis-tagged as Intel 80387 on the 386 capture. FPU DB coverage gap; homage research (`docs/research/homage/checkit-fpu-detection.md`) anticipated this as a v0.5+ deferred capability. M2 candidate.
+- Genoa ET4000 detected as generic `adapter=vga`. Video DB has Tseng ET4000 entries, but the Genoa OEM BIOS doesn't surface the expected signature. M2 probe-path investigation.
+- Intermittent OPL detection on Vibra 16 PnP (issue #2, pre-existing).
 
 **What's in each milestone:**
 - **v0.4.0** (2026-04-19) — All six subsystems (detect, diagnose, benchmark, consistency engine, thermal tracker, UI) real-hardware-validated on BEK-V409.
@@ -96,7 +113,18 @@ Requires [Open Watcom C/C++ 2.0](http://open-watcom.github.io/) and [NASM 2.x](h
 wmake
 ```
 
-Produces `CERBERUS.EXE`, DOS real-mode, medium memory model. v0.7.0-rc1 builds to 163,922 bytes; DGROUP (near data) 59,008 bytes, well under the 65,536-byte hardware ceiling.
+Produces `CERBERUS.EXE`, DOS real-mode, medium memory model. v0.8.0-M1 stock build is 163,838 bytes; DGROUP (near data) 59,888 bytes (58.5 KB), 5.6 KB under the 64 KB hardware ceiling. Run `wmake dgroup-report` to audit near-data usage.
+
+### Build flavours
+
+```
+wmake                             # stock 0.8.0 shipping build
+wmake WHETSTONE=1                 # +Whetstone emit (research/issue-#4)
+wmake UPLOAD=1                    # +HTTP upload via HTGET (barelybooting.com)
+wmake WHETSTONE=1 UPLOAD=1        # research build, both flags enabled
+```
+
+Stock builds: no Whetstone emit (the kernel stays compiled, the dispatcher suppresses), no HTTP transmission (entire HTGET / upload_execute code compiled out). Research builds re-enable both for development and calibration work. See `docs/CERBERUS_0.8.0_PLAN.md` sections 7 + 8 for the trust-first rationale.
 
 Host-side unit tests (run on Windows, Linux, or macOS dev box; exercise the pure-math and database-lookup paths with 201 assertions across timing, consist, thermal, diag_fpu, diag_cache, diag_dma, bench_cache):
 

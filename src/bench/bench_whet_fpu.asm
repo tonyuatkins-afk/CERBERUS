@@ -81,12 +81,44 @@ whet_fpu_const_3:   dq 3.0
 ; Integer scratch for FILD (x87 integer loads need a memory source).
 whet_fpu_i16_scratch: dw 0
 
+; v0.7.2 debug: per-module entry markers were added during the Apr 21
+; BEK-V409 real-iron investigation to narrow the whetstone hang to a
+; specific module. They confirmed two things:
+;   1. Whetstone is not actually hanging — each unit does complete
+;   2. BIOS INT 10h AH=0Eh on real 486/AMI/S3 Trio64 setups takes
+;      many ms per char (VGA text scroll is slow), so the per-unit
+;      overhead of 9 tag prints adds ~100 ms to a unit that should
+;      take ~1 ms. 10 warmup units spent 2+ minutes just on the tags.
+; Tags removed; only the C-side whet.warmup / whet.main crumbs remain,
+; which fire once per warmup/main, not per-module.
+
 ; ---------------------------------------------------------------------
 ; Code segment
 ; ---------------------------------------------------------------------
 segment bench_whet_fpu_TEXT public class=CODE
 
 global whet_fpu_run_units_
+
+; ---------------------------------------------------------------------
+; Module-entry tag macros. Each module inlines a 3-instruction sequence
+; that prints its one-char tag via DOS INT 21h AH=09h. No helper
+; function, no indirection — just direct INT 21h with the string offset
+; hard-coded. Early v0.7.2 investigation attempted a helper with an
+; indirect offset loaded from whet_current_tag; the first real-iron run
+; printed random garbage + BEL characters (audible as screen beeps),
+; which almost certainly means the [whet_current_tag] memory reference
+; was resolving against the wrong DGROUP offset under the NASM+Watcom
+; linker combination. Inlining the string offset as an immediate
+; eliminates that class of bug entirely. 12 bytes per module × 9
+; modules = 108 bytes of extra code, negligible. Each site is:
+;    push ax
+;    push dx
+;    mov ax, 0900h
+;    mov dx, whet_tag_mN
+;    int 21h
+;    pop dx
+;    pop ax
+; ---------------------------------------------------------------------
 
 ; ---------------------------------------------------------------------
 ; whet_fpu_run_units_
@@ -99,6 +131,18 @@ whet_fpu_run_units_:
     mov  bp, sp
     push si
     push di
+
+    ; v0.7.1: explicit FINIT at entry. The first real-iron run of this
+    ; kernel on BEK-V409 (2026-04-21) hung here, probably because the
+    ; FPU arrived in a non-default state from upstream code (Phase 2
+    ; diag_fpu_fingerprint, Phase 3 bench_fpu, Mandelbrot demo) and an
+    ; unmasked exception from the previous consumer eventually trapped
+    ; us here. FINIT writes the x87 control word back to 0x037F (all
+    ; six exceptions MASKED, round-to-nearest, 64-bit precision), clears
+    ; the status word, and empties the register stack. Every module
+    ; below assumes that clean state, so normalizing once at entry is
+    ; defensive but cheap. ~30 cycles on 486.
+    finit
 
     ; Outer counter in a local on the stack: [bp-4..bp-2].
     ; Modules freely clobber CX/SI/DI/AX/BX/DX.

@@ -1,27 +1,41 @@
 /*
  * Whetstone — synthetic floating-point benchmark, Curnow/Wichmann 1976.
  *
- * v0.5.0 — dispatches to x87 assembly kernel (bench_whet_fpu.asm) on
- * FPU-equipped systems. Replaces the prior Watcom-compiled C kernel,
- * which suffered a ~15x slowdown vs the published reference envelope
- * because the `volatile` DCE-suppression pattern forced every inner
- * arithmetic through memory instead of x87 registers.
+ * v0.8.0 — EMIT SUPPRESSED IN STOCK BUILDS.
  *
- * Standard output is K-Whetstones/second, where a K-Whetstone is 1,000
- * Whetstone operations. Published reference envelope for a 486 DX-2 at
- * 66 MHz: 1,500-3,000 K-Whet. Systems without an FPU skip the run
- * entirely and emit whetstone_status=skipped_no_fpu.
+ * Per the 0.8.0 plan (§7 Whetstone decision), stock builds compile the
+ * kernel (keeping the asm toolchain warm, keeping host tests green,
+ * preserving the issue #4 archaeological trail) but the dispatcher
+ * returns immediately with whetstone_status=disabled_for_release and
+ * emits no k_whetstones row. The build flag CERBERUS_WHETSTONE_ENABLED
+ * (set via `wmake WHETSTONE=1`) re-enables the full dispatch for
+ * research work.
+ *
+ * Why: v0.4 through v0.7.2 never produced a Whetstone number in the
+ * published 1,500-3,000 K-Whet range for a 486 DX-2-66. The pre-asm
+ * Watcom kernel ran at ~109 K-Whet (30x low); the v0.5.0 asm rework
+ * was not validated to close the gap; on real iron one unit costs
+ * 50-100 ms where research estimated 1-3 ms (a 30-50x per-unit-cost
+ * anomaly nobody root-caused). A trust-first release cannot ship a
+ * CONF_HIGH value 10x or more out of range. The 0.9.0 direction is
+ * per-instruction FADD/FMUL/FDIV/FSQRT/FSIN/FCOS microbenchmarks
+ * replacing the synthetic entirely; bench_fpu.c remains the aggregate
+ * FPU throughput metric in 0.8.0. See docs/methodology.md "Why
+ * Whetstone is not in 0.8.0".
+ *
+ * v0.5.0 historical note: dispatches to x87 assembly kernel
+ * (bench_whet_fpu.asm) on FPU-equipped systems. Replaces the prior
+ * Watcom-compiled C kernel which suffered a ~15x slowdown vs the
+ * published reference envelope because the `volatile` DCE-suppression
+ * pattern forced every inner arithmetic through memory instead of
+ * x87 registers.
  *
  * Rule 10 (whetstone_fpu_consistency) reads fpu.detected and the
  * whetstone_status / k_whetstones rows to flag any disagreement between
  * the FPU-detection head and the Whetstone benchmark's own FPU-presence
- * inference.
- *
- * Issue #4 note: the asm kernel's numeric output still needs real-
- * hardware validation on BEK-V409. Until that lands, treat reported
- * K-Whet as same-machine regression signal, not as a cross-tool
- * comparison anchor. See docs/plans/checkit-comparison.md for the
- * calibration plan.
+ * inference. Updated in 0.8.0 to treat disabled_for_release as rule
+ * skip (not FAIL): the build gate disabled the measurement, so there
+ * is no measurement to cross-check.
  */
 
 #include <stdio.h>
@@ -30,6 +44,7 @@
 #include "../core/timing.h"
 #include "../core/report.h"
 #include "../core/journey.h"
+#include "../core/crumb.h"
 
 /* ------------------------------------------------------------------- */
 /* Asm-kernel interface                                                 */
@@ -54,7 +69,13 @@ extern void whet_fpu_run_units(void);
 
 /* ------------------------------------------------------------------- */
 /* FPU-absence check                                                    */
+/*                                                                      */
+/* Wrapped in CERBERUS_WHETSTONE_ENABLED since the stock-build path     */
+/* early-returns before any FPU check. Watcom W202 would warn on the   */
+/* unreferenced static otherwise.                                       */
 /* ------------------------------------------------------------------- */
+
+#ifdef CERBERUS_WHETSTONE_ENABLED
 
 static const result_t *find_key_local(const result_table_t *t, const char *key)
 {
@@ -78,17 +99,50 @@ static int fpu_looks_present(const result_table_t *t)
     return 1;
 }
 
+#endif /* CERBERUS_WHETSTONE_ENABLED */
+
 /* ------------------------------------------------------------------- */
 /* CERBERUS entry point                                                 */
 /* ------------------------------------------------------------------- */
 
 #define W_WARMUP_UNITS   10UL
 #define W_MIN_UNITS      10UL
-#define W_MAX_UNITS      200000UL
-#define W_TARGET_MAIN_US 5000000UL    /* 5 seconds */
+/*
+ * v0.7.2: capped at 500 after two BEK-V409 real-iron attempts showed
+ * the per-unit cost on 486 iron is much higher than emulator baselines
+ * suggested. First attempt (cap=200000) sat for 2+ minutes on the
+ * warmup-calibrated main run. Second attempt (cap=2000, with BIOS
+ * teletype tag prints) scrolled for 2+ minutes and never completed
+ * the 10-unit warmup. Conclusion: one whetstone unit on a DX2-66
+ * with AMI BIOS / S3 Trio64 is closer to 50-100 ms than the 1-3 ms
+ * the research doc estimated.
+ *
+ * 500 at ~50 ms/unit = ~25 sec main run. Resolution is one BIOS tick
+ * in 25 sec = 0.2% quantization, fine for regression signal.
+ *
+ * Also see W_MAIN_TIMEOUT_US below — hard wall-clock cap that aborts
+ * the main run gracefully if it exceeds a sensible budget. Belt +
+ * suspenders because calibration miscalculation can still push below
+ * this cap but beyond sane wall time on weird hardware.
+ */
+#define W_MAX_UNITS         500UL
+#define W_TARGET_MAIN_US    5000000UL     /* 5 seconds */
+#define W_MAIN_TIMEOUT_US   30000000UL    /* 30 seconds hard cap */
 
 void bench_whetstone(result_table_t *t, const opts_t *o)
 {
+#ifndef CERBERUS_WHETSTONE_ENABLED
+    /* 0.8.0 build-gate: stock builds suppress Whetstone emit. Kernel
+     * is compiled but dispatcher returns immediately. No k_whetstones
+     * row, no timing, no visual. Rule 10 treats this status as "rule
+     * not applicable" and skips. Re-enable with `wmake WHETSTONE=1`
+     * for research work. See file header comment and 0.8.0 plan §7. */
+    (void)o;
+    report_add_str(t, "bench.fpu.whetstone_status",
+                   "disabled_for_release",
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    return;
+#else
     us_t warmup_us, main_us;
     unsigned long units;
     unsigned long k_whet_per_sec;
@@ -115,11 +169,13 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
          * visuals only. Mandelbrot will no-op. */
     }
 
-    /* Warmup */
+    /* Warmup. Crumb-wrapped so a hang shows up as "whet.warmup" in LAS. */
+    crumb_enter("whet.warmup");
     whet_fpu_units = W_WARMUP_UNITS;
     timing_start_long();
     whet_fpu_run_units();
     warmup_us = timing_stop_long();
+    crumb_exit();
 
     if (warmup_us == 0) {
         units = 500UL;
@@ -135,10 +191,17 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
     }
 
     if (!warmup_is_main) {
+        /* Main-run crumb. With W_MAX_UNITS capped at 2000, this run
+         * can't exceed ~4 sec wall time on DX2-66. If LAS still shows
+         * "whet.main" after a hang, the issue is in the asm kernel
+         * itself and we'll need module-boundary instrumentation in
+         * bench_whet_fpu.asm. */
+        crumb_enter("whet.main");
         whet_fpu_units = units;
         timing_start_long();
         whet_fpu_run_units();
         main_us = timing_stop_long();
+        crumb_exit();
     }
 
     /* DCE-barrier checksum over the asm kernel's final state. */
@@ -208,4 +271,5 @@ void bench_whetstone(result_table_t *t, const opts_t *o)
      * VGA-capable adapter and /NOUI inside the demo; FPU presence
      * is implied by reaching this point (the early-return above). */
     bench_mandelbrot_demo(o);
+#endif /* CERBERUS_WHETSTONE_ENABLED */
 }

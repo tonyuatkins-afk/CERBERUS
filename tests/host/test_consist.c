@@ -364,6 +364,31 @@ int main(void)
     CHECK(k(&t, "consistency.whetstone_fpu") == NULL,
           "Scenario HH: FPU=integrated-486 + Whetstone=inconclusive_elapsed_zero → rule 10 no-op");
 
+    /* Scenario HH2: 0.8.0 build-gate. Stock builds suppress Whetstone
+     * emit and write status=disabled_for_release. The measurement did
+     * not run; Rule 10 silently skips (no consistency row emitted).
+     * Re-enabled in research builds with `wmake WHETSTONE=1`, at which
+     * point scenarios CC / DD / EE / FF apply normally. See
+     * bench_whetstone.c file header and 0.8.0 plan §7. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "fpu.detected", "integrated-486", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bench.fpu.whetstone_status", "disabled_for_release",
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.whetstone_fpu") == NULL,
+          "Scenario HH2: FPU=integrated-486 + Whetstone=disabled_for_release → rule 10 no-op");
+
+    /* Scenario HH3: disabled_for_release on a no-FPU machine. Same
+     * semantics — build gate means no measurement, rule not applicable
+     * regardless of fpu.detected value. */
+    memset(&t, 0, sizeof(t));
+    report_add_str(&t, "fpu.detected", "none", CONF_HIGH, VERDICT_UNKNOWN);
+    report_add_str(&t, "bench.fpu.whetstone_status", "disabled_for_release",
+                   CONF_HIGH, VERDICT_UNKNOWN);
+    consist_check(&t);
+    CHECK(k(&t, "consistency.whetstone_fpu") == NULL,
+          "Scenario HH3: FPU=none + Whetstone=disabled_for_release → rule 10 no-op");
+
     /* Scenario II: DB expects CT1745 but probe returned "unknown" (Interrupt
      * Setup byte read neither CT1745-shaped nor clearly-absent — the weird-
      * mixer bucket that audio.c's probe_mixer_chip documents as "needs

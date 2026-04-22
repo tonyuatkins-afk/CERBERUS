@@ -81,7 +81,7 @@ void timing_metronome_visual(const opts_t *o)
     }
 
     tui_fill(0, MT_ROWS - 1, ' ', ATTR_NORMAL);
-    tui_puts(6, (MT_COLS - 30) / 2, "PIT Metronome — 18.2 Hz beat", title_attr);
+    tui_puts(6, (MT_COLS - 27) / 2, "PIT Metronome: 18.2 Hz beat", title_attr);
 
     /* Track: draw horizontal line markers at LEFT_EDGE and RIGHT_EDGE */
     tui_putc(ROW_BOUNCE, LEFT_EDGE - 2,  '|', bg_attr);

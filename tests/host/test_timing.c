@@ -381,6 +381,196 @@ static void test_emit_self_check(void)
     CHECK(r == NULL, "partial bios-only: bios_us row NOT emitted");
 }
 
+/* ======================================================================= */
+/* v0.7.1 stats + confidence + method-name tests (pure math)               */
+/* ======================================================================= */
+
+static void test_confidence_from_range_pct(void)
+{
+    printf("timing_confidence_from_range_pct (jitter -> CONF band):\n");
+    /* 0..5% -> HIGH */
+    CHECK(timing_confidence_from_range_pct(0)   == CONF_HIGH,   "0%% -> HIGH");
+    CHECK(timing_confidence_from_range_pct(3)   == CONF_HIGH,   "3%% -> HIGH");
+    CHECK(timing_confidence_from_range_pct(5)   == CONF_HIGH,   "5%% -> HIGH (inclusive boundary)");
+    /* 6..20% -> MEDIUM */
+    CHECK(timing_confidence_from_range_pct(6)   == CONF_MEDIUM, "6%% -> MEDIUM");
+    CHECK(timing_confidence_from_range_pct(15)  == CONF_MEDIUM, "15%% -> MEDIUM");
+    CHECK(timing_confidence_from_range_pct(20)  == CONF_MEDIUM, "20%% -> MEDIUM (inclusive boundary)");
+    /* 21%+ -> LOW */
+    CHECK(timing_confidence_from_range_pct(21)  == CONF_LOW,    "21%% -> LOW");
+    CHECK(timing_confidence_from_range_pct(100) == CONF_LOW,    "100%% -> LOW");
+    CHECK(timing_confidence_from_range_pct(999) == CONF_LOW,    "999%% -> LOW (clamped range)");
+}
+
+static void test_method_name(void)
+{
+    printf("timing_method_name (enum -> INI token):\n");
+    CHECK(strcmp(timing_method_name(TM_BIOS),  "bios")  == 0, "TM_BIOS -> \"bios\"");
+    CHECK(strcmp(timing_method_name(TM_PIT),   "pit")   == 0, "TM_PIT -> \"pit\"");
+    CHECK(strcmp(timing_method_name(TM_RDTSC), "rdtsc") == 0, "TM_RDTSC -> \"rdtsc\"");
+    /* Defensive: out-of-range enum values get a stable token so the INI
+     * never contains garbage. A future TM_ addition should extend the
+     * switch, not fall through. */
+    CHECK(strcmp(timing_method_name((timing_method_t)99), "unknown") == 0,
+          "out-of-range -> \"unknown\"");
+}
+
+static void test_stats_empty_and_single(void)
+{
+    timing_stats_t s;
+
+    printf("timing_stats (degenerate: 0 and 1 samples):\n");
+
+    /* Zero samples -> everything zero, CONF_LOW */
+    timing_stats_init(&s);
+    timing_stats_finalize(&s);
+    EXPECT_EQ_UL(s.n,         0UL, "empty: n");
+    EXPECT_EQ_UL(s.mean_us,   0UL, "empty: mean");
+    EXPECT_EQ_UL(s.min_us,    0UL, "empty: min (reset to 0)");
+    EXPECT_EQ_UL(s.max_us,    0UL, "empty: max");
+    EXPECT_EQ_UL(s.range_pct, 0UL, "empty: range_pct");
+    CHECK(s.confidence == CONF_LOW, "empty: CONF_LOW");
+
+    /* Single sample -> min = max = mean, zero spread, CONF_HIGH */
+    timing_stats_init(&s);
+    timing_stats_add(&s, 1000UL);
+    timing_stats_finalize(&s);
+    EXPECT_EQ_UL(s.n,         1UL,    "single: n=1");
+    EXPECT_EQ_UL(s.mean_us,   1000UL, "single: mean=1000");
+    EXPECT_EQ_UL(s.min_us,    1000UL, "single: min=1000");
+    EXPECT_EQ_UL(s.max_us,    1000UL, "single: max=1000");
+    EXPECT_EQ_UL(s.range_pct, 0UL,    "single: range_pct=0");
+    CHECK(s.confidence == CONF_HIGH,  "single: CONF_HIGH");
+}
+
+static void test_stats_uniform_and_jitter(void)
+{
+    timing_stats_t s;
+
+    printf("timing_stats (uniform and jitter samples):\n");
+
+    /* Uniform 5 x 1000 -> range_pct=0, HIGH */
+    timing_stats_init(&s);
+    timing_stats_add(&s, 1000UL);
+    timing_stats_add(&s, 1000UL);
+    timing_stats_add(&s, 1000UL);
+    timing_stats_add(&s, 1000UL);
+    timing_stats_add(&s, 1000UL);
+    timing_stats_finalize(&s);
+    EXPECT_EQ_UL(s.n,         5UL,    "uniform x5: n");
+    EXPECT_EQ_UL(s.mean_us,   1000UL, "uniform x5: mean");
+    EXPECT_EQ_UL(s.range_pct, 0UL,    "uniform x5: range_pct=0");
+    CHECK(s.confidence == CONF_HIGH,  "uniform x5: HIGH");
+
+    /* Small jitter 100-105 -> mean=102, range=5, pct = 5*100/102 = 4 -> HIGH */
+    timing_stats_init(&s);
+    timing_stats_add(&s, 100UL);
+    timing_stats_add(&s, 102UL);
+    timing_stats_add(&s, 103UL);
+    timing_stats_add(&s, 104UL);
+    timing_stats_add(&s, 105UL);
+    timing_stats_finalize(&s);
+    EXPECT_EQ_UL(s.n,         5UL,   "small-jitter: n");
+    EXPECT_EQ_UL(s.mean_us,   102UL, "small-jitter: mean=102");
+    EXPECT_EQ_UL(s.min_us,    100UL, "small-jitter: min");
+    EXPECT_EQ_UL(s.max_us,    105UL, "small-jitter: max");
+    EXPECT_EQ_UL(s.range_pct, 4UL,   "small-jitter: range_pct=4");
+    CHECK(s.confidence == CONF_HIGH, "small-jitter: HIGH");
+
+    /* 10% spread (1000, 1100) -> mean=1050, range=100, pct=9 -> MEDIUM */
+    timing_stats_init(&s);
+    timing_stats_add(&s, 1000UL);
+    timing_stats_add(&s, 1100UL);
+    timing_stats_finalize(&s);
+    EXPECT_EQ_UL(s.mean_us,   1050UL, "10pct-spread: mean=1050");
+    EXPECT_EQ_UL(s.range_pct, 9UL,    "10pct-spread: range_pct=9");
+    CHECK(s.confidence == CONF_MEDIUM, "10pct-spread: MEDIUM");
+
+    /* 30% spread (1000, 1300) -> mean=1150, range=300, pct=26 -> LOW */
+    timing_stats_init(&s);
+    timing_stats_add(&s, 1000UL);
+    timing_stats_add(&s, 1300UL);
+    timing_stats_finalize(&s);
+    EXPECT_EQ_UL(s.mean_us,   1150UL, "30pct-spread: mean=1150");
+    EXPECT_EQ_UL(s.range_pct, 26UL,   "30pct-spread: range_pct=26");
+    CHECK(s.confidence == CONF_LOW,   "30pct-spread: LOW");
+}
+
+static void test_stats_all_zero(void)
+{
+    timing_stats_t s;
+
+    printf("timing_stats (all-zero samples: divide-by-zero defense):\n");
+    timing_stats_init(&s);
+    timing_stats_add(&s, 0UL);
+    timing_stats_add(&s, 0UL);
+    timing_stats_add(&s, 0UL);
+    timing_stats_finalize(&s);
+    EXPECT_EQ_UL(s.n,         3UL, "all-zero: n=3");
+    EXPECT_EQ_UL(s.mean_us,   0UL, "all-zero: mean=0");
+    EXPECT_EQ_UL(s.range_pct, 0UL, "all-zero: range_pct=0 (no spread)");
+    CHECK(s.confidence == CONF_LOW,
+          "all-zero: CONF_LOW (zero-latency result is untrustworthy)");
+}
+
+static void test_stats_overflow_guard(void)
+{
+    timing_stats_t s;
+    int i;
+
+    printf("timing_stats (255-sample clamp):\n");
+    timing_stats_init(&s);
+    for (i = 0; i < 300; i++) {
+        timing_stats_add(&s, 1000UL);
+    }
+    timing_stats_finalize(&s);
+    EXPECT_EQ_UL(s.n, 255UL, "300 adds clamps at n=255");
+    EXPECT_EQ_UL(s.mean_us, 1000UL, "clamped mean still 1000");
+    CHECK(s.confidence == CONF_HIGH, "clamped CONF_HIGH (uniform)");
+}
+
+static void test_emit_self_check_pit_jitter(void)
+{
+    result_table_t t;
+    const result_t *r;
+
+    printf("timing_emit_self_check (v0.7.1 pit_jitter_pct):\n");
+
+    /* Zero-jitter: pit = bios exactly */
+    memset(&t, 0, sizeof(t));
+    timing_emit_self_check(&t, 0, (us_t)219700UL, (us_t)219700UL);
+    r = lookup_key(&t, "timing.pit_jitter_pct");
+    CHECK(r != NULL && r->type == V_U32 && r->v.u == 0UL,
+          "zero jitter: pit_jitter_pct=0");
+
+    /* Small positive jitter: pit > bios by 300us / 219700 = 0% (integer) */
+    memset(&t, 0, sizeof(t));
+    timing_emit_self_check(&t, 0, (us_t)220000UL, (us_t)219700UL);
+    r = lookup_key(&t, "timing.pit_jitter_pct");
+    CHECK(r != NULL && r->type == V_U32 && r->v.u == 0UL,
+          "0.14%% rounds to 0");
+
+    /* Larger jitter: pit = 230000, bios = 219700, delta = 10300, pct = 4 */
+    memset(&t, 0, sizeof(t));
+    timing_emit_self_check(&t, 0, (us_t)230000UL, (us_t)219700UL);
+    r = lookup_key(&t, "timing.pit_jitter_pct");
+    CHECK(r != NULL && r->type == V_U32 && r->v.u == 4UL,
+          "10300us / 219700 = 4%%");
+
+    /* Symmetric: pit < bios, same delta -> same jitter_pct */
+    memset(&t, 0, sizeof(t));
+    timing_emit_self_check(&t, 0, (us_t)209400UL, (us_t)219700UL);
+    r = lookup_key(&t, "timing.pit_jitter_pct");
+    CHECK(r != NULL && r->type == V_U32 && r->v.u == 4UL,
+          "negative direction: abs(delta) symmetric");
+
+    /* Failure path must NOT emit pit_jitter_pct */
+    memset(&t, 0, sizeof(t));
+    timing_emit_self_check(&t, 1, (us_t)0UL, (us_t)0UL);
+    r = lookup_key(&t, "timing.pit_jitter_pct");
+    CHECK(r == NULL, "failure path: pit_jitter_pct NOT emitted");
+}
+
 int main(void)
 {
     printf("=== CERBERUS host unit test: timing ===\n");
@@ -390,6 +580,14 @@ int main(void)
     test_bios_ticks_to_us_delta();
     test_compute_dual();
     test_emit_self_check();
+    /* v0.7.1 additions */
+    test_confidence_from_range_pct();
+    test_method_name();
+    test_stats_empty_and_single();
+    test_stats_uniform_and_jitter();
+    test_stats_all_zero();
+    test_stats_overflow_guard();
+    test_emit_self_check_pit_jitter();
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }

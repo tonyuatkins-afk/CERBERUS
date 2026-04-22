@@ -353,9 +353,9 @@ void audio_scale_visual(const opts_t *o)
     tui_fill(0, AS_ROWS - 1, ' ', ATTR_NORMAL);
     {
         const char *heading;
-        if (using_sb)      heading = "Audio Scale — SB DSP Direct PCM";
-        else if (using_opl) heading = "Audio Scale — OPL2 FM Synth";
-        else                heading = "Audio Scale — PC Speaker";
+        if (using_sb)      heading = "Audio Scale: SB DSP Direct PCM";
+        else if (using_opl) heading = "Audio Scale: OPL2 FM Synth";
+        else                heading = "Audio Scale: PC Speaker";
         tui_puts(3, (AS_COLS - (int)strlen(heading)) / 2, heading, title_attr);
     }
 

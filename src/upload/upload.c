@@ -1,5 +1,37 @@
 /*
- * CERBERUS INI upload client — v0.7.0 Part A.
+ * CERBERUS INI upload client.
+ *
+ * v0.8.0 — RUNTIME UPLOAD COMPILED OUT OF STOCK BUILDS.
+ *
+ * Per the 0.8.0 plan (§8 Upload decision), stock binaries contain no
+ * HTTP client code path, no HTGET shell-out, no transmission logic.
+ * The entire upload_execute() inner implementation plus all HTGET
+ * helpers are gated on CERBERUS_UPLOAD_ENABLED (set via
+ * `wmake UPLOAD=1`). Stock upload_execute is a stub that emits
+ * upload.status=not_built and returns UPLOAD_DISABLED.
+ *
+ * Why: the upload path had an unfixed failure mode (stack overflow
+ * when the endpoint is unreachable), and barelybooting.com is not
+ * yet deployed, so the default condition is "endpoint unreachable."
+ * Shipping a default-flag run one argv away from a crash on a
+ * vintage 486 is the worst-possible first impression for a trust-
+ * first release. Compiling the code out eliminates the crash as a
+ * code-presence fact, not a configuration fact.
+ *
+ * What stays in stock builds:
+ *   - upload_populate_metadata(): copies /NICK and /NOTE into the INI
+ *     locally. The local annotation has value independent of upload.
+ *   - src/detect/network.c: transport detection. Useful on its own.
+ *   - [upload] section in INI, populated with status=not_built.
+ *   - docs/ini-upload-contract.md: forward-looking design.
+ *
+ * What is compiled out in stock builds:
+ *   - HTGET shell-out, UPLOAD.TMP handling, HTTP response parsing.
+ *   - upload_execute()'s full body including the network-reachable
+ *     failure modes (including the unfixed stack overflow).
+ *   - /UPLOAD auto-yes wiring (flag is rejected at parse-time in main.c).
+ *
+ * Research builds (`wmake UPLOAD=1`, defines CERBERUS_UPLOAD_ENABLED):
  *
  * Flow:
  *   1. upload_populate_metadata() copies opts.nickname / opts.note into
@@ -15,15 +47,9 @@
  *        e. Parse response. Emit status + submission_id + url.
  *        f. Re-write INI with the updated [upload] block.
  *
- * Transport selection (v0.7.0 scope):
- *   - If mTCP is available (HTGET.EXE findable via PATH), use HTGET
- *     with POST flags. This covers the vast majority of DOS machines
- *     with working networking.
- *   - If only a raw packet driver is detected but no HTGET/mTCP:
- *     print install instructions and return UPLOAD_NO_TSR. A raw TCP
- *     implementation over packet driver is a multi-week project
- *     (TCP state machine, retransmit, windowing) and stays filed for
- *     v0.8.0+ if the need ever surfaces.
+ * Transport selection: HTGET shell-out only. Raw TCP over packet
+ * driver is a multi-week project (TCP state machine, retransmit,
+ * windowing) and stays filed for v0.9.0+.
  *
  * HTGET command line is encapsulated in a single #define below so the
  * exact flag syntax can be updated after on-hardware testing without
@@ -33,6 +59,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <malloc.h>   /* _nmalloc for issue #9 narrow fix */
 #include <dos.h>
 #include <conio.h>
 #include "upload.h"
@@ -61,40 +88,104 @@
 /* ----------------------------------------------------------------------- */
 /* Static storage (kept file-scope so report_add_str's stored pointers     */
 /* stay valid for the lifetime of the run).                                 */
+/*                                                                          */
+/* upload_status_buf is always compiled (stock builds still emit           */
+/* status=not_built via set_status). upload_submission_id_buf and          */
+/* upload_url_buf are only populated on successful POST, so they're gated  */
+/* to research builds.                                                      */
+/*                                                                          */
+/* upload_nickname_ptr and upload_notes_ptr (issue #9 narrow fix): the     */
+/* old BSS arrays upload_nickname_buf[40] and upload_notes_buf[136] were  */
+/* observed on real iron (v0.7.1 on BEK-V409) to have their trailing      */
+/* bytes progressively overwritten during emit_section by tails of other  */
+/* string values, producing output like "nickname=e inconclusive" where   */
+/* the captured user value was "BEK-V409". Root cause of the overwriter   */
+/* is not yet identified. Narrow fix: _nmalloc the buffers into the near  */
+/* heap at first-call time, moving them out of BSS and away from whatever */
+/* static-data neighbor is stomping them. Buffers live until program exit */
+/* (DOS reclaims). If the leak recurs on post-0.8.0 captures, escalate to */
+/* the architectural fix (report_add_str ownership refactor). See 0.8.0   */
+/* plan §6 M1.3 and the v0.7.x session reports.                           */
 /* ----------------------------------------------------------------------- */
 
+#define UPLOAD_NICKNAME_CAP 40
+#define UPLOAD_NOTES_CAP    136
+
 static char upload_status_buf[16];
-static char upload_nickname_buf[40];
-static char upload_notes_buf[136];
+static char *upload_nickname_ptr;   /* _nmalloc'd on first call */
+static char *upload_notes_ptr;      /* _nmalloc'd on first call */
+#ifdef CERBERUS_UPLOAD_ENABLED
 static char upload_submission_id_buf[SUBMISSION_ID_LEN + 1];
 static char upload_url_buf[96];
+#endif
+
+/* Fallback statics for the _nmalloc-returns-NULL path. Kept as a belt-
+ * and-braces guarantee the INI always gets a valid pointer even if the
+ * near heap is exhausted (very unlikely in practice, but CERBERUS runs
+ * on 256 KB 8088 machines where DGROUP + free heap can be tight). */
+static char upload_nickname_fallback[UPLOAD_NICKNAME_CAP];
+static char upload_notes_fallback[UPLOAD_NOTES_CAP];
 
 /* ----------------------------------------------------------------------- */
 /* Metadata population                                                      */
 /* ----------------------------------------------------------------------- */
 
+/* Forward declaration — defined below. upload_populate_metadata seeds
+ * upload.status in the first INI pass so offline/skipped/not_built
+ * rows always appear on disk. */
+static void set_status(result_table_t *t, const char *status);
+
 void upload_populate_metadata(result_table_t *t, const opts_t *o)
 {
+    /* Allocate nickname + notes buffers out of BSS on first call.
+     * See issue-#9 note above the storage declarations. _nmalloc
+     * returns near-heap memory separate from the static BSS pool,
+     * isolating these strings from whatever BSS-neighbor overwrite
+     * was corrupting the v0.7.1 captures. Fallback to file-scope
+     * statics if _nmalloc fails (near-heap exhausted). */
+    if (!upload_nickname_ptr) {
+        upload_nickname_ptr = (char *)_nmalloc(UPLOAD_NICKNAME_CAP);
+        if (!upload_nickname_ptr) upload_nickname_ptr = upload_nickname_fallback;
+    }
+    if (!upload_notes_ptr) {
+        upload_notes_ptr = (char *)_nmalloc(UPLOAD_NOTES_CAP);
+        if (!upload_notes_ptr) upload_notes_ptr = upload_notes_fallback;
+    }
+
     /* /NICK: populate upload.nickname. Always emit the row (empty if
      * no /NICK) so the server parser sees a stable schema. */
     if (o && o->nickname[0]) {
-        strncpy(upload_nickname_buf, o->nickname,
-                sizeof(upload_nickname_buf) - 1);
-        upload_nickname_buf[sizeof(upload_nickname_buf) - 1] = '\0';
+        strncpy(upload_nickname_ptr, o->nickname, UPLOAD_NICKNAME_CAP - 1);
+        upload_nickname_ptr[UPLOAD_NICKNAME_CAP - 1] = '\0';
     } else {
-        upload_nickname_buf[0] = '\0';
+        upload_nickname_ptr[0] = '\0';
     }
-    report_add_str(t, "upload.nickname", upload_nickname_buf,
+    report_add_str(t, "upload.nickname", upload_nickname_ptr,
                    CONF_HIGH, VERDICT_UNKNOWN);
 
     if (o && o->note[0]) {
-        strncpy(upload_notes_buf, o->note, sizeof(upload_notes_buf) - 1);
-        upload_notes_buf[sizeof(upload_notes_buf) - 1] = '\0';
+        strncpy(upload_notes_ptr, o->note, UPLOAD_NOTES_CAP - 1);
+        upload_notes_ptr[UPLOAD_NOTES_CAP - 1] = '\0';
     } else {
-        upload_notes_buf[0] = '\0';
+        upload_notes_ptr[0] = '\0';
     }
-    report_add_str(t, "upload.notes", upload_notes_buf,
+    report_add_str(t, "upload.notes", upload_notes_ptr,
                    CONF_HIGH, VERDICT_UNKNOWN);
+
+    /* Seed the upload.status row in the first INI pass.
+     *
+     * Stock builds: set_status("not_built") here is the final value;
+     * the stub upload_execute later redundantly writes the same value,
+     * but the row is guaranteed to appear in the INI on disk.
+     *
+     * Research builds: set_status here seeds an initial "not_built"
+     * that upload_execute overwrites in place (via report_update_str)
+     * to offline / skipped / uploaded / etc. during the post-INI pass.
+     *
+     * This fixes a pre-existing v0.7.x issue where upload paths that
+     * did not reach their second report_write_ini (offline, skipped,
+     * no_client) left the INI on disk without any upload.status row. */
+    set_status(t, "not_built");
 }
 
 /* ----------------------------------------------------------------------- */
@@ -114,6 +205,7 @@ static void set_status(result_table_t *t, const char *status)
                       CONF_HIGH, VERDICT_UNKNOWN);
 }
 
+#ifdef CERBERUS_UPLOAD_ENABLED
 static void set_submission(result_table_t *t,
                            const char *id, const char *url)
 {
@@ -128,10 +220,16 @@ static void set_submission(result_table_t *t,
     report_update_str(t, "upload.url", upload_url_buf,
                       CONF_HIGH, VERDICT_UNKNOWN);
 }
+#endif /* CERBERUS_UPLOAD_ENABLED */
 
 /* ----------------------------------------------------------------------- */
 /* HTGET invocation + response parse                                        */
+/*                                                                          */
+/* Everything below this point is gated on CERBERUS_UPLOAD_ENABLED. Stock  */
+/* builds provide a stub upload_execute() in the #else branch at the end.  */
 /* ----------------------------------------------------------------------- */
+
+#ifdef CERBERUS_UPLOAD_ENABLED
 
 /* Best-effort "is HTGET on PATH?" check. DOS has no `which`; we
  * attempt a dry-run via system() and rely on nonzero exit to mean
@@ -257,12 +355,18 @@ int upload_execute(result_table_t *t, const opts_t *o, const char *ini_path)
     /* Offline → status=offline, no prompt, no POST. */
     if (strcmp(transport, "none") == 0) {
         set_status(t, "offline");
+        /* Flush the updated status to disk so the INI reflects reality.
+         * Pre-M1 this path left the INI with the upload_populate_metadata
+         * seed (empty or not_built) rather than the actual outcome.
+         * Cost: one extra INI write on offline runs, cheap. */
+        (void)report_write_ini(t, o, ini_path);
         return UPLOAD_OFFLINE;
     }
 
     /* /NOUPLOAD → skipped regardless of network state. */
     if (o->no_upload) {
         set_status(t, "skipped");
+        (void)report_write_ini(t, o, ini_path);
         return UPLOAD_SKIPPED;
     }
 
@@ -270,6 +374,7 @@ int upload_execute(result_table_t *t, const opts_t *o, const char *ini_path)
     if (!o->do_upload) {
         if (!prompt_user(transport)) {
             set_status(t, "skipped");
+            (void)report_write_ini(t, o, ini_path);
             return UPLOAD_SKIPPED;
         }
     }
@@ -277,10 +382,11 @@ int upload_execute(result_table_t *t, const opts_t *o, const char *ini_path)
     /* Have we got an HTTP client? */
     if (!htget_available()) {
         printf("\n");
-        printf("No HTGET.EXE on PATH — install mTCP to enable uploads.\n");
+        printf("No HTGET.EXE on PATH, install mTCP to enable uploads.\n");
         printf("See: brutman.com/mTCP/\n");
         printf("Results saved locally in %s\n", ini_path);
         set_status(t, "no_client");
+        (void)report_write_ini(t, o, ini_path);
         return UPLOAD_NO_TSR;
     }
 
@@ -320,9 +426,25 @@ int upload_execute(result_table_t *t, const opts_t *o, const char *ini_path)
     }
 }
 
+#else /* CERBERUS_UPLOAD_ENABLED */
+
+/* Stock-build stub. No HTGET, no network, no crash. Writes
+ * upload.status=not_built so downstream tooling and the server's
+ * permissive parser see a well-formed value. Returns UPLOAD_DISABLED
+ * so the caller's log message ("upload disabled") fires correctly. */
+int upload_execute(result_table_t *t, const opts_t *o, const char *ini_path)
+{
+    (void)o;
+    (void)ini_path;
+    if (t) set_status(t, "not_built");
+    return UPLOAD_DISABLED;
+}
+
+#endif /* CERBERUS_UPLOAD_ENABLED */
+
 /* Legacy ABI: old upload_ini() entry retained for backward-compat with
  * any caller still linking against it. Delegates to a no-op since the
- * new flow lives in upload_execute(). */
+ * new flow lives in upload_execute(). Always compiled (both build paths). */
 int upload_ini(const char *path)
 {
     (void)path;

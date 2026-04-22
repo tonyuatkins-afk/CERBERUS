@@ -129,7 +129,7 @@ void diag_bit_parade(const opts_t *o)
     }
 
     tui_fill(0, BP_ROWS - 1, ' ', ATTR_NORMAL);
-    tui_puts(3, (BP_COLS - 21) / 2, "CPU ALU — Bit Parade", title_attr);
+    tui_puts(3, (BP_COLS - 19) / 2, "CPU ALU: Bit Parade", title_attr);
     {
         /* Header row: bit numbers 15..0, 2 cells apart */
         char header[48];
