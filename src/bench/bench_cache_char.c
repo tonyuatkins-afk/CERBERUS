@@ -34,6 +34,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <malloc.h>       /* _fmalloc / _ffree for M2.2 L2-probe buffer */
 #include "bench.h"
 #include "../core/timing.h"
 #include "../core/report.h"
@@ -181,6 +182,24 @@ const char *bench_cc_infer_write_policy(unsigned long read_kbps,
     return "unknown";
 }
 
+/* v0.8.1 M2.3: derive DRAM access time in ns from a known throughput
+ * (kbps) and the cache line size in bytes. Each DRAM fetch pulls one
+ * line (line_bytes), so
+ *    lines_per_sec  = (kbps * 1024) / line_bytes
+ *    ns_per_line    = 1e9 / lines_per_sec
+ * Combined and simplified for 32-bit arithmetic:
+ *    ns = (line_bytes * 1_000_000) / kbps
+ * Caller passes the largest-working-set kbps (post-cache plateau) as
+ * the DRAM-dominant rate. Returns 0 on degenerate input (kbps==0 or
+ * line_bytes==0) so the emit path can distinguish "derived" from
+ * "not derivable". Pure, host-testable. */
+unsigned long bench_cc_derive_dram_ns(unsigned long kbps,
+                                      unsigned int  line_bytes)
+{
+    if (kbps == 0UL || line_bytes == 0U) return 0UL;
+    return ((unsigned long)line_bytes * 1000000UL) / kbps;
+}
+
 /* --- Host-test stop point --------------------------------------- */
 #ifndef CERBERUS_HOST_TEST
 
@@ -229,6 +248,60 @@ static void stride_write(unsigned char __far *buf, unsigned int working_set,
         if (off >= working_set) off -= working_set;
     }
     bench_cc_write_sink = iters;
+}
+
+/* v0.8.1 M2.1: L1 pointer-chase latency probe.
+ *
+ * Reinterprets the existing 2 KB small_buf as a 1024-slot unsigned
+ * int array. Initializes slot[i] = next index in a coprime-step chain
+ * (step = 67, coprime with 1024), giving a cycle that touches every
+ * slot exactly once before repeating. The 67-byte step keeps the
+ * access pattern non-prefetchable on simple hardware prefetchers.
+ *
+ * Each chase iteration: load slot[cursor], that value is the next
+ * cursor. Single data-dependency chain = the CPU cannot parallelize
+ * loads; every iteration is serialized through one L1 access.
+ *
+ * Returns ns per access, computed as us * 1000 / iters. Measurement
+ * resolution is PIT-C2 (~838 ns/tick), so one iteration's worth of
+ * latency on a 486-class L1 (~15-30 ns) needs aggregate timing over
+ * many iterations to be meaningful. At 20000 iterations the total
+ * elapsed is ~0.3..0.6 ms on a 486, well within the 55 ms PIT wrap
+ * window, and the aggregate ns/access resolves to single-digit ns
+ * granularity. */
+static unsigned long pointer_chase_latency_ns(unsigned int __far *chain,
+                                              unsigned int n_slots,
+                                              unsigned long iters)
+{
+    unsigned int cursor = 0U;
+    unsigned int step;
+    unsigned int i;
+    unsigned long j;
+    us_t us;
+
+    /* Initialize chain: slot[i] = (i + step) % n_slots. Step=67 chosen
+     * to be coprime with 1024; any other coprime with n_slots works. */
+    step = 67U;
+    for (i = 0U; i < n_slots; i++) {
+        unsigned int next = (unsigned int)((unsigned long)(i + step) %
+                                           (unsigned long)n_slots);
+        chain[i] = next;
+    }
+
+    /* Warm: one full cycle to prime the cache. */
+    for (j = 0UL; j < (unsigned long)n_slots; j++) {
+        cursor = chain[cursor];
+    }
+
+    timing_start();
+    for (j = 0UL; j < iters; j++) {
+        cursor = chain[cursor];
+    }
+    us = timing_stop();
+
+    bench_cc_read_sink = (unsigned long)cursor;
+    if (us == 0UL) return 0UL;
+    return (us * 1000UL) / iters;
 }
 
 /* Compute KB/s from bytes + microseconds. 0 on degenerate input.
@@ -283,6 +356,10 @@ static char read_kbps_display[12];
 static char write_kbps_display[12];
 static char size_kbps_displays[5][12];     /* one per size sweep point */
 static char stride_kbps_displays[6][12];   /* one per stride sweep point (M2.1: 6 points, added 128) */
+/* v0.8.1 M2.1/M2.2/M2.3 display buffers */
+static char l1_ns_display[12];
+static char size_64kb_display[12];
+static char dram_ns_display[12];
 
 /* --- Entry point ------------------------------------------------- */
 
@@ -444,6 +521,82 @@ void bench_cache_char(result_table_t *t)
     write_policy = bench_cc_infer_write_policy(read_kbps, write_kbps);
     report_add_str(t, "bench.cache.char.write_policy", write_policy,
                    conf, VERDICT_UNKNOWN);
+
+    /* ----- Probe 4 (M2.1): L1 pointer-chase latency -----
+     * Reinterpret small_buf (2 KB) as 1024 unsigned ints. Chase a
+     * data-dependency chain, measure aggregate time, report ns/access.
+     * Works on any CPU with a cache; the 2 KB working set fits even the
+     * smallest target L1 (486SX 8 KB). Emits the latency directly so
+     * consistency rules and readers can compare against published
+     * chip-family numbers (L1 ~15-30 ns on 486-66, ~5-10 ns on Pentium). */
+    {
+        unsigned int __far *chain = (unsigned int __far *)small_buf;
+        unsigned int n_slots = (unsigned int)(CACHE_BUFFERS_SMALL_BYTES /
+                                              sizeof(unsigned int));
+        unsigned long ns = pointer_chase_latency_ns(chain, n_slots, 20000UL);
+        if (ns > 0UL) {
+            sprintf(l1_ns_display, "%lu", ns);
+            report_add_u32(t, "bench.cache.char.l1_ns",
+                           ns, l1_ns_display, conf, VERDICT_UNKNOWN);
+        } else {
+            report_add_str(t, "bench.cache.char.l1_ns", "inconclusive",
+                           CONF_LOW, VERDICT_UNKNOWN);
+        }
+    }
+
+    /* ----- Probe 5 (M2.2): L2 / DRAM reach via 64 KB FAR buffer -----
+     * Allocate an ephemeral ~64 KB buffer to sweep beyond the existing
+     * 32 KB cap. A single 64 KB measurement is enough to tell whether
+     * there is cache coverage past L1 (rate plateaus near the 32 KB
+     * number) or whether we have hit DRAM (rate drops another tier).
+     *
+     * Larger working sets (128 / 256 KB) require huge-pointer arithmetic
+     * to span the 64 KB segment boundary, which complicates the stride
+     * loop and is deferred to 0.9.0. What ships here answers the "is
+     * there an L2 reachable from a 64 KB working set" question, which
+     * is the most common configuration on 486-era boards. */
+    {
+        unsigned char __far *l2_buf = (unsigned char __far *)_fmalloc(65520U);
+        if (l2_buf == (unsigned char __far *)0) {
+            report_add_str(t, "bench.cache.char.l2_status",
+                           "no_far_mem",
+                           CONF_HIGH, VERDICT_UNKNOWN);
+        } else {
+            unsigned long size_64kb_kbps;
+            _fmemset(l2_buf, 0, 65520U);
+            timing_start();
+            stride_read(l2_buf, 65520U, 16U, iters_per_measure);
+            us = timing_stop();
+            size_64kb_kbps = bytes_per_us_to_kbps(iters_per_measure, us);
+            sprintf(size_64kb_display, "%lu", size_64kb_kbps);
+            report_add_u32(t, "bench.cache.char.size_64kb_kbps",
+                           size_64kb_kbps, size_64kb_display,
+                           conf, VERDICT_UNKNOWN);
+            report_add_str(t, "bench.cache.char.l2_status", "ok",
+                           CONF_HIGH, VERDICT_UNKNOWN);
+
+            /* ----- Probe 6 (M2.3): DRAM ns derivation -----
+             * Use the 64 KB measurement (beyond typical 486 L1 of 8 KB)
+             * as the DRAM-reach rate, paired with the inferred line
+             * size, to compute a ns/line cost. Confidence MEDIUM: the
+             * 64 KB working set may still land in L2 on chips with
+             * larger L2, in which case the derived ns is an L2 number
+             * mis-labeled as DRAM. The deferred 128/256 KB probes will
+             * resolve that in 0.9.0. */
+            if (line_bytes > 0U) {
+                unsigned long dns = bench_cc_derive_dram_ns(size_64kb_kbps,
+                                                            line_bytes);
+                if (dns > 0UL) {
+                    sprintf(dram_ns_display, "%lu", dns);
+                    report_add_u32(t, "bench.cache.char.dram_ns",
+                                   dns, dram_ns_display,
+                                   CONF_MEDIUM, VERDICT_UNKNOWN);
+                }
+            }
+
+            _ffree(l2_buf);
+        }
+    }
 
     /* ----- Associativity: deferred to a follow-up ---------------- */
     report_add_str(t, "bench.cache.char.assoc", "not_probed",

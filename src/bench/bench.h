@@ -49,6 +49,10 @@ unsigned int bench_cc_infer_line_bytes(const unsigned long *kbps_by_stride,
                                        unsigned int n_strides);
 const char * bench_cc_infer_write_policy(unsigned long read_kbps,
                                          unsigned long write_kbps);
+/* v0.8.1 M2.3 DRAM ns derivation: ns = line_bytes * 1e6 / kbps.
+ * Returns 0 on degenerate input. Pure, host-testable. */
+unsigned long bench_cc_derive_dram_ns(unsigned long kbps,
+                                      unsigned int  line_bytes);
 
 /* v0.4 video bandwidth — see docs/plans/v0.4-benchmarks-and-polish.md §2.
  *

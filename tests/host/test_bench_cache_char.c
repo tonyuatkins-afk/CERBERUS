@@ -234,6 +234,38 @@ static void test_wp_unknown(void)
           "write=0 -> unknown");
 }
 
+/* ======================================================================= */
+/* v0.8.1 M2.3: bench_cc_derive_dram_ns tests                              */
+/* ======================================================================= */
+
+static void test_dram_ns_plausible_486(void)
+{
+    /* BEK-V409 486 DX-2-66: ~5 MB/s throughput at DRAM-dominant working
+     * set, 16-byte cache lines. ns = 16 * 1e6 / 5000 = 3200 ns. Covers
+     * the "486 DRAM with no L2" case. */
+    unsigned long ns = bench_cc_derive_dram_ns(5000UL, 16U);
+    printf("\n[test_dram_ns_plausible_486]\n");
+    CHECK(ns == 3200UL, "kbps=5000, line=16 -> 3200 ns");
+}
+
+static void test_dram_ns_plausible_pentium(void)
+{
+    /* Pentium-era: ~20 MB/s DRAM throughput, 32-byte cache lines.
+     * ns = 32 * 1e6 / 20000 = 1600 ns. */
+    unsigned long ns = bench_cc_derive_dram_ns(20000UL, 32U);
+    printf("\n[test_dram_ns_plausible_pentium]\n");
+    CHECK(ns == 1600UL, "kbps=20000, line=32 -> 1600 ns");
+}
+
+static void test_dram_ns_zero_inputs(void)
+{
+    printf("\n[test_dram_ns_zero_inputs]\n");
+    CHECK(bench_cc_derive_dram_ns(0UL, 16U) == 0UL,
+          "kbps=0 -> 0 (degenerate)");
+    CHECK(bench_cc_derive_dram_ns(5000UL, 0U) == 0UL,
+          "line_bytes=0 -> 0 (degenerate)");
+}
+
 int main(void)
 {
     printf("=== CERBERUS host unit test: bench_cache_char ===\n");
@@ -254,6 +286,9 @@ int main(void)
     test_wp_wt();
     test_wp_wb_store_buffer();
     test_wp_unknown();
+    test_dram_ns_plausible_486();
+    test_dram_ns_plausible_pentium();
+    test_dram_ns_zero_inputs();
     printf("=== %d failure(s) ===\n", failures);
     return failures == 0 ? 0 : 1;
 }
