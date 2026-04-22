@@ -190,6 +190,47 @@ The BIOS tick is the reference denominator — PIT is tested against it. Absolut
 
 **Slot rationale:** the plan originally reserved Rule 8 for cache-stride vs CPUID-leaf-2 cross-check (still reserved, see Deferred rules). Rule 9 was already taken by `8086_bus`. Rule 10 is the next free slot — same off-by-one pattern as Rule 7.
 
+### Rule 11 — `consistency.xt_slave_dma` (v0.8.0-M4)
+
+**Claim:** An XT-class CPU (8086/8088/V20/V30) should not report a functional slave DMA controller. Slave DMA (8237 at 0xC0–0xDF) was an AT-class addition; its presence on an XT-class system is physically suspicious.
+
+**Prerequisites:** `cpu.class` in {8086, 8088, v20, v30}; `dma.slave_present` reports `yes`.
+
+**Verdicts:**
+- **WARN** — XT-class CPU reports slave DMA present. Narration: "WARN: XT-class CPU + slave DMA (CPU mis-ID, or AT board retrofit?)".
+- **no-op** — CPU class is AT-era or slave-DMA absent.
+
+**What it catches:**
+- CPU mis-detection where an AT-class part was identified as 8086/V30 by the CPU probe but the rest of the chipset remains AT-era.
+- Genuinely unusual hybrid boards (rare AT-board retrofits into XT-form-factor chassis), which the WARN flags for human review rather than failing outright.
+
+**What it does not catch:**
+- XT-class systems with broken DMA — the slave-DMA probe returns `absent`, so the rule no-ops and any fault is left to `diag_dma` to report. Rule 11 is an asymmetry detector, not a correctness check.
+
+**Verdict is WARN, not FAIL.** A hybrid retrofit board is unusual but physically possible; we surface the anomaly without declaring the run invalid.
+
+## v0.8.0-M4 narration enhancements
+
+Each FAIL and WARN row emitted by the consistency engine now carries a short possible-causes hint after the verdict. The hint is intended to help a first-time reader interpret what the contradiction means without having to read this document end-to-end. Narration additions from M4.1:
+
+| rule | verdict | narration text |
+|------|---------|----------------|
+| `486dx_fpu` | FAIL | "FAIL: 486DX but FPU not integrated (counterfeit SX relabel?)" |
+| `486sx_fpu` | FAIL | "FAIL: 486SX but FPU integrated (487 upgrade? detect wrong?)" |
+| `386sx_bus` | FAIL | "FAIL: 386SX on ISA-8 (impossible; check bus probe or BIOS)" |
+| `extmem_cpu` | FAIL | "FAIL: <KB>KB extmem on pre-286 CPU (HIMEM bug or CPU mis-ID)" |
+| `8086_bus`  | FAIL | "FAIL: <bus> on <cpu> (impossible; CPU mis-ID or BIOS bus-detect bug)" |
+| `whetstone_fpu` | FAIL | "FAIL: fpu=<state> vs Whetstone=<state> (detect/bench disagree)" |
+| `xt_slave_dma` | WARN | "WARN: XT-class CPU + slave DMA (CPU mis-ID, or AT board retrofit?)" |
+
+The narration text is the *value* of the `consistency.<rule>` row (where previously the value was just the verdict token). The short token (`PASS`/`WARN`/`FAIL`) remains the first whitespace-delimited prefix so downstream parsers that split on whitespace still read the verdict correctly. Tools that want the structured verdict should read the first token; tools that want the narration should take the remainder.
+
+Tests in `tests/host/test_consist.c` assert both the token prefix and the substring presence of a stable hint keyword per rule, so a narration rewording that preserves the keyword does not break the suite.
+
+## v0.8.0-M1.5 bench_cpu anchor widening
+
+Rule 4b (MIPS within class_ipc range, still deferred above) is blocked on per-class IPC anchors in `cpu_db`. M1.5 widened the 486 DX-2-66 anchor in `hw_db/cpus.csv` from `iters_low=4700000` to `iters_low=1500000` following BEK-V409 real-iron measurement of ~1.96M iters/sec — a value consistent with the 486 pipeline but outside the original narrow band (which had been set from DOSBox-X measurement only). The widened anchor now spans the band observed across real-iron + DOSBox-X captures; Rule 4b will activate once per-class IPC fields land.
+
 ## Deferred rules
 
 These are noted in the plan and will land as their prerequisite phases complete. Each is correctly no-op today.

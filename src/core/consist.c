@@ -103,7 +103,7 @@ static void rule_486dx_implies_integrated_fpu(result_table_t *t)
                        CONF_HIGH, VERDICT_PASS);
     } else {
         report_add_str(t, "consistency.486dx_fpu",
-                       "FAIL: 486DX-class CPU but FPU not integrated",
+                       "FAIL: 486DX but FPU not integrated (counterfeit SX relabel?)",
                        CONF_HIGH, VERDICT_FAIL);
     }
 }
@@ -134,7 +134,7 @@ static void rule_486sx_no_integrated_fpu(result_table_t *t)
                        CONF_HIGH, VERDICT_PASS);
     } else {
         report_add_str(t, "consistency.486sx_fpu",
-                       "FAIL: CPU is 486SX but FPU reports integrated",
+                       "FAIL: 486SX but FPU integrated (487 upgrade? detect wrong?)",
                        CONF_HIGH, VERDICT_FAIL);
     }
 }
@@ -200,7 +200,7 @@ static void rule_extmem_implies_286(result_table_t *t)
         strcmp(cv, "v20")  == 0 || strcmp(cv, "v30")  == 0) {
         (void)cv;  /* CPU class shown on DETECTION pane; omit from narration for width budget */
         sprintf(msg_rule6_fail,
-                "FAIL: ext memory %luKB reported but CPU is pre-286",
+                "FAIL: %luKB extmem on pre-286 CPU (HIMEM bug or CPU mis-ID)",
                 ext_kb);
         report_add_str(t, "consistency.extmem_cpu", msg_rule6_fail,
                        CONF_HIGH, VERDICT_FAIL);
@@ -240,7 +240,7 @@ static void rule_386sx_implies_isa16(result_table_t *t)
 
     if (strcmp(bv, "isa8") == 0) {
         report_add_str(t, "consistency.386sx_bus",
-                       "FAIL: 386SX CPU reported but bus is ISA-8 (impossible)",
+                       "FAIL: 386SX on ISA-8 (impossible; check bus probe or BIOS)",
                        CONF_HIGH, VERDICT_FAIL);
     } else {
         report_add_str(t, "consistency.386sx_bus",
@@ -285,7 +285,7 @@ static void rule_8086_implies_isa8(result_table_t *t)
                        "WARN: 8086-class CPU but bus class unknown",
                        CONF_HIGH, VERDICT_WARN);
     } else {
-        sprintf(msg_rule9_fail, "FAIL: 8086-class CPU (%s) cannot be on a %s bus", cv, bv);
+        sprintf(msg_rule9_fail, "FAIL: %s on %s (impossible; CPU mis-ID or BIOS bus-detect bug)", cv, bv);
         report_add_str(t, "consistency.8086_bus", msg_rule9_fail,
                        CONF_HIGH, VERDICT_FAIL);
     }
@@ -634,7 +634,8 @@ static void rule_whetstone_fpu_consistency(result_table_t *t)
         /* else: unknown skip token — fall through to no-op */
     } else {
         sprintf(msg_rule10_fail,
-                "FAIL: fpu=%s but Whetstone=%s", fpu_tag, st);
+                "FAIL: fpu=%s vs Whetstone=%s (detect/bench disagree)",
+                fpu_tag, st);
         report_add_str(t, "consistency.whetstone_fpu", msg_rule10_fail,
                        CONF_HIGH, VERDICT_FAIL);
     }
@@ -701,7 +702,7 @@ static void rule_dma_class_coherence(result_table_t *t)
                        CONF_HIGH, VERDICT_PASS);
     } else if (strcmp(c5, "pass") == 0) {
         report_add_str(t, "consistency.dma_class_coherence",
-                       "WARN: XT-class CPU with DMA slave active (impossible)",
+                       "WARN: XT-class CPU + slave DMA (CPU mis-ID, or AT board retrofit?)",
                        CONF_HIGH, VERDICT_WARN);
     }
     /* else: fail / unknown token — silent no-op, surface via

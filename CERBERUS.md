@@ -56,6 +56,14 @@ DOSBox-X carries CERBERUS day-to-day. The iteration loop is seconds instead of m
 - **OPL 0x388 mirror disabled by CTCM on Vibra 16 PnP.** Symptom: OPL3 undetected on a card that plays OPL in DOOM without issue. Cause: after CTCM's PnP init, the legacy 0x388 Adlib mirror can be switched off — OPL only answers at BLASTER-base+8. Fix: probe BLASTER-base+8 first, fall back to 0x388. (`eeba319`)
 - **UMC491-integrated 8254 produces biased latch-race phantom wraps DOSBox never synthesizes.** Symptom: PIT-C2 vs BIOS-tick cross-check reports 49% divergence every run, repeatable to the microsecond. Cause: the integrated 8254's composite LSB/MSB misreads cluster at consistent mid-range values that a naive wrap detector treats as real counter transitions. Fix: upper-bound the wrap count, require a low-band→high-band shape for a valid wrap, and reject the whole measurement if post-hoc PIT/BIOS divergence exceeds 25% rather than reporting biased data. (`eeba319`, refined in `6c3a023`)
 
+The 2026-04-21/22 M1 + M2 + M3 sessions added five more that only real iron found:
+
+- **Watcom libc teardown hangs the run on BEK-V409.** Symptom: pressing Q after UI summary leaves the machine hung, hard-reset required. Stock atexit / FPU-cleanup / stdio-close chain executes cleanly under DOSBox-X and DOSBox Staging and on the 386 bench box, but deadlocks on the BEK-V409 486 DX-2-66 + AMI 11/11/92 + DOS 6.22 + HIMEM + EMM386 stack. Fix: replace the final `return exit_code` with `crumb_exit(); _exit((int)exit_code);` so the run bypasses libc teardown entirely and calls INT 21h AH=4Ch directly. Safe because CERBERUS registers no atexit handlers and releases all its own FDs explicitly before the return. (M1.7, `src/main.c`)
+- **"*** NULL assignment detected" BSS overwrite is BEK-V409-specific.** Symptom: Watcom's NULL-guard canary fires on every BEK-V409 run but never on the 386 bench box, DOSBox-X, or DOSBox Staging. Cause: some probe path writes near DGROUP offset 0 on that specific chipset. Localized empirically to OPL fallback / S3 Trio64 / UMC491-PIT probes; root cause still open. Documented and filed for 0.8.1 via removal-at-a-time protocol (`docs/methodology.md` M1.7 section). The M2 probes ship with full isolation from this defect (new code uses explicit BSS segments, not near-zero accidentally).
+- **Em-dashes compiled into the EXE as ΓÇö on CP437 CGA displays.** Symptom: em-dash characters in source strings render as 3 garbled characters on BEK-V409's CGA composite output, invisible under DOSBox-X's default IBM font. Cause: em-dash is a 3-byte UTF-8 sequence (E2 80 94) that CP437 renders as three separate glyphs. Fix: swept the tree and replaced every em-dash in runtime strings with colons, commas, or parentheses as context demanded. Same lesson applies to every Unicode character that compiles into an 80x25 text-mode string: the emulator forgives, CP437 does not. (M1 follow-up)
+- **Whetstone per-unit cost anomaly (10-30× low K-Whet reading on real 486).** Symptom: Curnow-Wichmann kernel consistently reports ~109 K-Whet on BEK-V409 where the published reference envelope is 1500-3000 K-Whet. DOSBox-X produces numbers close to the reference because it fakes the FPU instruction throughput against a modern host cycle clock. Real 486 silicon says the kernel genuinely takes 50-100 ms per unit where research estimated 1-3 ms. Fix for 0.8.0: suppress the emit, ship `bench.fpu.ops_per_sec` as the primary FPU metric (honest ~1.17M on BEK-V409), defer per-instruction microbenchmarks to 0.9.0. (`docs/methodology.md` "Why Whetstone is not in 0.8.0").
+- **bench_cpu iters/sec measured 1.96M on BEK-V409, outside the DB anchor band of 4.7-10.5M.** Symptom: Rule 4b (cpu_ipc_bench) would report WARN on a perfectly healthy 486 DX-2-66 if it were active. Cause: the original anchor band was seeded from DOSBox-X measurements on modern hosts, not real iron. Fix: widened the 486 DX-2 iters_low bound to 1,500,000 in `hw_db/cpus.csv` to encompass the real-iron measurement, leaving headroom for slower 486 variants. (M1.5)
+
 DOSBox-X is necessary for iteration speed and insufficient for correctness. Real-hardware validation is a non-negotiable gate on every version tag. The emulator is the dress rehearsal. The bench box is opening night.
 
 ## 4. Design Principles
@@ -77,28 +85,31 @@ Hardware inventory. Identifies what is present without validating or measuring i
 
 | Subsystem | Method | Status |
 |-----------|--------|--------|
-| CPU       | Instruction probing (8088/86/V20/V30/286), CPUID (386+), vendor strings | Implemented |
-| FPU       | FNINIT/FNSTSW presence test, control word read, 287 vs 387 vs integrated | Stubbed |
-| Memory    | Conventional (INT 12h), extended (INT 15h AH=88h/E820), EMS/XMS driver probe | Partial |
-| Cache     | Timed stride access pattern, size and line-width inference | Stubbed |
-| Bus       | ISA/VLB/PCI detection, slot width, effective bus clock estimation | Stubbed |
-| Video     | Adapter class (MDA/CGA/Hercules/EGA/VGA), chipset signature where possible | Stubbed |
-| Audio     | PC speaker confirmed, AdLib/OPL2/OPL3 probe, Sound Blaster DSP version | Stubbed |
-| BIOS      | Date string, copyright, INT 15h extensions, PnP header | Implemented |
+| CPU       | Instruction probing (8088/86/V20/V30/286), CPUID (386+), vendor strings, class normalization to family token | Implemented |
+| FPU       | FNINIT/FNSTSW presence test, 4-axis behavioral fingerprint (infinity mode, pseudo-NaN, FPREM1, FSIN) + 5th axis FPTAN v0.8.0-M2, 14-entry DB | Implemented |
+| Memory    | Conventional (INT 12h), extended (INT 15h AH=88h/E801h with HIMEM intercept handling via XMS AH=08h), EMS/XMS driver probe | Implemented |
+| Cache     | Class-inference from CPU DB; throughput-sweep characterization (L1 size + line size + write policy); 6-stride sweep to 128 bytes for Pentium+ line inference v0.8.0-M2 | Implemented |
+| Bus       | PCI BIOS probe + ISA fallback, VLB possibility heuristic, class token (isa8/isa16/vlb/pci) | Implemented |
+| Video     | Adapter waterfall INT 10h AH=1Ah → AH=12h BL=10h → BDA → 3BAh toggle; 28-entry chipset DB (MDA/CGA/Hercules/EGA/VGA/SVGA); S3 chipset ID via CR30 past IBM-VGA string collision | Implemented. Hercules-variant discrimination deferred to 0.8.1+ |
+| Audio     | PC speaker, AdLib/OPL2/OPL3 probe via port 388h or BLASTER-base+8, SB DSP version (port base+0Eh for status, base+0Ah for data), 31-entry DB with T-suffix + CT1745 mixer discriminator | Implemented |
+| BIOS      | Date string, family/vendor DB (21 entries), copyright extraction, INT 15h extensions, $PnP header | Implemented |
 
 ### Head II: DIAGNOSE
 
 Validation. For each detected subsystem, runs targeted correctness tests.
 
-| Test | What It Catches |
-|------|-----------------|
-| ALU integrity | Stuck bits, failing flag logic, bad multiply/divide |
-| Flag register | Missing or bogus flag behavior (common in clones and emulators) |
-| Memory integrity | Pattern/address/moving-inversion test on conventional RAM |
-| Cache coherence | Write-through vs write-back validation, stale-line detection |
-| Video RAM | Direct VRAM walk, snow pattern on CGA, EGA/VGA plane consistency |
-| FPU correctness | Known-answer tests for add/mul/div, transcendentals, precision control |
-| System bus | Back-to-back I/O timing sanity, DMA channel liveness |
+| Test | What It Catches | Status |
+|------|-----------------|--------|
+| CPU ALU integrity | Stuck bits, failing flag logic, bad multiply/divide | Implemented (diag_cpu) |
+| Memory integrity | Walking-1s, walking-0s, address-in-address, checkerboard + inv-checkerboard (v0.8.0-M2 adjacent-cell coupling coverage) | Implemented (diag_mem) |
+| Cache health | Stride-ratio timing test (2 KB small vs 32 KB large); classifier `ratio >= 40x PASS` / `20-40x WARN` / `<20x FAIL`; skipped on pre-486 floor | Implemented (diag_cache) |
+| Video RAM | Direct VRAM walk, 4-pattern integrity, retrace-gated writes on CGA | Implemented (diag_video) |
+| FPU correctness | Bit-exact known-answer tests for FADD/FSUB/FMUL/FDIV/compound | Implemented (diag_fpu) |
+| FPU behavioral fingerprint | 5-axis probe: infinity mode (projective vs affine), pseudo-NaN handling, FPREM1 presence, FSIN presence, FPTAN pushes-1.0 (v0.8.0-M2) | Implemented (diag_fpu_fingerprint) |
+| FPU control modes | Rounding-control cross-check (4 modes, canonical IEEE-754 table verification); precision-control cross-check (3 modes, bytewise distinct 1/3 results); exception-flag roundtrip (6 exceptions IE/DE/ZE/OE/UE/PE deliberately triggered) | Implemented (v0.8.0-M2) |
+| DMA | 8237 count-register write+readback probe on channels 1/2/3/5/6/7; channels 0/4 safety-skipped; XT-class slave-skip path | Implemented (diag_dma) |
+| IEEE-754 edge-case coverage | 9 operand classes x 5 ops | **Deferred to 0.8.1+** (research gap L, DGROUP budget pressure) |
+| 8259A interrupt-controller functional probe | | **Deferred to 0.8.1+** (QA-Plus homage candidate) |
 
 Diagnostic results feed the consistency engine. If detection says "486DX" but the FPU correctness test fails, that is a reportable fact, not a crash.
 
@@ -106,17 +117,24 @@ Diagnostic results feed the consistency engine. If detection says "486DX" but th
 
 Measurement. Produces repeatable numbers with explicit methodology.
 
-| Benchmark | Unit | Method |
-|-----------|------|--------|
-| CPU integer | Dhrystones-equivalent MIPS | Fixed instruction mix, PIT-timed, no compiler optimization games |
-| FPU | Whetstone-equivalent MFLOPS | x87 instruction mix, PIT-timed |
-| Memory bandwidth | KB/s (read, write, copy) | REP MOVSW, REP STOSW, large buffer |
-| Memory latency | ns (random access) | Pointer-chase through randomized buffer, cache-defeating |
-| Cache bandwidth | KB/s (L1, L2 where present) | Stride tests at multiple working-set sizes |
-| Video throughput | KB/s (VRAM write) | Direct write to text and graphics segments |
-| Disk throughput | KB/s (sequential read) | INT 13h raw sector reads, optional |
+| Benchmark | Unit | Method | Status |
+|-----------|------|--------|--------|
+| CPU integer | iters/sec (MIPS-equivalent) | Fixed instruction mix, PIT-C2-timed | Implemented (bench_cpu) |
+| Dhrystone 2.1 | Dhrystones/sec | Full Weicker port, -od -oi compile flags, DCE-barrier via report_add_u32 | Implemented (bench_dhrystone) |
+| Whetstone | K-Whetstones/sec | Curnow-Wichmann x87 asm kernel, DCE-barrier checksum | **Compiled in; emit suppressed in stock 0.8.0 builds** (v0.8.0-M1, plan §7). `wmake WHETSTONE=1` re-enables emit for research work. See `docs/methodology.md` "Why Whetstone is not in 0.8.0" |
+| FPU aggregate | fpu.ops_per_sec | x87 mix (FADD/FMUL/FDIV/FSQRT), PIT-timed | Implemented (bench_fpu). Primary FPU throughput metric in 0.8.0 |
+| Memory bandwidth | KB/s (read, write, copy) | REP MOVSW (copy), REP STOSW (write), REP LODSB (read), microsecond-scaled | Implemented (bench_memory) |
+| Cache bandwidth | KB/s (small vs large buffer) | 2 KB and 32 KB FAR buffers, PIT-C2-timed | Implemented (bench_cache) |
+| Cache characterization | L1 size + line size + write policy | Size sweep 2/4/8/16/32 KB (inflection = L1 size); stride sweep 4/8/16/32/64/128 B (plateau = line size); read-vs-write delta (wb/wt/unknown) | Implemented (bench_cache_char). 6-stride sweep added in v0.8.0-M2 |
+| Video throughput | KB/s (text + mode 13h) | Direct VRAM writes to text segment and mode 13h graphics | Implemented (bench_video) |
+| Mandelbrot visual coda | not measured; visual | VGA mode 13h, 320x200x256, per-pixel progressive render | Implemented (bench_mandelbrot). Gated in stock builds (piggybacked on Whetstone); research builds render it |
+| Memory latency | ns random access | Pointer-chase through randomized buffer | **Deferred to 0.8.1+** (research gap A) |
+| L2 cache detection | KB/s at 64/128/256 KB working sets | | **Deferred to 0.8.1+** (research gap B, needs DGROUP reclaim + FAR buffer work beyond current 32 KB cap) |
+| DRAM latency derivation | ns | 1000000 / (largest-sweep-kbps / line-size-kb) | **Deferred to 0.8.1+** (research gap E) |
+| Per-instruction FPU microbench | cycles/FADD, FMUL, FDIV, FSQRT | | **Deferred to 0.9.0** (replacement story for Whetstone) |
+| Disk throughput | KB/s sequential read | INT 13h raw sector reads | **Deferred to 0.9.0+** (needs validation surface) |
 
-All benchmarks run under the timing subsystem in either quick or calibrated mode.
+All benchmarks run under the timing subsystem in either quick or calibrated mode. Calibrated mode runs N passes, computes median + coefficient of variation, feeds the thermal-stability tracker (Mann-Kendall α=0.05).
 
 ## 6. Core Subsystems
 
@@ -126,7 +144,17 @@ PIT Channel 2 gate-based measurement. Channel 2 is used because it can be starte
 
 ### Display
 
-Text-mode abstraction covering MDA, CGA, Hercules, EGA, and VGA. Detects adapter class at startup. On CGA, uses retrace-synced writes to avoid snow. All output is 80x25 compatible. Color is used where available but never load-bearing.
+Text-mode abstraction covering MDA, CGA, Hercules, EGA, and VGA. Detects adapter class at startup via the research-aligned waterfall: INT 10h AH=1Ah → INT 10h AH=12h BL=10h → BDA equipment flag → 3BAh bit 7 toggle (MDA vs Hercules). On CGA, all VRAM writes gate on 3DAh retrace edge via `tui_wait_cga_retrace_edge()` to avoid snow (v0.8.0-M3.1). All output is 80x25 compatible. Color is used where available but never load-bearing.
+
+The `/MONO` flag (v0.8.0-M3.5) forces monochrome rendering regardless of detected adapter. Attribute mapping per MS-DOS UI-UX research Tier 0: 07h body, 0Fh emphasis, 01h underline, 70h reverse, F0h blink-reverse, 00h/08h reserved-invisible. All rendering paths query `display_is_mono()` which unifies the check across /MONO-forced and native-mono adapters.
+
+EGA/VGA color adapters get INT 10h AX=1003h BL=00h at startup (v0.8.0-M3.6) to switch attribute byte bit 7 from blink-enable to background-intensity, giving 16 background colors. Zero-cost quality win.
+
+### UI interaction (CUA-lite, v0.8.0-M3)
+
+The scrollable summary's row 24 is a Norton-style F-key legend: `1Help  3Exit  Up/Dn  PgUp/Dn  Home/End  ...  rows X-Y of N`. Borland TStatusLine palette on color (0x30 base black-on-cyan, 0x3F hotkey bright-white-on-cyan); ATTR_INVERSE on mono. F1 opens a static help overlay (any key returns). F3 and Esc exit; Q remains as legacy alias. Arrow keys + PgUp/PgDn + Home/End scroll the virtual-row table.
+
+No menu bar, no dropdown menus, no modal dialog system. These are deferred to 0.9.0 per plan §9 CUA-lite decision.
 
 ### Report
 
@@ -190,33 +218,56 @@ For calibrated runs, tracks drift across passes. A subsystem whose per-pass timi
 
 ### Upload
 
-When invoked with `/U` and the NetISA TSR is loaded, CERBERUS issues an HTTPS POST of the INI file to a community results endpoint. Upload is opt-in per run and never automatic. See Section 10.
+**v0.8.0: runtime upload is compiled out of stock binaries.** Per plan §8 (upload decision), the network-transmission code path is gated behind `#ifdef CERBERUS_UPLOAD_ENABLED`; stock builds contain no HTTP client, no HTGET shell-out, no crash-on-unreachable-endpoint code. Only the `[network]` transport detection and `/NICK` / `/NOTE` local INI annotation remain in stock.
+
+Research builds (`wmake UPLOAD=1`) re-enable the full upload flow for development work: HTGET shell-out POST to `barelybooting.com/api/v1/submit`, response parsing, re-write of the INI with post-upload state. Endpoint must be deployed for the upload to succeed; contract at `docs/ini-upload-contract.md`.
+
+Upload is on the 0.9.0 path, gated on: (a) server deployed and red-teamed, (b) at least one non-BEK-V409 machine round-tripped successfully, (c) circuit-breaker or health-check added to the client to survive endpoint unavailability gracefully.
 
 ## 7. Command-Line Interface
 
 ```
-CERBERUS [/Q] [/C[:n]] [/D] [/B] [/O:file] [/U] [/?]
+CERBERUS [/Q] [/C[:n]] [/ONLY:<h>] [/SKIP:<h>] [/O:file]
+         [/NOCYRIX] [/NOINTRO] [/QUICK] [/NOUI] [/MONO]
+         [/NICK:<name>] [/NOTE:<text>] [/NOUPLOAD] [/?]
 
-  /Q       Quick mode, single pass (default)
-  /C[:n]   Calibrated mode, n runs per test (default 5)
-  /D       Detection only (skip diagnose and benchmark)
-  /B       Skip diagnostics (detect and benchmark only)
-  /O:file  Write INI report to file (default CERBERUS.INI)
-  /U       Upload results via NetISA
-  /?       Show help
+  /Q              Quick mode (default)
+  /C[:n]          Calibrated mode, n runs (default 7)
+  /ONLY:DET|DIAG|BENCH   Run only that head
+  /SKIP:DET|DIAG|BENCH   Skip that head
+  /SKIP:TIMING    Skip PIT/BIOS timing self-check
+  /SKIP:<module>  Skip a named module caught by a previous hang crumb
+  /O:file         Output INI path (default CERBERUS.INI)
+  /NOCYRIX        Skip Cyrix DIR probe (port 22h safety)
+  /NOINTRO        Skip ANSI splash
+  /NOUI           Skip summary + consistency UI; plain-text stdout batch
+  /QUICK          Skip visual demonstrations (bit parade, Lissajous, etc.)
+  /MONO           Force monochrome rendering regardless of adapter (v0.8.0-M3)
+  /NICK:<name>    Nickname for INI annotation (alnum+space+hyphen, max 32)
+  /NOTE:<text>    Note for INI annotation (printable ASCII, max 128)
+  /NOUPLOAD       No-op in stock builds (upload not compiled in)
+  /UPLOAD         Rejected in stock builds; requires wmake UPLOAD=1
+  /U              Alias for /UPLOAD; same rejection in stock
+  /?              Show help
 ```
 
 ## 8. Target Hardware
 
-| Class | CPU | Minimum RAM | Display | Bus |
-|-------|-----|-------------|---------|-----|
-| Floor | 8088 / 8086 / V20 / V30 | 256KB | MDA | ISA 8-bit |
-| Common | 80286 / 386SX / 386DX | 640KB | CGA / Hercules / EGA | ISA 16-bit |
-| Ceiling | 486SX / 486DX / DX2 / DX4, RapidCAD, Cyrix, AMD | 4MB+ | VGA | VLB / PCI |
+Claim hierarchy (v0.8.0 after M1-M3):
 
-Audio: PC Speaker, AdLib / OPL2 / OPL3, Sound Blaster family.
+| Tier | CPU | RAM | Display | Bus | Validation status |
+|------|-----|-----|---------|-----|-------------------|
+| Floor | 8088 / 8086 / V20 / V30 | 256KB | MDA / CGA | ISA 8-bit | **Code paths present, XT-class real-iron validation pending** |
+| 286 | 80286 / 80287 | 640KB | CGA / EGA | ISA 16-bit | **Code paths present, AT-class real-iron validation pending** |
+| 386 | 80386DX / SX / Am386 / Cyrix 486DLC | 1-16 MB | EGA / VGA | ISA 16-bit | **Validated** on 386 DX-40 + IIT 3C87 + Genoa ET4000 (2026-04-21) |
+| 486 | 486SX / 486DX / DX2 / DX4, AMD Am5x86 | 4-64 MB | VGA / SVGA | VLB / PCI | **Validated** on BEK-V409 (Intel i486DX-2-66 + S3 Trio64 + Vibra 16S + AMI 11/11/92) |
+| Pentium | P5/P54C/P55C/Pentium MMX/Pentium Pro/II/III | 8+ MB | VGA / SVGA | PCI | **Code paths inherited, real-iron validation in flight** |
 
-Explicitly supported oddities: NEC V20/V30 with extended instruction set, RapidCAD FPU behavior, Cyrix instruction timing quirks, AMD 5x86.
+Current public claim: "Validated on 386 and 486. 286 and 8088 paths untested." Ship-valid per plan §4 three-tier path; upgrades as 286 and 8088 captures land.
+
+Audio: PC Speaker, AdLib / OPL2 / OPL3, Sound Blaster family (DSP 1.x through 4.x including CT1745-equipped SB16 / Vibra 16S / Vibra 16).
+
+Explicitly supported oddities: NEC V20/V30 with extended instruction set, RapidCAD FPU behavior, Cyrix instruction timing quirks, AMD 5x86, IIT 3C87 (capture present; DB discrimination via undefined-opcode probe deferred to 0.8.1+).
 
 ## 9. Build & Toolchain
 
@@ -224,28 +275,26 @@ Requires:
 
 - [Open Watcom C/C++](http://open-watcom.github.io/) (v1.9 or v2.0 fork)
 - [NASM](https://www.nasm.us/) for assembly modules
+- Python 3 for the hardware-DB CSV → C regenerator and DGROUP audit tool
 - DOS-compatible build environment (real DOS, DOSBox-X, or OpenWatcom on Windows/Linux cross-compiling)
 
-Build:
+Build variants:
 
 ```
-wmake
+wmake                             # stock 0.8.0 shipping build
+wmake WHETSTONE=1                 # research: re-enable Whetstone emit
+wmake UPLOAD=1                    # research: re-enable upload
+wmake WHETSTONE=1 UPLOAD=1        # both enabled
+wmake dgroup-report               # audit near-data budget against 64 KB ceiling
 ```
 
-Produces `CERBERUS.EXE`, DOS real-mode, large memory model. Target size under 64KB for diskette-friendly distribution.
+Produces `CERBERUS.EXE`, DOS real-mode, medium memory model (code >64 KB allowed, near data ≤64 KB). v0.8.0-M3 stock build: 166,898 bytes. DGROUP near-data: 60,976 bytes (59.5 KB), 2.4 KB headroom vs 62 KB soft target. Host-side unit test suite (run on Windows/Linux dev box, exercises pure-math + inference paths): 320 assertions across 9 suites.
 
-## 10. NetISA Integration
+## 10. Upload ecosystem (0.9.0+)
 
-CERBERUS is the first DOS application designed from day one to integrate with NetISA, the open-source TLS 1.3 networking card for vintage PCs. When the NetISA TSR is resident:
+The upload client to `barelybooting.com/cerberus/` is **compiled out of stock 0.8.0 binaries per plan §8**. Research builds can re-enable via `wmake UPLOAD=1`. Full runtime path + server deployment + circuit-breaker + round-trip validation are the 0.9.0 scope.
 
-- `/U` triggers an HTTPS POST of the INI output to a public results endpoint
-- Payload is the raw INI, prefixed with the system signature
-- TLS 1.3 handshake and cert validation are handled by the NetISA card
-- The host PC never sees a cryptographic primitive
-
-This produces the ecosystem effect: a vintage PC can securely upload its own hardware profile over the open internet, from DOS, over WiFi. Aggregated, this becomes a public database of real-world vintage PC configurations and measured performance. No Windows, no modern driver stack, no man in the middle.
-
-Upload is opt-in per invocation. CERBERUS never uploads without `/U`. The INI file is always written locally first.
+The long-term ecosystem ambition (TLS 1.3 HTTPS POST via NetISA TSR, aggregated public hardware database, no Windows / no modern driver stack / no man in the middle) remains the 1.0.0 target. 0.8.0 preserves the infrastructure (contract doc, INI schema, network transport detection, /NICK + /NOTE annotation) so the 0.9.0+ revival is a compile-flag flip once the server is ready.
 
 ## 11. Repository Structure
 
@@ -256,41 +305,94 @@ cerberus/
   CERBERUS.md               This document
   LICENSE                   License file
   src/
-    cerberus.h              Master header (types, constants)
-    main.c                  Entry point, CLI, orchestration
+    cerberus.h              Master header (types, constants, opts_t)
+    main.c                  Entry point, CLI parse_args, orchestration, _exit bypass (M1.7)
     core/
-      timing.h/c            PIT timing subsystem
-      display.h/c           Text-mode display abstraction
-      report.h/c            INI output, system signature
-      consist.h/c           Consistency engine
-      thermal.h/c           Thermal stability tracking
+      timing.{h,c,_a.asm}   PIT timing subsystem, RDTSC backend gate, stats accumulator
+      display.{h,c}         Adapter waterfall + attribute primitives + /MONO + 16-bg enable
+      tui_util.{h,c}        Shared text-mode UI primitives + CGA snow gate (M3.1)
+      report.{h,c}          INI output, system signature, dual-signature scheme
+      sha1.{h,c}            Hash for signatures
+      consist.{h,c}         Consistency engine (11 rules + possible-causes narration)
+      thermal.{h,c}         Mann-Kendall α=0.05 trend test
+      crumb.{h,c}           Crash-recovery breadcrumb (CERBERUS.LAST via DOS commit)
+      ui.{h,c}              Scrollable three-heads summary + CUA-lite legend + F1 help
+      intro.{h,c}           ANSI boot splash (v0.5.0 three-headed-dog)
+      head_art.{h,c}        Three-heads directional CP437 art
+      journey.{h,c}         Visual journey framework + title cards
+      timing_metronome.c    PIT metronome visual
+      audio_scale.{h,c}     End-of-journey audio scale (PC speaker / OPL2 / SB DSP)
+      cache_buffers.{h,c}   Far buffer allocation for cache probes
     detect/
       detect.h              Head I interface
-      cpu.c                 CPU detection (8088-486, CPUID)
-      cpu_a.asm             CPU detection ASM (NASM)
-      fpu.c                 FPU detection
-      mem.c                 Memory detection
-      cache.c               Cache detection
-      bus.c                 Bus detection
-      video.c               Video detection
-      audio.c               Audio detection
-      bios.c                BIOS info
       detect_all.c          Detection orchestrator
+      env.{h,c}             Emulator detection + confidence clamping
+      unknown.{h,c}         Unknown-hardware capture to CERBERUS.UNK
+      cpu.{h,c,_a.asm}      CPU detection (instruction probing + CPUID + family token)
+      cpu_db.{h,c}          Generated from hw_db/cpus.csv (34 entries)
+      fpu.{h,c,_a.asm}      FPU detection (FNINIT/FNSTSW sentinel)
+      fpu_db.{h,c}          Generated from hw_db/fpus.csv (14 entries)
+      mem.{h,c,_a.asm}      Memory detection (INT 12h, INT 15h AH=88h/E801h, XMS AH=08h)
+      cache.{h,c}           Cache class-inference from CPU DB
+      bus.{h,c}             PCI + ISA + VLB-possibility bus detection
+      video.{h,c}           Adapter detection, S3 CR30 chipset ID, 28-entry DB
+      video_db.{h,c}        Generated from hw_db/video.csv
+      audio.{h,c}           PC speaker + OPL + SB DSP probes, 31-entry DB with mixer_chip column
+      audio_db.{h,c}        Generated from hw_db/audio.csv
+      bios.{h,c}            BIOS date + family + $PnP scan, 21-entry DB
+      bios_db.{h,c}         Generated from hw_db/bios.csv
+      network.{h,c}         Transport detection (NetISA/pktdrv/mTCP/WATTCP)
     diag/
-      diag.h                Head II interface
+      diag.{h,c,_a.asm}     Head II interface + shared types
       diag_all.c            Diagnostics orchestrator
-      (per-subsystem diagnostic modules)
+      diag_cpu.c            ALU + MUL + shift integrity probes
+      diag_mem.c            Walking-1s/0s + addr-in-addr + checkerboard + inv-checkerboard (M2.7)
+      diag_fpu.c            FPU bit-exact correctness tests
+      diag_fpu_fingerprint.{c,_a.asm}   5-axis fingerprint + rounding/precision/exception probes (M2)
+      diag_video.c          VRAM walk + 4-pattern integrity
+      diag_cache.c          Stride-ratio health probe
+      diag_dma.c            8237 count-register probe (channels 1/2/3/5/6/7)
+      diag_bit_parade.c     Journey visual: CPU ALU bit parade
+      diag_lissajous.c      Journey visual: FPU Lissajous
+      diag_latency_map.c    Journey visual: cache latency heatmap
     bench/
-      bench.h               Head III interface
-      bench_all.c           Benchmark orchestrator
-      (per-subsystem benchmark modules)
+      bench.h, bench_all.c  Head III interface + orchestrator
+      bench_cpu.c           Integer throughput benchmark
+      bench_memory.c        REP MOVSW/STOSW/LODSB bandwidth
+      bench_fpu.c           Aggregate FPU mix (primary FPU throughput metric in 0.8.0)
+      bench_cache.c         Small/large buffer throughput (2 KB vs 32 KB)
+      bench_cache_char.c    L1 size + line size + write policy characterization (6-stride v0.8.0-M2)
+      bench_video.c         Text-mode + mode 13h VRAM throughput
+      bench_dhrystone.c     Dhrystone 2.1 port (Weicker)
+      bench_whetstone.c     Curnow-Wichmann Whetstone (compiled, stock-emit suppressed)
+      bench_whet_fpu.asm    x87 asm kernel for Whetstone
+      bench_mandelbrot.c    VGA mode 13h visual coda (gated with Whetstone)
+      bench_cache_waterfall.c   Journey visual: 9-band memory cache waterfall
     upload/
-      upload.h              NetISA upload interface
-      upload.c              Upload implementation
+      upload.{h,c}          Upload client (runtime path #ifdef'd out in stock builds)
   docs/
+    CERBERUS_0.8.0_PLAN.md  Release doctrine for 0.8.0
     methodology.md          How each measurement works
-    consistency-rules.md    Truth engine logic
+    consistency-rules.md    Consistency engine logic
+    ini-format.md           INI schema reference
+    ini-upload-contract.md  Client/server API contract for upload
     contributing.md         PR and commit conventions
+    quality-gates/          Per-milestone adversarial gate outcomes
+    sessions/               Development session reports
+    research/homage/        Ethical homage research on 17 DOS-era reference tools
+    Cache Test Research.md  Source document for M2 cache-probe scope
+    FPU Test Research.md    Source document for M2 FPU-probe scope
+    General Test Research.md  Source document for broader scope items
+  tests/
+    host/                   OpenWatcom Win32 console host tests (320 assertions, 9 suites)
+    target/                 Real-hardware validation protocols (VALIDATION-486.md, VALIDATION-0.8.0-M1.md)
+    captures/               Archived real-hardware INI captures, per-machine READMEs
+  tools/
+    dgroup_check.py         Near-data budget auditor (wmake dgroup-report)
+    repstosd/               Issue #6 VRAM-throughput standalone test
+  hw_db/
+    cpus.csv, fpus.csv, video.csv, audio.csv, bios.csv   Human-editable hardware DBs
+    build_*.py              CSV-to-C generators (wmake regen-cpu-db etc.)
 ```
 
 ## 12. Release & Distribution Plan

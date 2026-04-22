@@ -1,24 +1,15 @@
 # CERBERUS Measurement Methodology
 
-This document records the measurement method, confidence rationale, and known failure modes for every result CERBERUS reports. Added to as each Phase 1 / 3 subsystem is implemented.
+This document records the measurement method, confidence rationale, and known failure modes for every result CERBERUS reports. Updated through v0.8.0-M3 (2026-04-22).
 
 ## Timing
 
-- PIT Channel 2 gate-based measurement, ≈838ns resolution
+- PIT Channel 2 gate-based measurement, ~838ns resolution
 - `timing_ticks_to_us` uses `unsigned long` throughout to avoid the 16-bit overflow trap
 - Rollover compensation: PIT counts DOWN, so `stop > start` indicates wrap
 - XT-clone PIT C2 sanity probe runs at `timing_init()`; fallback to BIOS tick counter flags all results LOW confidence
-
-## Pending subsystems
-
-- CPU detection (Task 1.1)
-- FPU detection (Task 1.2)
-- Memory detection (Task 1.3) — INT 15h AX=E820h deliberately excluded (ACPI-era, not on pre-Pentium BIOSes)
-- Cache detection (Task 1.4)
-- Bus detection (Task 1.5)
-- Video detection (Task 1.6)
-- Audio detection (Task 1.7)
-- BIOS info (Task 1.8)
+- v0.7.1: `timing_stats_t` accumulator for repeat-with-jitter measurement; `timing_confidence_from_range_pct` maps jitter to CONF_HIGH/MEDIUM/LOW bands
+- v0.7.1: RDTSC backend gated on CPUID leaf 1 EDX bit 4 via `cpu_has_tsc()`; `timing_emit_method_info()` writes `timing.method` and (on RDTSC paths) `timing.cpu_mhz` calibrated via a 4-BIOS-tick window
 
 ## Why Whetstone is not in 0.8.0 (added 2026-04-21)
 
@@ -71,3 +62,120 @@ The `crumb_exit()` before `_exit()` unlinks `CERBERUS.LAST` (`.LAS` on disk due 
 **Verified on BEK-V409 2026-04-21 20:39**: clean exit to DOS prompt after Q-exit, no reset required, `CERBERUS.LAS` absent post-run. Full INI captured at `tests/captures/486-BEK-V409-2026-04-21-m1-exit/capture.ini`.
 
 **Post-fix observation**: with the exit path now running cleanly, Watcom's libc NULL-assignment canary fires and prints "*** NULL assignment detected" above the DOS prompt. This is a real latent defect in CERBERUS (some code somewhere writes to a near-NULL address, corrupting the first 32 bytes of DGROUP's `_NULL` segment) that was previously masked by the hang. It is the same underlying defect as the intermittent `[bios] dree=` BSS stomp: both are caused by writes that land at or near DGROUP offset 0, and whether the stomp overflows into adjacent CONST (corrupting bios.date string literals) depends on the specific probe-path taken (`opl=opl3` path is shorter and stays within `_NULL`; `opl=none` fallback path is longer and overflows into CONST). DOSBox-X does not reproduce the symptom. Investigation is filed for M2 via `docs/quality-gates/M1-gate-2026-04-21.md` W6 + W4; the removal-at-a-time protocol from this section's crumb-chain investigation applies analogously to the NULL-write investigation.
+
+## Cache characterization probes (M2.1)
+
+The cache-sweep measures bytes/sec for a fixed-stride read over a working set. Six stride points (`32, 64, 128, 256, 512, 1024` bytes) sweep a 4 KB buffer kept resident in L1 on all target CPUs. The detector emits the smallest stride at which throughput transitions from "every access hits a new line" to "multiple accesses per line" as the inferred line size.
+
+- **Stride=128 rationale**: Pentium-era parts split at 32-byte lines, while Pentium-Pro+ split at 64. Without a 128-byte stride the plateau between 64 and 256 is under-sampled and the detector cannot distinguish Pentium from later Intel. Adding stride=128 makes `line_bytes=32` detectable by the plateau signature `K(32) < K(64) ~= K(128)`; `line_bytes=64` shows `K(32) < K(64) < K(128) ~= K(256)`.
+- **Inference bounds**: `bench_cc_infer_line_bytes()` accepts 5 or 6 stride points for backward compatibility with pre-M2 captures. When exactly 5 points are present (no stride=128), the detector falls back to the older heuristic and tags the output as `inferred_from_5point_sweep=1` so consistency rules can downgrade confidence.
+- **Working set**: the 4 KB buffer fits in the smallest 486-class L1 (8 KB) with margin for code + working variables. Measuring at this buffer size means the sweep characterizes L1 throughput specifically; L2 detection via larger buffers is deferred to 0.8.1 (see `docs/research/Cache Test Research.md` for the 64/128/256 KB extension plan).
+
+## FPU behavioral fingerprint (M2.2–M2.4, M2.6)
+
+The fingerprint is a 5-axis probe that discriminates 8087 / 80287 / 80387 / 486-integrated / Pentium+ FPUs by exercising documented control-register and edge-case behaviors. Each axis is a one-instruction or short-sequence probe chosen so the observable differs across generations and cannot be inferred from CPUID alone.
+
+### M2.2 FPTAN pushes 1.0 (research gap I)
+
+FPTAN on 8087 and 80287 computes tan(angle) and leaves a single value on the stack. FPTAN on 387+ pushes tan(angle) AND a trailing 1.0 (the implicit denominator for a following FPATAN that would recover the original angle). The probe:
+
+```
+FLDPI                  ; push π
+FLD1                   ; push 1.0
+FDIV                   ; st(0) = π/4 * something... use a clean 0.5
+FLD <angle=0.5>        ; simpler: push 0.5 directly
+FPTAN
+FCOMP <1.0>            ; compare st(0) to 1.0; on 387+ st(0) IS 1.0
+FSTSW ax
+test ah, 0x40          ; ZF bit of C3 == equal
+```
+
+`diagnose.fpu.fptan_pushes_one = yes` => 387 or later. `no` => 8087/287 (stored as the partial-reduction remainder, not 1.0). The probe is gated on `cpu_has_fpu` to skip no-FPU systems, and the angle=0.5 avoids the FPTAN input-range restriction (|angle| < π/4 on 8087/287).
+
+### M2.3 Rounding-control cross-check (research gap J)
+
+All x87 parts honor the RC field of the control word (bits 10:11 of FCW), but the exact rounding-to-integer behavior differs subtly for negative numbers. The probe stores two fixed test values (`1.5` and `-1.5`) as 16-bit integers via FISTP at all four rounding modes (00=nearest-even, 01=down, 10=up, 11=truncate-toward-zero) and tabulates the 8 results.
+
+Canonical 387/486/Pentium result table:
+
+| mode     | FISTP(1.5) | FISTP(-1.5) |
+|----------|-----------:|------------:|
+| nearest  |          2 |          -2 |
+| down     |          1 |          -2 |
+| up       |          2 |          -1 |
+| truncate |          1 |          -1 |
+
+Any deviation => `diagnose.fpu.rounding_modes_ok=no` and the 8 raw integers are emitted as sub-keys (`rc_near_pos`, `rc_near_neg`, …) for investigation. 8087/287 are identical to 387 for this probe so it does not discriminate generation, but it catches emulator stubs and damaged FPUs.
+
+### M2.4 Precision-control cross-check (research gap K)
+
+The PC field (bits 8:9 of FCW) selects 24-bit (single), 53-bit (double), or 64-bit (extended) significand for arithmetic. The probe stores 1.0/3.0 as a 10-byte tword (FSTP tbyte) at each precision, so the low mantissa bits differ. The three tword results must be distinct: if they match, PC is ignored or clamped (typical of software emulators). `diagnose.fpu.precision_modes_ok=yes|no` with the three 10-byte hex strings as sub-keys.
+
+### M2.6 Exception-flag roundtrip (research gap M)
+
+Each of the 6 x87 exceptions is triggered deliberately, observed in the status word, and cleared via FCLEX:
+
+| exception | trigger                           | status bit |
+|-----------|-----------------------------------|-----------:|
+| IE (invalid)  | FSQRT(-1.0)                    | 0 |
+| DE (denormal) | FLD denormal then FADD 1.0     | 1 |
+| ZE (zerodiv)  | FLD 1.0 / FLD 0.0 / FDIV       | 2 |
+| OE (overflow) | FLD MAX_FLOAT / FMUL MAX_FLOAT | 3 |
+| UE (underflow)| FLD MIN_DENORM / FMUL 0.5      | 4 |
+| PE (precision)| FLD 1.0 / FLD 3.0 / FDIV       | 5 |
+
+Before each probe: `FCLEX` (clear SW). After each probe: `FSTSW AX` and check the relevant bit; then `FCLEX` again to avoid cross-contamination. All 6 bits must round-trip for `diagnose.fpu.exception_flags_ok=yes`. Failures often indicate a 287 with an external 387 emulator that swallows some exception classes, or a Weitek coprocessor responding on partial FPU port ranges.
+
+Control-word mask bits (IM/DM/ZM/OM/UM/PM, bits 0–5) are cleared via FLDCW before each probe so exceptions are not masked silently; the mask is restored to 0x037F (default-masked-all) after the roundtrip so subsequent benches are not sensitive to our probe state.
+
+## Memory pattern diagnostics (M2.7)
+
+`diag_mem` runs a pattern-write, readback, comparison loop over a configurable-size buffer (default 64 KB conventional, extended to XMS when available). Two new patterns in M2.7:
+
+- **Checkerboard (0x55 / 0xAA)**: alternating nibbles within each byte exercise adjacent bit-cells in opposite directions. A stuck-short between adjacent DQ lines reads back as 0x00 or 0xFF; a stuck-at fault reports a consistent bit offset across all addresses.
+- **Inverse checkerboard (0xAA / 0x55)**: same pattern offset by one byte. Running both catches address-decode faults where the byte at offset N gets the pattern intended for N+1.
+
+Both patterns complement the existing walking-ones (`0x01`, `0x02`, `0x04`, …) and walking-zeros (`0xFE`, `0xFD`, …) patterns. Pattern execution is always paired: write-P, read-verify, write-~P, read-verify, in that order, so a stuck-at-0 fault reports a single P failure while a true data-line short reports mirror-image errors on both passes.
+
+Deferred to 0.8.1 and tracked against `docs/research/Memory Test Research.md`: March-C+ algorithm, parity-error deliberate-injection via INT 2 NMI path, and XMS/EMS boundary stress.
+
+## CGA snow safety gate (M3.1)
+
+CGA video RAM at B800:0000 is dual-ported: the CRTC reads it during active scan, and any CPU write during active scan produces visible snow (the CPU's bus cycle wins, corrupting what the CRTC emits for the current character cell). The fix is to write only during vertical-retrace or horizontal-retrace windows, detected via the 3DAh status port bit 0 (1 = retrace in progress).
+
+`tui_wait_cga_retrace_edge()` in `src/core/tui_util.c` polls 3DAh until it observes a retrace-inactive → retrace-active transition (the "edge"). Two sequential reads guarantee we land inside a fresh retrace window rather than catching the tail of the previous one. Non-CGA adapters (MDA, EGA, VGA) short-circuit the wait because they are not dual-ported in the same way and do not snow.
+
+Adapter tier is established once at `display_init()` via the adapter-tier waterfall (M3.7 below); all row-24 writes and full-screen updates gate on `tui_wait_cga_retrace_edge()` when `display_adapter_tier == CGA`. The cost on CGA is ~1 ms per call (one vertical-retrace interval at 60 Hz), which is invisible for the row-24 legend refresh and acceptable for help-overlay show/hide.
+
+## Adapter-tier detection waterfall (M3.7)
+
+Detection runs four probes in order and stops at the first unambiguous answer:
+
+1. **INT 10h AH=1Ah (Get Display Combination Code)**: VGA-era BIOS returns a BL/BH pair identifying the active and alternate adapters. AL=1Ah on return means the call is supported; any other AL means the BIOS is pre-VGA and we fall through. When supported, BL directly maps to our tier (07h/08h = VGA, 04h/05h = EGA, 01h = MDA, 02h = CGA).
+2. **INT 10h AH=12h BL=10h (Get EGA Info)**: EGA BIOS returns BH (monitor type) and BL (memory size) in a way that distinguishes EGA from CGA. Unused registers stay unchanged across the call on non-EGA BIOS; we preload a sentinel pattern and detect no-response by pattern-persistence.
+3. **BIOS Data Area 40:49h (video mode) + 40:10h (equipment byte)**: the equipment byte bits 4:5 give the initial video mode (00=EGA/VGA-deferred, 01=CGA-40, 10=CGA-80, 11=MDA-80). Current mode at 40:49h cross-checks this.
+4. **3BAh toggle probe**: writing to 3BAh and reading back discriminates MDA (port responds) from CGA (port does not). Final fallback.
+
+Result is cached in `display_adapter_tier` for the rest of the run; all subsequent CGA snow gating, mono-attribute mapping, and 16-background-color probing reads from the cache.
+
+## /MONO attribute mapping + 16-background-color probe (M3.5, M3.6)
+
+CERBERUS uses a 5-role semantic palette: NORMAL, EMPHASIS, DIM, HIGHLIGHT, WARNING. Each role maps to a hardware attribute byte depending on display tier.
+
+### Mono / /MONO-forced mapping
+
+| role      | attribute | effect on mono    |
+|-----------|----------:|-------------------|
+| NORMAL    |      0x07 | white on black    |
+| EMPHASIS  |      0x0F | bright white      |
+| DIM       |      0x01 | underline         |
+| HIGHLIGHT |      0x70 | reverse video     |
+| WARNING   |      0xF0 | bright reverse    |
+
+The 0x01 underline attribute is MDA-specific (the hardware literally underlines the character); CGA displays it as blue-on-black. For CGA composite monitors the distinction disappears. `/MONO` forces this table regardless of detected tier so users with amber/green-phosphor monitors attached to color cards get the semantic-correct rendering rather than color-coded rendering their phosphor cannot express.
+
+### 16-background-color enable on EGA/VGA
+
+By default EGA/VGA put the top attribute-byte bit in the "blink" role (character blinks). `INT 10h AX=1003h BL=00h` reassigns that bit to "background-intensity" instead, giving 16 background colors (0x00–0xF0) rather than 8 + blink. CERBERUS issues this at `display_init()` on EGA and VGA tiers so WARNING's 0xF0 renders as bright-bg rather than blinking-bg. The call is a no-op on MDA and CGA (CGA's blink semantics are immutable), so we gate it on tier.
+
+Known caveat: certain SVGA BIOSes (notably some ET4000 variants and early S3 Trio boards) silently drop AX=1003h and keep blink semantics. Detection would require reading back the internal attribute-controller register, which is not portable. Accepted as documented limitation; users seeing blinking WARNING can pass `/MONO` as a workaround.

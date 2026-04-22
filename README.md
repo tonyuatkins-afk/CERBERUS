@@ -31,34 +31,34 @@ Historical arc (unchanged): `v0.1.1-scaffold` → `v0.2-rc1` → `v0.3-rc1` → 
 - Genoa ET4000 detected as generic `adapter=vga`. Video DB has Tseng ET4000 entries, but the Genoa OEM BIOS doesn't surface the expected signature. M2 probe-path investigation.
 - Intermittent OPL detection on Vibra 16 PnP (issue #2, pre-existing).
 
-**What's in each milestone:**
-- **v0.4.0** (2026-04-19) — All six subsystems (detect, diagnose, benchmark, consistency engine, thermal tracker, UI) real-hardware-validated on BEK-V409.
-- **v0.5.0** — Scrollable three-heads summary UI; Whetstone x87-asm kernel; Mandelbrot FPU visual demo.
-- **v0.6.0** — Visual Diagnostics Journey: new tagline "Tough Times Demand Tough Tests"; directional head art (left / center / right); CPU ALU bit parade; FPU Lissajous; PIT metronome; journey framework with title cards + `/QUICK` flag.
-- **v0.6.1** — Memory Cache Waterfall; Cache Latency Heat Map; OPL2 FM audio scale; result flashes wired.
-- **v0.6.2** — Shared TUI helpers module; SB DSP direct-mode PCM audio (third audio path).
-- **v0.7.0-rc1** — Community Upload (Part A): network transport detection, `[upload]` INI section, `/NOUPLOAD`/`/UPLOAD`/`/NICK`/`/NOTE` flags, HTGET shell-out for POST, UPLOAD STATUS summary section, INI format frozen at `ini_format=1`, server API contract documented at [`docs/ini-upload-contract.md`](docs/ini-upload-contract.md).
-- **v0.7.0-rc2** — Quality-gate sweep: atomic BIOS-tick read in `intro.c`, `UPLOAD.TMP` cleanup on fopen failure, INI dedup via `report_update_str()` for post-upload status emit, `audit_narration_widths()` spot-check.
+**Subsystem state at v0.8.0-M3:**
 
-BEK-V409 (Intel i486DX-2-66, AMI BIOS 11/11/92, S3 Trio64, Vibra 16S, 63 MB XMS) is the validation workstation. 386 and 8088 validation are the next-platforms work. Hardware identification has 128 seed entries across 5 databases; your chip may not be present. `CERBERUS.UNK` captures get submitted as GitHub issues and added to the CSVs.
+| Subsystem | Status |
+|---|---|
+| Scaffold, timing (PIT C2 + RDTSC backend), INI writer, dual signatures (identity + run), crash-recovery breadcrumb | Complete |
+| Emulator detection + confidence clamping | Complete |
+| Detection: CPU / FPU / memory / cache / bus / video / audio / BIOS | Complete. CPUID-capable paths + pre-CPUID instruction probing + normalized cpu.class family token (v0.8.0-M1) |
+| Hardware identification databases (CPU 34 / FPU 14 / video 28 / audio 31 / BIOS 21 = 128 seeds) | Complete + regen via `wmake regen-<subsystem>-db` |
+| Audio DB `mixer_chip` column (CT1745 discriminator for SB16 family) | Complete |
+| Unknown-hardware submission path (`CERBERUS.UNK`) | Complete |
+| Scrollable three-heads summary UI + directional head art | Complete |
+| CUA-lite interaction (F1 help overlay, F3 exit, Norton-style F-key legend, Esc/Q aliases) | Complete v0.8.0-M3 |
+| /MONO flag with MDA-valid attribute clamping | Complete v0.8.0-M3.5 |
+| 16-background-color mode on EGA/VGA (INT 10h AX=1003h BL=00h) | Complete v0.8.0-M3.6 |
+| CGA snow-safety gate (3DAh retrace sync on every VRAM write) | Complete v0.8.0-M3.1 |
+| Diagnostic tests (ALU, memory walking-1s/0s/AinA + **checkerboard M2.7**, FPU bit-exact + 5-axis behavioral fingerprint + rounding/precision/exception probes M2, video RAM, cache-stride, DMA-controller) | Complete |
+| Benchmark suite (integer, FPU aggregate, memory, cache, video, Dhrystone) | Complete |
+| Whetstone kernel + Mandelbrot coda | Compiled but **stock-emit suppressed** per v0.8.0-M1 trust-first decision. `wmake WHETSTONE=1` re-enables for research |
+| Cache characterization (L1 size + line size + write policy + stride=128 Pentium+) | Complete v0.8.0-M2.1 |
+| Consistency engine (11 rules + possible-causes narration M4.1) and thermal stability (Mann-Kendall α=0.05, N≥5) | Complete |
+| Timing self-check (PIT C2 vs BIOS tick cross-check, rule 4a) | Complete |
+| Homage research lessons (17 DOS-era reference tools studied across Phase 1-3) | Complete |
+| Upload (HTGET shell-out POST to barelybooting.com) | **Compiled out of stock builds** per v0.8.0-M1. `wmake UPLOAD=1` re-enables. 0.9.0 revival target |
+| Real-hardware validation corpus | 486 + 386 archived; 286 + XT-class pending. `tests/captures/<class>-<id>-<date>/` |
+| Quality-gate framework | `docs/quality-gates/M1-gate-*.md` through `M3-gate-*.md`, adversarial-review patterns documented |
+| DGROUP audit tool | `wmake dgroup-report` / `tools/dgroup_check.py` |
 
-| Subsystem | Target version | Current state |
-|---|---|---|
-| Scaffold, timing, INI writer, dual signatures, crash breadcrumb | v0.1 | complete, tagged `v0.1.1-scaffold` |
-| Emulator detection + confidence clamping | v0.2 | complete, tagged `v0.2-rc1` |
-| Detection: CPU / FPU / memory / cache / bus / video / audio / BIOS | v0.2 | complete. 486 gate passed. 386 and 8088 pending. |
-| Hardware identification databases (CPU 34 / FPU 14 / video 28 / audio 31 / BIOS 21) | v0.2 | 128 seed entries |
-| Audio DB `mixer_chip` column (CT1745 discriminator for SB16 family) | v0.2 | complete |
-| Unknown-hardware submission path (`CERBERUS.UNK`) | v0.2 | complete |
-| Summary UI, three-pane direct-VRAM color renderer | v0.3 | complete; polished in v0.4.0 with CP437 corruption and V_U32 blank-row fixes |
-| Diagnostic tests (ALU, memory walking-1s/0s/AinA, FPU bit-exact, video RAM, cache-stride, DMA-controller) | v0.3 | **6 of 6 complete**, tagged `v0.3-rc1` |
-| Benchmark suite (integer, FPU, memory, cache, video, Dhrystone, Whetstone) | v0.4 | 5 of 5 benchmark modules live; Whetstone FPU-asm rework [#4](https://github.com/tonyuatkins-afk/CERBERUS/issues/4) deferred |
-| Consistency engine (11 rules) and thermal stability (Mann-Kendall, α=0.05, N≥5) | v0.5 | quality-gated clean |
-| Timing self-check (PIT C2 vs BIOS tick cross-check, rule 4a) | v0.5 | complete |
-| Homage Phase 2 research lessons (7 tasks across CheckIt, CACHECHK, FASTVID, CHKCPU, TOPBENCH) | v0.4 | complete |
-| NetISA upload | v0.6 | build-flag disabled by default |
-
-See [CERBERUS.md](CERBERUS.md) for the full design document and [docs/plans/](docs/plans/) for the implementation plan.
+See [CERBERUS.md](CERBERUS.md) for the full design document, [docs/CERBERUS_0.8.0_PLAN.md](docs/CERBERUS_0.8.0_PLAN.md) for release doctrine, and [docs/quality-gates/](docs/quality-gates/) for per-milestone gate outcomes.
 
 ## What it does today
 
@@ -70,12 +70,31 @@ The INI file carries two signatures:
 
 These support the counterfeit-CPU and remarked-chip detection scenario: two runs from the same hardware should produce the same `signature` but different `run_signature` values. Divergent behavior under an identical claimed identity is the fingerprint the dual-signature scheme is designed to expose.
 
-## What it does NOT do yet
+## What does not work yet (v0.8.0)
 
-- No NetISA upload. The default build returns an "upload disabled" exit code. Enable at v0.6 with `wmake NETISA=1` once the NetISA card firmware is far enough along.
-- No cache write-back vs write-through reporting ([v0.5+ candidate](docs/research/homage/chkcpu-lessons.md)). Bench output makes the distinction visible through the small/large throughput comparison, but `detect.cache.l1_mode` is not yet a reported key.
-- No Cyrix DIR-based pre-CPUID discrimination ([v0.5+ candidate](docs/research/homage/chkcpu-lessons.md)). A Cyrix 486DLC currently tags as generic `486-no-cpuid`.
-- No automatic bar-graph comparison UI. Numbers emit as absolute rates; comparison against CheckIt or community baselines is manual today.
+### Deferred to 0.8.1 or 0.9.0
+
+- **Runtime upload to `barelybooting.com`.** Compiled out of stock 0.8.0 per plan §8. Server not yet deployed; unreachable-endpoint code path had unfixed stack-overflow risk. `wmake UPLOAD=1` enables for development.
+- **Whetstone numeric emit.** Kernel compiled in every build; stock dispatcher suppresses emit. Plan §7 trust-first decision: 30-50x per-unit-cost anomaly on real iron never root-caused. `bench_fpu.ops_per_sec` is the shipping FPU throughput metric. `wmake WHETSTONE=1` re-enables for calibration work. 0.9.0 direction: replace with per-instruction FADD/FMUL/FDIV/FSQRT/FSIN/FCOS microbenchmarks.
+- **IEEE-754 edge-case FPU diagnostic** (M2.5, research gap L). Nine operand classes × five ops. DGROUP budget pressure at M2 exit (3 KB headroom); needs const-reclaim work before landing.
+- **CSV output mode (`/CSV` flag).** M2.8 deferred. Format-string DGROUP cost + new code surface. Post-M3 revival.
+- **L2 cache detection via 64/128/256 KB working-set sweep** (research gap B). Requires FAR buffer work beyond the current 32 KB cap.
+- **Pointer-chase cache L1 latency in nanoseconds** (research gap A).
+- **DRAM latency derivation** (research gap E).
+- **Per-instruction FPU microbenchmarks** (0.9.0 replacement for Whetstone).
+- **Menu bar, dropdown menus, modal dialog system.** Explicitly out of 0.8.0 scope per plan §9 CUA-lite decision. 0.9.0 candidate.
+- **Dashboard-default landing screen** (CheckIt "launch with SysInfo populated" pattern). 0.9.0.
+- **Cyrix DIR-based pre-CPUID discrimination.** Cyrix 486DLC currently tags as generic `486-no-cpuid`. Candidate for any 0.8.x point release if Cyrix hardware enters the capture corpus.
+- **IIT 3C87 discrimination** via undefined-opcode probe. Target machine present (386 DX-40 + IIT 3C87) but the M2+ CheckIt-style IIT probe is not yet wired up.
+- **Hercules-variant discrimination** (HGC / HGC+ / InColor via 3BAh bits 6:4). All Hercules cards currently tag as generic `ADAPTER_HERCULES`.
+- **Genoa ET4000 video chipset** detected as generic `adapter=vga`. Video DB has Tseng ET4000; probe path misses the Genoa OEM BIOS signature. Investigation candidate.
+- **Disk I/O benchmarks** (INT 13h sequential read throughput). Wide validation surface; 0.9.0+.
+
+### Known real-iron issues (investigation ongoing)
+
+- **W4/W6 BSS overwrite on BEK-V409 specifically.** Watcom `*** NULL assignment detected` fires on every exit on BEK-V409 (486 DX-2-66 + S3 Trio64 + Vibra 16S + AMI 11/11/92 + EMM386). On certain probe paths (OPL fallback) the stomp spills past the 32-byte `_NULL` guard and corrupts the BIOS date string in CONST. Two-machine capture matrix + DOSBox-X absence empirically narrow the bug to BEK-V409-specific hardware-probe paths (S3 Trio64 CR30 read, Vibra 16S DSP + OPL fallback, UMC491 PIT wrap-guard). Generic CERBERUS code paths ruled out. M2+ investigation when the 486 is back in service.
+- **Intermittent OPL detection on Vibra 16 PnP** (issue #2, pre-existing). Same binary, same box, different boot produces `opl=opl3` vs `opl=none`.
+- **timing_self_check cross-check marked `measurement_failed` on both 486 and 386.** The v0.7.1 UMC491 wrap-guard rejects the PIT/BIOS cross-check across hardware classes; may be too aggressive for original 8253 PIT.
 
 ## What the consistency engine checks today
 
