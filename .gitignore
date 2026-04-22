@@ -112,3 +112,6 @@ devenv/*.TMP
 /UPLOAD.TMP
 /CAPTURE.INI
 /cerberus.map
+
+# Investigation-branch binary; not tagged, not released
+/dist-investigation/
