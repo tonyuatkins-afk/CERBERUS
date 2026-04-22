@@ -163,6 +163,44 @@ static const video_db_entry_t *probe_s3_chipid(void)
     }
 }
 
+/* v0.8.1 M3.2: Tseng ET4000 chip-level probe.
+ *
+ * The Tseng ET4000 has a unique segment-select register at port 3CDh
+ * that's absent on other VGA chipsets and is readable across ET3000 /
+ * ET4000 / ET4000/W32 variants. This probe catches Genoa and other
+ * OEM boards that use ET4000 silicon but surface BIOS strings the
+ * scan_video_bios() text-match misses.
+ *
+ * The probe is a read-write-readback test: save the current value,
+ * write 0x55 + readback, write 0xAA + readback, restore the original.
+ * ET4000 preserves the written value across the readback; other VGAs
+ * either ignore the port (read returns 0xFF) or have different
+ * semantics (e.g. a write disables but read returns a fixed pattern).
+ *
+ * Real-iron validation on the 386 DX-40 + Genoa ET4000 bench box is
+ * pending; the 3CDh behavior is documented in the Tseng ET4000
+ * programmer's reference but specific OEM boards may vary. If the
+ * probe misfires on real hardware, refine the threshold to require
+ * both write patterns to round-trip successfully. */
+static const video_db_entry_t *probe_et4000_chipid(void)
+{
+    unsigned char saved, rb1, rb2;
+
+    saved = (unsigned char)inp(0x3CD);
+
+    outp(0x3CD, 0x55);
+    rb1 = (unsigned char)inp(0x3CD);
+    outp(0x3CD, 0xAA);
+    rb2 = (unsigned char)inp(0x3CD);
+
+    outp(0x3CD, saved);   /* restore */
+
+    if (rb1 != 0x55 || rb2 != 0xAA) return (const video_db_entry_t *)0;
+
+    /* Both patterns round-tripped; this is an ET4000-family chip. */
+    return find_video_db_entry("ET4000");
+}
+
 static int probe_vbe(unsigned int *out_version)
 {
     union  REGS  r;
@@ -205,6 +243,17 @@ void detect_video(result_table_t *t)
                    display_has_color() ? "yes" : "no",
                    env_clamp(CONF_HIGH), VERDICT_UNKNOWN);
 
+    /* v0.8.1 M3.3: Hercules sub-variant. Emits only when adapter is
+     * Hercules; the confidence is MEDIUM because the ID-bit assignments
+     * this probe relies on are documented but the real-iron validation
+     * across actual HGC / HGC+ / InColor boards is still pending. */
+    if (a == ADAPTER_HERCULES) {
+        hercules_variant_t hv = display_hercules_variant();
+        report_add_str(t, "video.hercules_variant",
+                       display_hercules_variant_token(hv),
+                       env_clamp(CONF_MEDIUM), VERDICT_UNKNOWN);
+    }
+
     /* Chipset: HW probe first (S3 chip-ID register), then fall back to
      * BIOS ROM string scan. The HW probe wins because many SVGA cards
      * embed "IBM VGA" for compatibility, which the BIOS scan would match
@@ -212,6 +261,9 @@ void detect_video(result_table_t *t)
     chip = (const video_db_entry_t *)0;
     if (a == ADAPTER_VGA_COLOR || a == ADAPTER_VGA_MONO || a == ADAPTER_MCGA) {
         chip = probe_s3_chipid();
+        /* v0.8.1 M3.2: ET4000 chip-level probe. Fires on OEM boards
+         * (Genoa, etc.) whose BIOS strings the text scan would miss. */
+        if (!chip) chip = probe_et4000_chipid();
     }
     if (!chip) chip = scan_video_bios();
     if (chip) {

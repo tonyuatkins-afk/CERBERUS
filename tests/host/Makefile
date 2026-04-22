@@ -12,7 +12,7 @@ CFLAGS   = -zq -bt=nt -w3 -DCERBERUS_HOST_TEST -I..\..\src
 TESTS = test_timing.exe test_consist.exe test_thermal.exe test_diag_fpu.exe &
         test_diag_fpu_fingerprint.exe test_diag_fpu_edges.exe              &
         test_diag_cache.exe test_diag_dma.exe test_bench_cache.exe         &
-        test_bench_cache_char.exe test_report_csv.exe
+        test_bench_cache_char.exe test_report_csv.exe test_hercules_variant.exe
 
 all: $(TESTS) .SYMBOLIC
 
@@ -49,6 +49,9 @@ test_bench_cache_char.exe: test_bench_cache_char.c ..\..\src\bench\bench_cache_c
 test_report_csv.exe: test_report_csv.c ..\..\src\core\report.c ..\..\src\core\sha1.c ..\..\src\core\report.h ..\..\src\cerberus.h
 	$(CC) $(CFLAGS) -fe=$@ test_report_csv.c
 
+test_hercules_variant.exe: test_hercules_variant.c ..\..\src\core\display_hercules_ids.c ..\..\src\core\display.h
+	$(CC) $(CFLAGS) -fe=$@ test_hercules_variant.c
+
 run: $(TESTS) .SYMBOLIC
 	@test_timing.exe
 	@test_consist.exe
@@ -61,6 +64,7 @@ run: $(TESTS) .SYMBOLIC
 	@test_bench_cache.exe
 	@test_bench_cache_char.exe
 	@test_report_csv.exe
+	@test_hercules_variant.exe
 
 clean: .SYMBOLIC
 	-del *.exe

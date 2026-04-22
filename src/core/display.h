@@ -86,4 +86,35 @@ void display_box_double(int row, int col, int width, int height);
  * non-CGA adapters. */
 void display_wait_retrace(void);
 
+/* v0.8.1 M3.3: Hercules sub-variant discrimination.
+ *
+ * Three documented Hercules adapter variants share the ADAPTER_HERCULES
+ * generic token (we don't split the adapter_t enum because that token
+ * is part of the hardware signature). The variant returned below is a
+ * best-effort classification based on 3BAh status-register bits 6:4,
+ * which the HGC+ and InColor boards use to expose a small identification
+ * code and which the original HGC left unspecified.
+ *
+ * Returns HERCULES_VARIANT_NA when the current adapter is not Hercules.
+ * display_init() must have run first.
+ *
+ * Real-iron signature validation on actual HGC / HGC+ / InColor cards
+ * is required to confirm the bit assignments this probe uses; documented
+ * references disagree on some of the finer details. Pure classification
+ * is host-testable via display_classify_hercules_id(). */
+typedef enum {
+    HERCULES_VARIANT_NA       = 0,   /* not a Hercules adapter */
+    HERCULES_VARIANT_HGC      = 1,   /* original 1982 Hercules Graphics Card */
+    HERCULES_VARIANT_HGCPLUS  = 2,   /* 1986 Plus (adds softfont RAM) */
+    HERCULES_VARIANT_INCOLOR  = 3,   /* 1987 In Color (16-color) */
+    HERCULES_VARIANT_UNKNOWN  = 4    /* Hercules-family but ID bits unmapped */
+} hercules_variant_t;
+
+hercules_variant_t display_hercules_variant(void);
+const char        *display_hercules_variant_token(hercules_variant_t v);
+
+/* Pure classifier — given the 3 ID bits (bits 6:4 of port 3BAh, right-
+ * shifted into 2:0 of a byte), return the variant. Host-testable. */
+hercules_variant_t display_classify_hercules_id(unsigned char id_bits);
+
 #endif

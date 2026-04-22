@@ -303,6 +303,39 @@ void display_init(void)
     display_enable_16bg_colors();
 }
 
+/* ----------------------------------------------------------------------- */
+/* v0.8.1 M3.3: Hercules variant discrimination                              */
+/* ----------------------------------------------------------------------- */
+
+/* Pure classifier + token mapper live in a separate include so host
+ * tests can exercise them without pulling in display.c's DOS-only
+ * conio/dos/i86 dependencies. Guarded so display.c is the sole
+ * inclusion site in the target build. */
+#include "display_hercules_ids.c"
+
+hercules_variant_t display_hercules_variant(void)
+{
+    unsigned char status, id_bits;
+    unsigned int  i;
+
+    if (current_adapter != ADAPTER_HERCULES) return HERCULES_VARIANT_NA;
+
+    /* Sample 3BAh outside the vertical-retrace window so bit 7 doesn't
+     * skew the ID bits. Wait for retrace to start then end, then read
+     * mid-display. If we time out without seeing a full retrace cycle,
+     * fall through to read whatever is there and let the classifier
+     * bucket it as UNKNOWN. */
+    for (i = 0; i < 32000U; i++) {
+        if (inp(0x3BA) & 0x80) break;
+    }
+    for (i = 0; i < 32000U; i++) {
+        if (!(inp(0x3BA) & 0x80)) break;
+    }
+    status  = (unsigned char)inp(0x3BA);
+    id_bits = (unsigned char)((status >> 4) & 0x07);
+    return display_classify_hercules_id(id_bits);
+}
+
 void display_shutdown(void)
 {
     /* Reset attribute so we don't leave the terminal colored after exit */

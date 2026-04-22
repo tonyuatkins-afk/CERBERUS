@@ -32,6 +32,29 @@ extern int fpu_asm_probe(void);
 /* DGROUP-resident sentinel — NASM probe writes into it via DS:offset */
 unsigned short fpu_sentinel;
 
+/* v0.8.1 M3.1: IIT 3C87 discrimination stub.
+ *
+ * Returns 1 when the present coprocessor is confirmed IIT 3C87, 0
+ * otherwise (Intel 80387, ULSI 83C387, Cyrix FasMath 387+, or
+ * undetermined). The actual discriminator requires real-iron signature
+ * capture from a 386 DX-40 + IIT 3C87 bench box; documented approaches
+ * include:
+ *   - FNSAVE extended-bytes check: IIT stores matrix-mode state in
+ *     bytes 94..107 of a 108-byte buffer that Intel leaves at zero
+ *     in real mode.
+ *   - Opcode probe via INT 6 handler: IIT supports matrix-mode
+ *     opcodes (DB E9 range) that Intel 387 faults on.
+ * Either approach becomes a small-diff edit once real-iron capture
+ * data confirms the specific byte/opcode pattern.
+ *
+ * Stub returns 0 so the 387-compat default path still wins on every
+ * currently-tested system, preserving existing behavior while this
+ * file gets the DB row and routing ready for the capture session. */
+static int fpu_probe_iit_3c87(void)
+{
+    return 0;
+}
+
 static const char *tag_for(int present, cpu_class_t cls)
 {
     if (!present) return "none";
@@ -49,6 +72,10 @@ static const char *tag_for(int present, cpu_class_t cls)
         case CPU_CLASS_486_NOCPUID:
             return "integrated-486";
         case CPU_CLASS_386:
+            /* v0.8.1 M3.1: when real-iron validation confirms the
+             * IIT 3C87 signature, this branch routes to the iit-3c87
+             * DB row; otherwise falls through to the generic 387. */
+            if (fpu_probe_iit_3c87()) return "iit-3c87";
             return "387";
         case CPU_CLASS_286:
             return "287";

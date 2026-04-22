@@ -18,7 +18,8 @@ none,No FPU present,,8086/88/286/386SX or 486SX with no external coprocessor
 287,Intel 80287,Intel,286-era coprocessor (also AMD Am287 and 80C287A)
 387,Intel 80387 (DX/SX),Intel,386-era coprocessor with affine infinity
 287-compat,287-compatible coprocessor,various,IIT 2C87 / ULSI 83C287 / Cyrix FasMath 287+
-387-compat,387-compatible coprocessor,various,IIT 3C87 / ULSI 83C387 / Cyrix FasMath 387+
+387-compat,387-compatible coprocessor,various,ULSI 83C387 / Cyrix FasMath 387+ (IIT 3C87 discriminated separately via iit-3c87 tag)
+iit-3c87,IIT 3C87,IIT,"386-era 387-compatible coprocessor with extended matrix-math registers"
 487sx,Intel i487SX,Intel,"i486SX companion coprocessor — actually a full i486DX that disables the host SX"
 integrated-486,Integrated i486DX FPU,Intel,"On-die x87 for 486DX/DX2/DX4 family"
 integrated-pentium,Integrated Pentium FPU,Intel,"On-die x87 for P5/P54C/P55C and later"
