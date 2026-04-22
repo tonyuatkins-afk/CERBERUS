@@ -1,7 +1,7 @@
 #ifndef CERBERUS_H
 #define CERBERUS_H
 
-#define CERBERUS_VERSION          "0.8.0-M2"
+#define CERBERUS_VERSION          "0.8.0-M3"
 #define CERBERUS_SCHEMA_VERSION   "1.0"
 #define CERBERUS_SIGNATURE_SCHEMA "1"
 /* ini_format: integer, increments on INI breaking changes (key removal,
@@ -77,6 +77,11 @@ typedef struct {
                                 * v0.7.0. */
     /* do_upload was the pre-v0.7.0 "upload?" flag; now reused as
      * /UPLOAD auto-yes (skip the prompt, upload immediately). */
+    unsigned char force_mono;  /* /MONO: force monochrome rendering
+                                * regardless of detected adapter. Attr
+                                * clamping per MS-DOS UI-UX research
+                                * Tier 0 mapping (07h/0Fh/01h/70h/F0h).
+                                * v0.8.0-M3.5. */
     char          out_path[64];
     /* v0.7.0 upload metadata from /NICK and /NOTE flags. Both empty
      * strings by default (anonymous submission). */

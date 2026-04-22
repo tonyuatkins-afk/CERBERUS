@@ -56,6 +56,20 @@ adapter_t display_adapter(void);
 const char *display_adapter_name(adapter_t a);
 int       display_has_color(void);
 
+/* M3.5 /MONO support. display_set_force_mono(1) before display_init()
+ * forces display_is_mono() to return 1 regardless of detected adapter.
+ * Rendering paths that branch on mono-vs-color SHOULD query
+ * display_is_mono() rather than comparing adapter tokens directly, so
+ * /MONO propagates cleanly. Query after display_init(). */
+void      display_set_force_mono(int force);
+int       display_is_mono(void);
+
+/* M3.6: on color adapters, issue INT 10h AX=1003h BL=00h to switch the
+ * attribute high bit from blink-enable to background-intensity, giving
+ * 16 background colors. Zero-cost quality win per MS-DOS UI-UX research
+ * Part B. No-op on mono adapters. Called from display_init(). */
+void      display_enable_16bg_colors(void);
+
 /* Basic primitives (BIOS INT 10h teletype path — works on every adapter) */
 void display_putc(char c);
 void display_puts(const char *s);

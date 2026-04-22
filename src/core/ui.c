@@ -42,6 +42,7 @@
 #include "ui.h"
 #include "display.h"
 #include "head_art.h"
+#include "tui_util.h"      /* M3.1: tui_wait_cga_retrace_edge() */
 #include "../core/report.h"
 
 /* ----------------------------------------------------------------------- */
@@ -87,9 +88,10 @@ static unsigned char __far *vram_base(void)
 
 static int ui_is_mono(void)
 {
-    adapter_t a = display_adapter();
-    return (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-            a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO);
+    /* M3.5: unified via display_is_mono() so /MONO force flag
+     * propagates through all rendering paths (this function and
+     * tui_util's tui_is_mono both resolve to the same answer). */
+    return display_is_mono();
 }
 
 static void vram_cursor(int row, int col)
@@ -106,6 +108,8 @@ static void vram_putc(int row, int col, unsigned char ch, unsigned char attr)
 {
     unsigned char __far *v = vram_base();
     unsigned int off = (unsigned int)((row * VRAM_COLS + col) * 2);
+    /* M3.1: CGA snow gate. No-op on MDA/Hercules/EGA/VGA. */
+    tui_wait_cga_retrace_edge();
     v[off]     = ch;
     v[off + 1] = attr;
 }
@@ -680,27 +684,126 @@ static void render_viewport(int scroll_top)
 
 /* Status bar shows scroll position + nav hints. Rendered in reverse-video
  * so it stands apart from the content area above. */
-static void render_status_bar(int scroll_top, int fits_in_one_page)
+/* M3.2: Norton-style F-key legend on row 24, Borland TStatusLine
+ * palette. Replaces the v0.7.x status-bar rendering per 0.8.0 plan §9
+ * CUA-lite decision.
+ *
+ * Color attributes:
+ *   0x30  base   (black on cyan) — labels, padding, position indicator
+ *   0x3F  hotkey (bright white on cyan) — F-number digits
+ *
+ * Mono attributes per MS-DOS UI-UX research Tier 0:
+ *   0x70  reverse video (MDA-valid; used for base and hotkey both —
+ *         mono has no color contrast to distinguish digit from label).
+ *
+ * Layout (80 cols, 0-indexed):
+ *   col 1   '1' F1 hotkey digit
+ *   col 2-5 "Help"
+ *   col 8   '3' F3 hotkey digit
+ *   col 9-12 "Exit"
+ *   col 15-19 "Up/Dn"
+ *   col 22-28 "PgUp/Dn"
+ *   col 31-38 "Home/End"
+ *   right end "rows X-Y of N" position indicator, collision-guarded
+ *             to not overlap Home/End
+ *   col 79    trailing space
+ *
+ * Esc and Q remain exit keys (legacy + CUA Esc); the legend advertises
+ * F3 because it's CUA-canonical and the one-digit-wide label Norton
+ * users recognize. */
+static void render_legend(int scroll_top, int fits_in_one_page)
 {
-    static char buf[VRAM_COLS + 1];
+    static char pos_str[32];
+    unsigned char base_attr;
+    unsigned char hotkey_attr;
     int end_row = scroll_top + VIEWPORT_ROWS;
     int c;
 
     if (end_row > vrow_count) end_row = vrow_count;
-    for (c = 0; c < VRAM_COLS; c++) {
-        vram_putc(VIEWPORT_ROWS, c, ' ', ATTR_INVERSE);
-    }
-    if (fits_in_one_page) {
-        sprintf(buf, " CERBERUS %s  "
-                     "%d rows  |  Any key to exit ",
-                CERBERUS_VERSION, vrow_count);
+
+    if (display_is_mono()) {
+        base_attr   = ATTR_INVERSE;
+        hotkey_attr = ATTR_INVERSE;
     } else {
-        sprintf(buf, " CERBERUS %s  "
-                     "rows %d-%d of %d  |  "
-                     "Up/Dn PgUp/PgDn Home/End  Q:exit ",
-                CERBERUS_VERSION, scroll_top + 1, end_row, vrow_count);
+        base_attr   = 0x30;
+        hotkey_attr = 0x3F;
     }
-    vram_puts(VIEWPORT_ROWS, 0, buf, ATTR_INVERSE);
+
+    for (c = 0; c < VRAM_COLS; c++) {
+        vram_putc(VIEWPORT_ROWS, c, ' ', base_attr);
+    }
+
+    vram_putc(VIEWPORT_ROWS, 1, '1', hotkey_attr);
+    vram_puts(VIEWPORT_ROWS, 2, "Help", base_attr);
+    vram_putc(VIEWPORT_ROWS, 8, '3', hotkey_attr);
+    vram_puts(VIEWPORT_ROWS, 9, "Exit", base_attr);
+    vram_puts(VIEWPORT_ROWS, 15, "Up/Dn",    base_attr);
+    vram_puts(VIEWPORT_ROWS, 22, "PgUp/Dn",  base_attr);
+    vram_puts(VIEWPORT_ROWS, 31, "Home/End", base_attr);
+
+    if (fits_in_one_page) {
+        sprintf(pos_str, "%d rows total", vrow_count);
+    } else {
+        sprintf(pos_str, "rows %d-%d of %d",
+                scroll_top + 1, end_row, vrow_count);
+    }
+    {
+        int len = (int)strlen(pos_str);
+        int start = VRAM_COLS - len - 1;
+        if (start < 45) start = 45;  /* collision-guard vs Home/End */
+        vram_puts(VIEWPORT_ROWS, start, pos_str, base_attr);
+    }
+}
+
+/* M3.3: F1 help overlay. Reuses the viewport area to display static
+ * navigation and command reference. Any keypress restores the
+ * scrollable summary (caller re-renders viewport + legend after
+ * this returns). No modal-window chrome — deliberately minimal to
+ * match the M3 "interaction grammar, not architecture" scope. */
+static void render_help_overlay(void)
+{
+    static const char *lines[] = {
+        "",
+        "  CERBERUS help",
+        "",
+        "  Navigation:",
+        "    Up / Down arrow       scroll one line",
+        "    Page Up / Page Down   scroll one viewport",
+        "    Home / End            jump to top / bottom",
+        "",
+        "  Commands:",
+        "    F1                    this help screen",
+        "    F3   or   Esc         exit to DOS",
+        "    Q                     exit (legacy alias)",
+        "",
+        "  Version: " CERBERUS_VERSION,
+        "",
+        "  Build variants: wmake (stock), wmake WHETSTONE=1, wmake UPLOAD=1",
+        "",
+        "  Press any key to close this help screen.",
+    };
+    unsigned int n = sizeof(lines) / sizeof(lines[0]);
+    unsigned int i;
+    unsigned char base_attr;
+    int c;
+
+    base_attr = display_is_mono() ? ATTR_INVERSE : 0x30;
+
+    vram_fill(0, VIEWPORT_ROWS - 1, ' ', ATTR_NORMAL);
+    for (i = 0; i < n && (int)i < VIEWPORT_ROWS; i++) {
+        vram_puts((int)i, 0, lines[i], ATTR_NORMAL);
+    }
+
+    for (c = 0; c < VRAM_COLS; c++) {
+        vram_putc(VIEWPORT_ROWS, c, ' ', base_attr);
+    }
+    vram_puts(VIEWPORT_ROWS, 1, "Press any key to close help", base_attr);
+
+    {
+        union REGS r;
+        r.h.ah = 0x00;
+        int86(0x16, &r, &r);
+    }
 }
 
 /* ----------------------------------------------------------------------- */
@@ -709,9 +812,16 @@ static void render_status_bar(int scroll_top, int fits_in_one_page)
 
 typedef enum {
     NAV_UP, NAV_DOWN, NAV_PGUP, NAV_PGDN, NAV_HOME, NAV_END,
-    NAV_EXIT, NAV_OTHER
+    NAV_EXIT, NAV_HELP, NAV_OTHER
 } nav_key_t;
 
+/* M3.4: CUA-lite key dispatch. Scan codes used:
+ *   F1 = 0x3B      help overlay
+ *   F3 = 0x3D      exit (CUA canonical; alias for Esc/Q)
+ *   Esc = 0x1B     exit (CUA canonical cancel; ASCII path)
+ *   Q/q = 0x71/51  exit (legacy alias, predates F3 wiring)
+ *   arrows, PgUp/Dn, Home/End: standard extended scan codes
+ */
 static nav_key_t read_nav_key(void)
 {
     union REGS r;
@@ -720,6 +830,8 @@ static nav_key_t read_nav_key(void)
     if (r.h.al == 0) {
         /* extended key, AH is scan code */
         switch (r.h.ah) {
+        case 0x3B: return NAV_HELP;  /* F1 */
+        case 0x3D: return NAV_EXIT;  /* F3 (CUA) */
         case 0x48: return NAV_UP;
         case 0x50: return NAV_DOWN;
         case 0x49: return NAV_PGUP;
@@ -768,43 +880,50 @@ void ui_render_summary(const result_table_t *t, const opts_t *o)
 
     for (;;) {
         render_viewport(scroll_top);
-        render_status_bar(scroll_top, fits);
-        if (fits) {
-            /* wait for any key, exit */
-            union REGS r;
-            r.h.ah = 0x00;
-            int86(0x16, &r, &r);
-            break;
-        }
+        render_legend(scroll_top, fits);
         switch (read_nav_key()) {
         case NAV_UP:
-            if (scroll_top > 0) scroll_top--;
+            if (!fits && scroll_top > 0) scroll_top--;
             break;
         case NAV_DOWN:
-            if (scroll_top < max_scroll) scroll_top++;
+            if (!fits && scroll_top < max_scroll) scroll_top++;
             break;
         case NAV_PGUP:
-            scroll_top -= VIEWPORT_ROWS;
-            if (scroll_top < 0) scroll_top = 0;
+            if (!fits) {
+                scroll_top -= VIEWPORT_ROWS;
+                if (scroll_top < 0) scroll_top = 0;
+            }
             break;
         case NAV_PGDN:
-            scroll_top += VIEWPORT_ROWS;
-            if (scroll_top > max_scroll) scroll_top = max_scroll;
+            if (!fits) {
+                scroll_top += VIEWPORT_ROWS;
+                if (scroll_top > max_scroll) scroll_top = max_scroll;
+            }
             break;
         case NAV_HOME:
-            scroll_top = 0;
+            if (!fits) scroll_top = 0;
             break;
         case NAV_END:
-            scroll_top = max_scroll;
+            if (!fits) scroll_top = max_scroll;
+            break;
+        case NAV_HELP:
+            render_help_overlay();
+            /* next loop iteration re-renders viewport + legend */
             break;
         case NAV_EXIT:
             reset_screen_to_dos();
             return;
         case NAV_OTHER:
+            /* On fits-in-one-page mode, any non-handled key exits —
+             * preserves v0.7.x "any key" convenience for static summaries
+             * while still giving F1 help and proper exit keys. */
+            if (fits) {
+                reset_screen_to_dos();
+                return;
+            }
             break;
         }
     }
-    reset_screen_to_dos();
 }
 
 /* The consistency alerts are now rendered inline as the third section of

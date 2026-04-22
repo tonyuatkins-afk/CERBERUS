@@ -2,16 +2,30 @@
  * CERBERUS display abstraction
  *
  * Text-mode detection and primitives covering MDA, CGA, Hercules, EGA, and
- * VGA. Detection is layered from newest to oldest:
+ * VGA. Detection is a newest-to-oldest waterfall per MS-DOS UI-UX research
+ * Part B adapter-detection guidance:
  *
- *   1. INT 10h AH=1Ah — VGA/MCGA self-report (returns AL=1Ah on success)
- *   2. INT 10h AH=12h BL=10h — EGA info (BL changes if EGA+)
- *   3. BDA equipment flag at 0040:0010h bits 4-5 — CGA/MDA fallback
- *   4. 3BAh status-register toggle — Hercules distinguished from MDA
+ *   1. INT 10h AH=1Ah        VGA/MCGA self-report (AL=1Ah on success)
+ *   2. INT 10h AH=12h BL=10h  EGA info (BH changes from FFh sentinel)
+ *   3. BDA equipment flag at 0040:0010h bits 4-5 (CGA/MDA distinguisher)
+ *      NOTE: functionally equivalent to INT 11h AH=00h; direct BDA read
+ *      avoids the BIOS call overhead and has the same data source.
+ *   4. Port 3BAh bit 7 toggle (vsync on HGC, fixed on MDA) distinguishes
+ *      Hercules from MDA.
  *
  * Output uses BIOS INT 10h AH=0Eh (teletype) for the portable path. Direct
- * VRAM fast paths are deferred to the UI work in Task 1.9 when they become
- * load-bearing for redraw latency.
+ * VRAM writes live in tui_util.c and ui.c. CGA snow-avoidance via
+ * tui_wait_cga_retrace_edge() synchronizes writes to the retrace edge
+ * (v0.8.0-M3.1).
+ *
+ * v0.8.0-M3.5: display_set_force_mono() + display_is_mono() unify the
+ * mono vs color attribute-mapping branch across all rendering code
+ * paths so the /MONO command-line flag propagates cleanly without
+ * adapter-specific conditionals sprinkled throughout callers.
+ *
+ * v0.8.0-M3.6: display_enable_16bg_colors() runs INT 10h AX=1003h BL=00h
+ * during display_init() on EGA/VGA to get 16 background colors
+ * (bg-intensity replaces blink-enable on the attribute byte's bit 7).
  */
 
 #include <stdio.h>
@@ -23,6 +37,7 @@
 
 static adapter_t     current_adapter = ADAPTER_UNKNOWN;
 static unsigned char current_attr    = ATTR_NORMAL;
+static int           force_mono_flag = 0;  /* M3.5: /MONO forced-mono bit */
 
 /* ----------------------------------------------------------------------- */
 /* Adapter detection                                                        */
@@ -232,10 +247,60 @@ adapter_t display_adapter(void)
     return current_adapter;
 }
 
+void display_set_force_mono(int force)
+{
+    force_mono_flag = force ? 1 : 0;
+}
+
+int display_is_mono(void)
+{
+    /* /MONO wins over detected adapter. Otherwise fall through to the
+     * adapter's own monochrome-tier classification. */
+    if (force_mono_flag) return 1;
+    switch (current_adapter) {
+        case ADAPTER_MDA:
+        case ADAPTER_HERCULES:
+        case ADAPTER_EGA_MONO:
+        case ADAPTER_VGA_MONO:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+/* M3.6: INT 10h AX=1003h BL=00h switches attribute-byte bit 7 from
+ * blink-enable to background-intensity on EGA/VGA. Result: 16
+ * background colors (0..F) are available instead of 8 with blink.
+ *
+ * No-op on pre-EGA adapters (MDA/CGA/Hercules): the BIOS call is
+ * EGA+ only; older adapters ignore it. Also no-op when /MONO is
+ * forced (renderers use mono attr set which doesn't need this).
+ *
+ * Called from display_init() after adapter detection. */
+void display_enable_16bg_colors(void)
+{
+    union REGS r;
+    if (force_mono_flag) return;
+    switch (current_adapter) {
+        case ADAPTER_EGA_COLOR:
+        case ADAPTER_VGA_COLOR:
+        case ADAPTER_MCGA:
+            break;
+        default:
+            return;  /* MDA/CGA/Hercules/EGA_MONO/VGA_MONO: skip */
+    }
+    r.h.ah = 0x10;
+    r.h.al = 0x03;
+    r.h.bl = 0x00;  /* 0 = background intensity, 1 = blink */
+    r.h.bh = 0;
+    int86(0x10, &r, &r);
+}
+
 void display_init(void)
 {
     current_adapter = detect_adapter();
     current_attr = ATTR_NORMAL;
+    display_enable_16bg_colors();
 }
 
 void display_shutdown(void)

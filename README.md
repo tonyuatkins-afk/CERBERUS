@@ -1,6 +1,6 @@
 # CERBERUS
 
-DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; v0.8.0-M1 stock build is 163,838 bytes. Targets an 8088 with 256KB and an MDA card as the design floor (XT-class validation pending per the current claim hierarchy) and scales up through a 486 with VGA, proven on BEK-V409 real iron.
+DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; v0.8.0-M3 stock build is 166,898 bytes. Targets an 8088 with 256KB and an MDA card as the design floor (XT-class validation pending per the current claim hierarchy) and scales up through a 486 with VGA, proven on BEK-V409 real iron.
 
 Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelybooting-server](https://github.com/tonyuatkins-afk/barelybooting-server) is the companion web app that ingests uploaded CERBERUS.INI runs at `barelybooting.com/cerberus/`.
 
@@ -8,19 +8,21 @@ Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelyboot
 
 ## Status
 
-**`v0.8.0-M2` on `main` 2026-04-21.** Second milestone of the 0.8.0 "trust and validation" release. M1 closed the known credibility traps and established the real-hardware validation corpus; M2 adds the research-gap FPU probes and cache stride extension that fit within DGROUP budget. 0.8.0 tag is held for M3 (CUA-lite shell polish) and M4 (docs parity). Release doctrine at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md).
+**`v0.8.0-M3` on `main` 2026-04-22.** Third milestone of the 0.8.0 "trust and validation" release. M1 closed credibility traps and established validation corpus; M2 added research-gap FPU probes and cache stride extension; M3 closes the interaction-axis gap with CUA-standard keybindings, Norton-style F-key legend, F1 help overlay, /MONO flag, 16-bg-color enable on EGA/VGA, and CGA snow-safety gate. 0.8.0 tag is held for M4 (docs parity + release tag). Release doctrine at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md).
 
 Real-hardware validation status: **Validated on 386 and 486. 286 and 8088 paths untested.** Per plan section 10 claim hierarchy, 286 and 8088/XT captures will upgrade the claim as hardware becomes accessible. Current captures archived in `tests/captures/`:
 - BEK-V409 (Intel i486DX-2-66 + AMI 11/11/92 + S3 Trio64 + Vibra 16S + 63 MB XMS)
 - 386 DX-40 + IIT 3C87 + Genoa ET4000 + Aztech ISA + AMI 02/02/91 + ~16 MB
 
-### What M1 and M2 changed (full detail in [CHANGELOG.md](CHANGELOG.md))
+### What M1, M2, and M3 changed (full detail in [CHANGELOG.md](CHANGELOG.md))
 
 **M1 (trust-first cuts)**: Whetstone emit suppressed in stock builds (`wmake WHETSTONE=1` to re-enable); runtime upload compiled out of stock binaries (`wmake UPLOAD=1` to re-enable). Fixes: nickname buffer leak (issue #9), `cpu.class` normalization to family token, `bench_cpu` DB anchor widened, end-of-run `_exit` bypass. Infrastructure: DGROUP audit tool, real-hardware validation corpus, quality-gate framework.
 
 **M2 (precision expansion)**: FPU research-gap probes land for FPTAN behavior (I), rounding-control cross-check (J), precision-control cross-check (K), exception-flag roundtrip (M). Cache stride sweep extended to 6 points including stride=128 (enables line=32/64 inference for Pentium+). Memory checkerboard + inv-checkerboard patterns added (catches adjacent-cell coupling faults). M2.5 IEEE-754 edge cases and M2.8 CSV output deferred to post-M2 under DGROUP budget pressure.
 
-Historical arc (unchanged): `v0.1.1-scaffold` → `v0.2-rc1` → `v0.3-rc1` → `v0.4-rc1` → **`v0.4.0`** → **`v0.5.0`** → **`v0.6.0`** → `v0.6.1` → `v0.6.2` → `v0.7.0-rc1` → **`v0.7.0-rc2`** → **`v0.7.1`** → **`v0.8.0-M1`** → **`v0.8.0-M2`** (current).
+**M3 (CUA-lite interaction)**: F1 help overlay, F3 exit (CUA), Norton-style F-key legend replaces status bar on row 24 (Borland 0x30/0x3F palette on color, ATTR_INVERSE on mono). `/MONO` flag forces monochrome rendering regardless of adapter. `AX=1003h BL=00h` on EGA/VGA for 16-background-color mode. CGA snow safety: all VRAM writes gate on 3DAh retrace edge. Adapter-tier waterfall documentation aligned with MS-DOS UI-UX research Part B. No menu bar, no dropdown menus, no modal dialog system (deferred to 0.9.0).
+
+Historical arc (unchanged): `v0.1.1-scaffold` → `v0.2-rc1` → `v0.3-rc1` → `v0.4-rc1` → **`v0.4.0`** → **`v0.5.0`** → **`v0.6.0`** → `v0.6.1` → `v0.6.2` → `v0.7.0-rc1` → **`v0.7.0-rc2`** → **`v0.7.1`** → **`v0.8.0-M1`** → **`v0.8.0-M2`** → **`v0.8.0-M3`** (current).
 
 ### Known issues at M1 close-out (carried to M2)
 
@@ -115,7 +117,7 @@ Requires [Open Watcom C/C++ 2.0](http://open-watcom.github.io/) and [NASM 2.x](h
 wmake
 ```
 
-Produces `CERBERUS.EXE`, DOS real-mode, medium memory model. v0.8.0-M1 stock build is 163,838 bytes; DGROUP (near data) 59,888 bytes (58.5 KB), 5.6 KB under the 64 KB hardware ceiling. Run `wmake dgroup-report` to audit near-data usage.
+Produces `CERBERUS.EXE`, DOS real-mode, medium memory model. v0.8.0-M3 stock build is 166,898 bytes; DGROUP (near data) 60,880 bytes (59.5 KB), 4.6 KB under the 64 KB hardware ceiling. Run `wmake dgroup-report` to audit near-data usage.
 
 ### Build flavours
 

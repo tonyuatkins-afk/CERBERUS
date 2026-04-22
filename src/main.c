@@ -35,6 +35,7 @@ static void print_help(void)
     puts("  /NOINTRO        Skip VGA splash");
     puts("  /NOUI           Skip summary + consistency UI render (INI still written)");
     puts("  /QUICK          Skip visual demonstrations (title cards + visuals); run tests + summary");
+    puts("  /MONO           Force monochrome rendering regardless of adapter");
 #ifdef CERBERUS_UPLOAD_ENABLED
     puts("  /U, /UPLOAD     Upload without prompting (auto-yes)");
     puts("  /NOUPLOAD       Never prompt to upload, never upload");
@@ -68,6 +69,7 @@ static int parse_args(int argc, char *argv[], opts_t *o)
     o->no_ui    = 0;
     o->do_quick = 0;
     o->no_upload = 0;
+    o->force_mono = 0;
     strcpy(o->out_path, "CERBERUS.INI");
     o->nickname[0] = '\0';
     o->note[0]     = '\0';
@@ -115,6 +117,7 @@ static int parse_args(int argc, char *argv[], opts_t *o)
         else if (!strcmp(a, "/NOINTRO")) { o->no_intro = 1; }
         else if (!strcmp(a, "/NOUI"))    { o->no_ui = 1; }
         else if (!strcmp(a, "/QUICK"))   { o->do_quick = 1; }
+        else if (!strcmp(a, "/MONO"))    { o->force_mono = 1; }
         else if (!strcmp(a, "/NOUPLOAD")) { o->no_upload = 1; }
         else if (!strcmp(a, "/UPLOAD"))  {
 #ifdef CERBERUS_UPLOAD_ENABLED
@@ -178,6 +181,10 @@ int main(int argc, char *argv[])
 
     crumb_init();
     unknown_init();
+    /* M3.5: /MONO must be applied BEFORE display_init() so adapter
+     * detection sees the force flag and display_enable_16bg_colors()
+     * decides not to bump the palette. */
+    display_set_force_mono(opts.force_mono);
     display_init();
     journey_init();
     crumb_check_previous();

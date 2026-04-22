@@ -59,4 +59,11 @@ void tui_read_key(unsigned char *ascii, unsigned char *scan);
  * interactive hold to avoid stale keystroke pre-emption. */
 void tui_drain_keys(void);
 
+/* v0.8.0-M3.1: synchronize to CGA retrace edge before a VRAM write
+ * to avoid snow on single-ported IBM CGA. No-op on non-CGA adapters.
+ * tui_putc calls this internally; code that maintains its own private
+ * VRAM helpers (ui.c predates this module) should call it explicitly
+ * before each write-to-VRAM. Per 0.8.0 plan M3 exit gate. */
+void tui_wait_cga_retrace_edge(void);
+
 #endif

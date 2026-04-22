@@ -29,7 +29,7 @@ CERBERUS is not a synthetic benchmark. It does not produce a single performance 
 
 ## 3. Status
 
-**v0.8.0-M1** on `main` 2026-04-21. First milestone of the 0.8.0 "trust and validation" release. The 0.8.0 release doctrine is at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md).
+**v0.8.0-M3** on `main` 2026-04-22. Third milestone of the 0.8.0 "trust and validation" release. The 0.8.0 release doctrine is at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md).
 
 Release arc (shipped):
 
@@ -38,13 +38,13 @@ Release arc (shipped):
 - **v0.6.x**: Visual Diagnostics Journey (bit parade, Lissajous, cache waterfall, latency heatmap, PIT metronome, audio scale), OPL2 FM + SB DSP direct PCM audio paths.
 - **v0.7.0-rc1 / rc2**: Community upload client (Part A), end-to-end quality-gate fixes.
 - **v0.7.1**: Cache characterization + FPU behavioral fingerprint.
-- **v0.8.0-M1** (current): trust-and-validation milestone. Whetstone emit suppressed in stock builds. Runtime upload compiled out of stock builds. Nickname buffer leak fixed. `cpu.class` normalized to family token. `bench_cpu` DB anchor widened. End-of-run `_exit` bypass for Watcom libc teardown hangs. DGROUP audit tooling. Real-hardware validation on 486 and 386; claim hierarchy currently "Validated on 386 and 486. 286 and 8088 paths untested."
+- **v0.8.0-M1** (2026-04-21): trust-and-validation milestone. Whetstone emit suppressed in stock builds. Runtime upload compiled out of stock builds. Nickname buffer leak fixed. `cpu.class` normalized to family token. `bench_cpu` DB anchor widened. End-of-run `_exit` bypass for Watcom libc teardown hangs. DGROUP audit tooling. Real-hardware validation on 486 and 386; claim hierarchy currently "Validated on 386 and 486. 286 and 8088 paths untested."
+- **v0.8.0-M2** (2026-04-21 overnight): precision expansion. FPU research-gap probes I/J/K/M (FPTAN, rounding-control, precision-control, exception-flag roundtrip). Cache stride=128 for Pentium+ line-size inference. Memory checkerboard + inv-checkerboard patterns. M2.5 IEEE-754 edges and M2.8 CSV output deferred under DGROUP pressure.
+- **v0.8.0-M3** (current, 2026-04-22 overnight): CUA-lite interaction polish. F1 help overlay, F3 exit, Norton-style F-key legend on row 24 (Borland palette on color, ATTR_INVERSE on mono), /MONO flag for forced monochrome rendering, 16-background-color mode enabled on EGA/VGA, CGA snow-safety gate on all VRAM writes. Adapter-tier waterfall documentation aligned with MS-DOS UI-UX research Part B. No menu bar, no dropdowns, no modal dialog system (deferred to 0.9.0).
 
 Remaining milestones for 0.8.0 tag (per plan):
 
-- **M2**: precision expansion within DGROUP budget (FPU research gaps I/J/K/L/M, cache L2 detection + pointer-chase latency, memory checkerboard, CSV output, possible-causes narration).
-- **M3**: CUA-lite UI polish (F1 help, F3 exit, bottom F-key legend, /MONO flag, adapter-tier progressive enhancement). No menu bar, no full CUA shell; interaction grammar only.
-- **M4**: documentation parity, release notes, tag `v0.8.0`.
+- **M4**: documentation parity (README full refresh, CERBERUS.md sections beyond §3 Status, session report for M1-M3 arc), release notes, tag `v0.8.0`.
 
 ## Why real hardware
 

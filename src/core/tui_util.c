@@ -1,5 +1,12 @@
 /*
- * Shared text-mode UI primitives — v0.6.2 T1 implementation.
+ * Shared text-mode UI primitives.
+ *
+ * v0.6.2 T1 origin; v0.8.0-M3 adds:
+ *   - CGA retrace gating in tui_putc (0.8.0 plan section 9 exit gate)
+ *     to prevent snow on single-ported IBM CGA during row-24 legend
+ *     redraws and any other VRAM traffic. No-op on MDA/Hercules/EGA/
+ *     VGA which have dual-ported VRAM.
+ *
  * See tui_util.h for rationale.
  */
 
@@ -7,6 +14,36 @@
 #include <conio.h>
 #include "tui_util.h"
 #include "display.h"
+
+/* CGA status register port. Bit 0 is set during horizontal retrace on
+ * single-ported IBM CGA (MC6845 datasheet + IBM CGA technical ref).
+ * Bit 3 is set during vertical retrace; we use bit 0 for the faster
+ * per-character gate. */
+#define CGA_STATUS_PORT   0x3DA
+#define CGA_RETRACE_BIT   0x01
+
+/* Synchronize to the CGA retrace edge. The two polling loops wait for
+ * bit 0 to clear then rise, so the CPU-to-VRAM write that follows lands
+ * during the brief display-off window. No-op on non-CGA adapters
+ * (MDA/Hercules/EGA/VGA have no snow problem).
+ *
+ * Both loops have a ~64K-iteration timeout to guard against a dead or
+ * stuck status port so the UI doesn't hang forever on weird hardware
+ * or emulators that don't implement the port. Timeout expiry means
+ * snow MAY appear on that write, but the program keeps moving. */
+void tui_wait_cga_retrace_edge(void)
+{
+    unsigned int timeout;
+    if (display_adapter() != ADAPTER_CGA) return;
+    timeout = 0xFFFFU;
+    while ((inp(CGA_STATUS_PORT) & CGA_RETRACE_BIT) != 0) {
+        if (--timeout == 0U) return;
+    }
+    timeout = 0xFFFFU;
+    while ((inp(CGA_STATUS_PORT) & CGA_RETRACE_BIT) == 0) {
+        if (--timeout == 0U) return;
+    }
+}
 
 unsigned char __far *tui_vram_base(void)
 {
@@ -20,15 +57,16 @@ unsigned char __far *tui_vram_base(void)
 
 int tui_is_mono(void)
 {
-    adapter_t a = display_adapter();
-    return (a == ADAPTER_MDA || a == ADAPTER_HERCULES ||
-            a == ADAPTER_EGA_MONO || a == ADAPTER_VGA_MONO);
+    /* M3.5: delegate to display_is_mono() so /MONO force flag
+     * propagates through all rendering paths. */
+    return display_is_mono();
 }
 
 void tui_putc(int row, int col, unsigned char ch, unsigned char attr)
 {
     unsigned char __far *v = tui_vram_base();
     unsigned int off = (unsigned int)((row * TUI_COLS + col) * 2);
+    tui_wait_cga_retrace_edge();   /* no-op on non-CGA */
     v[off]     = ch;
     v[off + 1] = attr;
 }

@@ -2,6 +2,58 @@
 
 All notable changes to CERBERUS. Format loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); dates are ISO-8601, hash references are short-sha from `main`.
 
+## [v0.8.0-M3], 2026-04-22 (overnight) — CUA-lite interaction polish
+
+Third milestone of the 0.8.0 "trust and validation" release. M3 closes the interaction-axis gap: CUA-standard keybindings, Norton-style F-key legend, F1 help overlay, /MONO flag, 16-background-color enable, CGA snow gate. No menu bar, no modal dialog system, no structural UI refactor (per plan §9 CUA-lite decision). Full gate at `docs/quality-gates/M3-gate-2026-04-22.md`.
+
+### Added
+
+- **M3.1 CGA snow safety gate.** New `tui_wait_cga_retrace_edge()` in `tui_util.c` synchronizes VRAM writes to the CGA 3DAh retrace edge. `tui_putc` and `ui.c`'s private `vram_putc` call it before every write. No-op on non-CGA adapters (MDA/Hercules/EGA/VGA have dual-ported VRAM). 64K-iteration timeout guard against broken emulation. Per plan §M3 exit-gate requirement.
+- **M3.2 Norton-style F-key legend.** `ui.c:render_status_bar` becomes `render_legend`. Layout: " 1Help  3Exit  Up/Dn  PgUp/Dn  Home/End ... rows X-Y of N". Borland TStatusLine palette on color (0x30 black-on-cyan base, 0x3F bright-white-on-cyan hotkey digits); ATTR_INVERSE on mono. Right-aligned scroll-position indicator with collision-guard.
+- **M3.3 F1 help overlay.** `render_help_overlay()` displays static navigation + command reference. Any key returns to scrollable summary. Reuses viewport primitives; deliberately no modal-window class.
+- **M3.4 F3 exit + formalized CUA key dispatch.** `read_nav_key()` handles F1 (0x3B) and F3 (0x3D) scan codes. Esc and Q remain as exit aliases. Main loop wires NAV_HELP through `render_help_overlay()`; fits-in-one-page path now also supports F1 help (not just exit-on-any-key).
+- **M3.5 /MONO flag with semantic role mapping.** New `opts_t.force_mono` + `/MONO` parse. `display_set_force_mono(int)` / `display_is_mono()` unify mono detection across all rendering. `tui_is_mono()` and `ui.c:ui_is_mono()` delegate to `display_is_mono()`. Attribute mapping per MS-DOS UI-UX research Tier 0: 07h body, 0Fh emphasis, 01h underline, 70h reverse, F0h blink-reverse, 00h/08h reserved-invisible — realized via ATTR_INVERSE across the mono rendering paths.
+- **M3.6 16-background-color mode enable.** `display_enable_16bg_colors()` issues INT 10h AX=1003h BL=00h during `display_init()` on EGA/VGA/MCGA color adapters. Switches attribute byte bit 7 from blink-enable to background-intensity, making 16 background colors available. Zero-cost quality win per MS-DOS UI-UX research Part B.
+- **M3.7 Adapter-tier waterfall documentation refinement.** `display.c` header comment refreshed to match the MS-DOS UI-UX research Part B waterfall documentation: VGA AH=1Ah → EGA AH=12h BL=10h → BDA equipment flag (equivalent to INT 11h) → 3BAh bit 7 toggle (MDA vs Hercules). Code was already correct; docstring now matches the canonical reference.
+
+### Changed
+
+- `CERBERUS_VERSION` bumped from `0.8.0-M2` to `0.8.0-M3`.
+- `display_init()` now calls `display_enable_16bg_colors()` after adapter detection.
+- `tui_util.c:tui_is_mono()` and `ui.c:ui_is_mono()` are now wrappers around `display_is_mono()` for unified /MONO-aware behavior.
+- Help output (`/?`) adds `/MONO` line.
+
+### Deferred from M3
+
+- **Full CUA shell** (menu bar, dropdowns, modal dialogs). Explicitly out of scope per plan §9; 0.9.0 candidate.
+- **80x50 dense mode, 132-column SVGA, DAC-gradient title bars, themed palettes.** All out of scope.
+- **Hercules-variant discrimination** (HGC vs HGC+ vs InColor via 3BAh bits 6:4). Out of M3 scope (enum expansion). Gate W10.
+
+### Build state at M3 close-out
+
+- Stock `CERBERUS.EXE`: 166,898 bytes (+1,056 from M2's 165,842)
+- Research `CERBERUS.EXE` (`wmake WHETSTONE=1 UPLOAD=1`): 173,294 bytes
+- DGROUP near-data: 60,880 bytes (59.5 KB), 2,608 bytes headroom vs 62 KB soft target. STATUS: OK per `tools/dgroup_check.py`.
+- Host test suite: 320 assertions, 0 failures (unchanged from M2; M3 work is UI-path and was intentionally designed to avoid expanding host-test surface — interactive behavior needs real keyboard input).
+- Zero compiler warnings stock + research.
+- MD5 stock: `9b2ef53fdc187e7a085be00eb4e2c61e`
+
+### Known issues carried from M1/M2 (none resolved in M3)
+
+- W4/W6 BSS-overwrite on BEK-V409 specifically (pending 486 return from storage).
+- IIT 3C87 FPU mis-tagged on 386 DX-40 capture.
+- Genoa ET4000 video DB/probe gap.
+- Mandelbrot coda suppressed in stock builds.
+
+### Real-hardware validation plan (tomorrow)
+
+M3 interaction grammar must be validated on real keyboards. Hardware parade: 8088/XT + 286/AT + 386 DX-40 + 486 BEK-V409 + Pentium 133 (Toshiba) + Pentium 200 MMX. Each machine exercises:
+- M3.1 CGA snow gate (only relevant on actual CGA hardware)
+- M3.2 F-key legend rendering (color vs mono attributes)
+- M3.3/3.4 F1/F3/Esc key flow
+- M3.5 /MONO flag (try on color machine and on true-mono machine)
+- M3.6 16-bg-color mode (visible if rendering uses bright bg colors — currently it doesn't, so silent enabler)
+
 ## [v0.8.0-M2], 2026-04-21 (overnight) — precision expansion milestone
 
 Second milestone of the 0.8.0 "trust and validation" release. M2 lands the research-gap FPU probes and cache stride extension that fit within DGROUP budget. Full gate outcome at `docs/quality-gates/M2-gate-2026-04-21.md`.
