@@ -1,6 +1,8 @@
-# Bench Session Playbook: 2026-04-23 (evening)
+# Bench Session Playbook
 
-Pre-staged during the 2026-04-22 autonomous block. Run this from top to bottom; each section says what to FTP, what to run, what to look for, and what the capture answers. Save time by running both boxes in parallel when possible (they're on different static IPs).
+Written 2026-04-22 for a bench session that was planned for 2026-04-23 but got bumped by a dead 386 CMOS battery. The document is calendar-agnostic — use it whenever the next bench evening lands. Each section says what to FTP, what to run, what to look for, and what the capture answers. Save time by running both 486 boxes in parallel when possible (they're on different static IPs).
+
+Prerequisite before the session: working CMOS battery on the 386. The Varta on that board was desoldered; a CR2032 + Keystone holder + 1N4148 diode wired to the external battery header gets it back in BIOS-remembering mode. eBay also sells pre-built "retro PC 3.6V battery adapter" modules for ~$10 that skip the soldering.
 
 ## Targets
 

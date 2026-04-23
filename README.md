@@ -1,6 +1,8 @@
 # CERBERUS
 
-DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; v0.8.0 stock build is ~167 KB. Targets an 8088 with 256KB and an MDA card as the design floor (XT-class validation pending per the current claim hierarchy) and scales up through a 486 with VGA, proven on BEK-V409 real iron.
+> **Status: `v0.8.1` released 2026-04-22. Active development paused 2026-04-23 while the maintainer focuses on NetISA. See [PARKING.md](PARKING.md) for resume notes. The tagged release is production-ready; nothing half-landed on `main`.**
+
+DOS-native hardware detection, diagnostic, and benchmark tool for real-mode IBM PC / XT / AT and 486-class machines. Single EXE; v0.8.1 stock build is ~167 KB. Targets an 8088 with 256KB and an MDA card as the design floor (XT-class validation pending per the current claim hierarchy) and scales up through a 486 with VGA, proven on BEK-V409 real iron.
 
 Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelybooting-server](https://github.com/tonyuatkins-afk/barelybooting-server) is the companion web app that ingests uploaded CERBERUS.INI runs at `barelybooting.com/cerberus/`.
 
@@ -8,7 +10,9 @@ Part of the Barely Booting / NetISA ecosystem. CERBERUS is the tool; [barelyboot
 
 ## Status
 
-**`v0.8.0` tagged on `main` 2026-04-22.** Fourth-milestone release of the 0.8.0 "trust and validation" arc. M1 closed credibility traps and established validation corpus; M2 added research-gap FPU probes and cache stride extension; M3 closed the interaction-axis gap with CUA-standard keybindings, Norton-style F-key legend, F1 help overlay, /MONO flag, 16-bg-color enable on EGA/VGA, and CGA snow-safety gate; M4 landed documentation parity + possible-causes narration on consistency rules. Release doctrine at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md); release notes at [`docs/releases/v0.8.0.md`](docs/releases/v0.8.0.md).
+**`v0.8.1` tagged on `main` 2026-04-22.** Completion release on top of `v0.8.0`: IEEE-754 edge-case diagnostic, `/CSV` output, L1 pointer-chase latency, 64 KB L2 reach, DRAM ns derivation, IIT 3C87 DB routing, Genoa ET4000 chip-level probe, Hercules variant discrimination. Release notes: [`docs/releases/v0.8.1.md`](docs/releases/v0.8.1.md). Planned next release is `v0.9.0` per [`docs/CERBERUS_0.9.0_PLAN.md`](docs/CERBERUS_0.9.0_PLAN.md) when development resumes.
+
+**`v0.8.0` tagged 2026-04-22** (same day, earlier). Fourth-milestone release of the 0.8.0 "trust and validation" arc. M1 closed credibility traps and established validation corpus; M2 added research-gap FPU probes and cache stride extension; M3 closed the interaction-axis gap with CUA-standard keybindings, Norton-style F-key legend, F1 help overlay, /MONO flag, 16-bg-color enable on EGA/VGA, and CGA snow-safety gate; M4 landed documentation parity + possible-causes narration on consistency rules. Release doctrine at [`docs/CERBERUS_0.8.0_PLAN.md`](docs/CERBERUS_0.8.0_PLAN.md); release notes at [`docs/releases/v0.8.0.md`](docs/releases/v0.8.0.md).
 
 Real-hardware validation status: **Validated on 386 and 486. 286 and 8088 paths untested.** Per plan section 10 claim hierarchy, 286 and 8088/XT captures will upgrade the claim as hardware becomes accessible. Current captures archived in `tests/captures/`:
 - BEK-V409 (Intel i486DX-2-66 + AMI 11/11/92 + S3 Trio64 + Vibra 16S + 63 MB XMS)
